@@ -1,0 +1,75 @@
+export type SafeWorkspaceErrorCode =
+  | "APP_DATA_PATH_INVALID"
+  | "WORKSPACE_INITIALIZATION_FAILED"
+  | "AUDIT_PAYLOAD_FORBIDDEN"
+  | "BASE_RESUME_PRIMARY_REQUIRED"
+  | "BASE_RESUME_DUPLICATE"
+  | "BASE_RESUME_INVALID"
+  | "BASE_RESUME_IMPORT_FAILED"
+  | "CURRENT_BASE_RESUME_INVALID"
+  | "CURRENT_BASE_RESUME_DUPLICATE"
+  | "CURRENT_BASE_RESUME_NOT_FOUND"
+  | "CURRENT_BASE_RESUME_STALE"
+  | "CURRENT_BASE_RESUME_UNRESOLVED"
+  | "EVIDENCE_INVALID"
+  | "EVIDENCE_NOT_FOUND"
+  | "EVIDENCE_STALE"
+  | "EVIDENCE_BASE_RESUME_REQUIRED"
+  | "EVIDENCE_LIBRARY_INVALID"
+  | "EVIDENCE_LIBRARY_DUPLICATE"
+  | "EVIDENCE_LIBRARY_EMPTY"
+  | "EVIDENCE_DOCUMENTER_INVALID"
+  | "EVIDENCE_DOCUMENTER_NOT_FOUND"
+  | "EVIDENCE_DOCUMENTER_STALE"
+  | "JOB_PREFERENCES_INVALID"
+  | "JOB_PREFERENCES_STALE"
+  | "JOB_PREFERENCES_UNAVAILABLE"
+  | "SOURCE_CONFIGURATION_INVALID"
+  | "SOURCE_CONFIGURATION_STALE"
+  | "SOURCE_CONFIGURATION_UNAVAILABLE"
+  | "SOURCE_CONFIGURATION_POLICY_UNRESOLVED"
+  | "REFRESH_INVALID"
+  | "REFRESH_UNAVAILABLE"
+  | "REFRESH_POLICY_UNRESOLVED"
+  | "DATA_STORAGE_UNAVAILABLE"
+  | "DATA_ARTIFACT_NOT_FOUND"
+  | "DATA_ARTIFACT_STALE"
+  | "DATA_ARTIFACT_EXPIRED"
+  | "DATA_CONFIRMATION_REQUIRED"
+  | "DATA_ARTIFACT_INVALID";
+
+export class WorkspaceError extends Error {
+  readonly code: SafeWorkspaceErrorCode;
+  readonly summary: string;
+  readonly safeNextAction: string;
+  readonly affectedEntityIds: string[];
+
+  constructor(
+    code: SafeWorkspaceErrorCode,
+    summary: string,
+    safeNextAction: string,
+    affectedEntityIds: string[] = [],
+  ) {
+    super(summary);
+    this.code = code;
+    this.summary = summary;
+    this.safeNextAction = safeNextAction;
+    this.affectedEntityIds = affectedEntityIds;
+  }
+}
+
+export type SafeWorkspaceError = Pick<
+  WorkspaceError,
+  "code" | "summary" | "safeNextAction" | "affectedEntityIds"
+>;
+
+export function toSafeWorkspaceError(error: unknown): SafeWorkspaceError {
+  if (error instanceof WorkspaceError) {
+    return error;
+  }
+  return new WorkspaceError(
+    "WORKSPACE_INITIALIZATION_FAILED",
+    "The private workspace could not be initialized.",
+    "Check your Windows account's local app-data access, then try initialization again.",
+  );
+}
