@@ -68,3 +68,36 @@ test("refresh requires confirmation and no generic retrieval surface is introduc
   const source = await (await import("node:fs/promises")).readFile(new URL("../src/domain/discovery/refresh-runs.ts", import.meta.url), "utf8");
   assert.doesNotMatch(source, /fetch\s*\(|setInterval|setTimeout|window\.|proxy|credential (?:store|access)|browser automation/i);
 });
+
+test("timeout, adapter identity, and malformed results become bounded safe outcomes", async () => {
+  const value = await fixture();
+  try {
+    const source = await saveSourceConfiguration({ ...value, values: approved("Timeout") });
+    const timeoutRegistry = new Map([[adapterKey(source.sourceId, source.revisionId), { sourceId: source.sourceId, sourceConfigurationRevisionId: source.revisionId, async refresh() { return await new Promise<never>(() => undefined); } } as SourceAdapter]]);
+    const timed = await startRefreshRun({ ...value, sourceIds: [source.sourceId], confirmed: true, timeoutMs: 5, registry: timeoutRegistry });
+    assert.equal(timed.status, "failed"); assert.equal(timed.outcomes[0].status, "failed");
+
+    const mismatched = await saveSourceConfiguration({ ...value, values: approved("Mismatch") });
+    let calls = 0;
+    const mismatchRegistry = new Map([[adapterKey(mismatched.sourceId, mismatched.revisionId), { sourceId: "00000000-0000-7000-8000-000000009999", sourceConfigurationRevisionId: mismatched.revisionId, async refresh() { calls += 1; return { status: "completed" }; } } as SourceAdapter]]);
+    const blocked = await startRefreshRun({ ...value, sourceIds: [mismatched.sourceId], confirmed: true, registry: mismatchRegistry });
+    assert.equal(blocked.outcomes[0].status, "blocked"); assert.equal(calls, 0);
+
+    const malformed = await saveSourceConfiguration({ ...value, values: approved("Malformed") });
+    const malformedRegistry = new Map([[adapterKey(malformed.sourceId, malformed.revisionId), { sourceId: malformed.sourceId, sourceConfigurationRevisionId: malformed.revisionId, async refresh() { return { status: "not-a-status" } as unknown as { status: "completed" }; } } as SourceAdapter]]);
+    const failed = await startRefreshRun({ ...value, sourceIds: [malformed.sourceId], confirmed: true, registry: malformedRegistry });
+    assert.equal(failed.outcomes[0].status, "failed"); assert.ok(failed.outcomes[0].recoveryGuidance.length > 0);
+  } finally { await rm(value.root, { recursive: true, force: true }); }
+});
+
+test("outcome persistence failure marks the run failed instead of leaving it running", async () => {
+  const value = await fixture();
+  try {
+    const source = await saveSourceConfiguration({ ...value, values: approved("PersistenceFailure") });
+    const database = openDatabase(join(value.appDataRoot, "workspace.sqlite"));
+    try { database.exec("CREATE TRIGGER test_refresh_outcome_failure BEFORE INSERT ON refresh_source_outcomes BEGIN SELECT RAISE(ABORT, 'simulated refresh persistence failure'); END;"); } finally { database.close(); }
+    const registry = new Map([[adapterKey(source.sourceId, source.revisionId), { sourceId: source.sourceId, sourceConfigurationRevisionId: source.revisionId, async refresh(context: { consumeRequest: () => void }) { context.consumeRequest(); return { status: "completed" as const }; } } as SourceAdapter]]);
+    await assert.rejects(startRefreshRun({ ...value, sourceIds: [source.sourceId], confirmed: true, registry }), /simulated refresh persistence failure/);
+    const view = await listRefreshRuns(value); assert.equal(view.runs[0].status, "failed");
+  } finally { await rm(value.root, { recursive: true, force: true }); }
+});
