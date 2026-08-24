@@ -14,12 +14,54 @@ import { maximumCurrentResumeText, type ResumeDraftContent } from "@/adapters/re
 import { saveJobPreferences, type Country, type RoleIntent, type WorkStyle } from "@/domain/discovery/job-preferences";
 import { createManualCareersPageSource, saveSourceConfiguration, type SourceAccessPath, type SourceType } from "@/domain/discovery/source-configurations";
 import { startRefreshRun } from "@/domain/discovery/refresh-runs";
+import { applyDuplicateOverride, importManualJobListing, reverseDuplicateOverride } from "@/domain/discovery/job-listings";
+import { calculateAndPersistFitAssessment } from "@/domain/fit/fit-assessment";
+import { captureOpportunityDraft, OpportunityCaptureValidationError, type OpportunityCaptureDraft } from "@/domain/opportunities/capture-draft";
+import { confirmCapturedOpportunity } from "@/domain/opportunities/captured-opportunities";
+import { resolveAppDataPaths } from "@/files/app-data";
+import { applyMigrations, openDatabase } from "@/persistence/database";
 
 export type WorkspaceActionState = {
   status: "idle" | "success" | "error";
   summary: string;
   safeNextAction?: string;
 };
+
+export type OpportunityCaptureActionState = {
+  status: "idle" | "success" | "error";
+  summary: string;
+  safeNextAction?: string;
+  fieldErrors?: Partial<Record<"postingUrl" | "copiedDescription", string>>;
+  submittedPostingUrl?: string;
+  submittedCopiedDescription?: string;
+  draft?: OpportunityCaptureDraft;
+};
+export type OpportunityConfirmationActionState = OpportunityCaptureActionState & { fieldErrors?: Partial<Record<"postingUrl" | "copiedDescription" | "title" | "company" | "location" | "workStyle" | "requirements" | "postedAt", string>>; probableDuplicate?: boolean };
+
+export async function opportunityCaptureAction(_: OpportunityCaptureActionState, formData: FormData): Promise<OpportunityCaptureActionState> {
+  try {
+    const draft = captureOpportunityDraft({ postingUrl: formData.get("postingUrl"), copiedDescription: formData.get("copiedDescription") });
+    return { status: "success", summary: "Your local capture draft is ready for review. Nothing is saved yet.", draft, submittedPostingUrl: String(formData.get("postingUrl") ?? ""), submittedCopiedDescription: String(formData.get("copiedDescription") ?? "") };
+  } catch (error) {
+    if (error instanceof OpportunityCaptureValidationError) return { status: "error", summary: error.summary, safeNextAction: error.safeNextAction, fieldErrors: { [error.field]: error.summary } };
+    const safeError = toSafeWorkspaceError(error);
+    return { status: "error", summary: safeError.summary, safeNextAction: safeError.safeNextAction };
+  }
+}
+
+export async function opportunityConfirmationAction(_: OpportunityConfirmationActionState, formData: FormData): Promise<OpportunityConfirmationActionState> {
+  const submitted = { submittedPostingUrl: String(formData.get("postingUrl") ?? ""), submittedCopiedDescription: String(formData.get("copiedDescription") ?? "") };
+  try {
+    const result = await confirmCapturedOpportunity({ postingUrl: formData.get("postingUrl"), copiedDescription: formData.get("copiedDescription"), title: formData.get("title"), company: formData.get("company"), location: formData.get("location"), workStyle: formData.get("workStyle"), requirements: formData.get("requirements"), postedAt: formData.get("postedAt") });
+    revalidatePath("/");
+    return { status: "success", summary: `${result.opportunity.title} at ${result.opportunity.company} was saved locally.`, probableDuplicate: result.probableDuplicate, ...submitted };
+  } catch (error) {
+    if (error instanceof OpportunityCaptureValidationError) return { status: "error", summary: error.summary, safeNextAction: error.safeNextAction, fieldErrors: { [error.field]: error.summary }, ...submitted };
+    const safeError = toSafeWorkspaceError(error); const code = safeError.code;
+    const field = code === "OPPORTUNITY_TITLE_INVALID" ? "title" : code === "OPPORTUNITY_COMPANY_INVALID" ? "company" : code === "OPPORTUNITY_LOCATION_INVALID" ? "location" : code === "OPPORTUNITY_WORK_STYLE_INVALID" ? "workStyle" : code === "OPPORTUNITY_REQUIREMENTS_INVALID" ? "requirements" : code === "OPPORTUNITY_POSTED_DATE_INVALID" ? "postedAt" : code === "OPPORTUNITY_CAPTURE_INVALID" ? "postingUrl" : undefined;
+    return { status: "error", summary: safeError.summary, safeNextAction: safeError.safeNextAction, fieldErrors: field ? { [field]: safeError.summary } : undefined, ...submitted };
+  }
+}
 
 export async function initializeWorkspaceAction(): Promise<WorkspaceActionState> {
   try {
@@ -92,6 +134,36 @@ export async function sourceRefreshAction(_: WorkspaceActionState, formData: For
   }
 }
 
+export async function jobListingsAction(_: WorkspaceActionState, formData: FormData): Promise<WorkspaceActionState> {
+  try {
+    const command = String(formData.get("jobCommand") ?? "");
+    if (command === "manual-import") {
+      const [sourceId, sourceConfigurationRevisionId] = String(formData.get("sourceId") ?? "").split(":");
+      await importManualJobListing({ sourceId, sourceConfigurationRevisionId, title: formData.get("title"), company: formData.get("company"), workStyle: formData.get("workStyle"), location: formData.get("location"), originalUrl: formData.get("originalUrl"), postedAt: formData.get("postedAt") });
+      revalidatePath("/");
+      return { status: "success", summary: "Listing was imported locally with its source attribution." };
+    }
+    if (command === "separate-duplicate") {
+      await applyDuplicateOverride({ listingId: String(formData.get("listingId") ?? ""), confirmed: formData.get("confirmed") === "yes" });
+      revalidatePath("/");
+      return { status: "success", summary: "The saved opportunity's duplicate grouping was changed locally." };
+    }
+    if (command === "reverse-duplicate") {
+      await reverseDuplicateOverride({ overrideId: String(formData.get("overrideId") ?? ""), confirmed: formData.get("confirmed") === "yes" });
+      revalidatePath("/");
+      return { status: "success", summary: "The prior probable duplicate grouping was restored locally." };
+    }
+    if (command === "calculate-fit") {
+      const paths = await resolveAppDataPaths(); const db = openDatabase(paths.databasePath); try { applyMigrations(db); calculateAndPersistFitAssessment(db, String(formData.get("listingId") ?? "")); } finally { db.close(); }
+      revalidatePath("/"); return { status: "success", summary: "Fit Assessment calculated from approved evidence and current preferences." };
+    }
+    throw new WorkspaceError("JOB_LISTING_INVALID", "The Job Listing action is unavailable.", "Choose Manual import or an available duplicate action.");
+  } catch (error) {
+    const safeError = toSafeWorkspaceError(error);
+    return { status: "error", summary: safeError.summary, safeNextAction: safeError.safeNextAction };
+  }
+}
+
 export async function importBaseResumeAction(_: WorkspaceActionState, formData: FormData): Promise<WorkspaceActionState> {
   try {
     const files = formData.getAll("baseResumeFiles").filter((value): value is File => value instanceof File);
@@ -101,7 +173,7 @@ export async function importBaseResumeAction(_: WorkspaceActionState, formData: 
     }
     const importFiles = await Promise.all(files.map(async (file) => ({ name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) })));
     const result = await importBaseResume({ files: importFiles });
-    revalidatePath("/");
+    revalidateCareerWorkspaces();
     return { status: "success", summary: `${result.baseResume.primaryFilename} was imported as a read-only Base Resume.` };
   } catch (error) {
     const safeError = toSafeWorkspaceError(error);
@@ -112,6 +184,13 @@ export async function importBaseResumeAction(_: WorkspaceActionState, formData: 
 function draftFromForm(formData: FormData): ResumeDraftContent {
   const read = (name: string) => { const value = String(formData.get(name) ?? ""); if (value.length > maximumCurrentResumeText) throw new WorkspaceError("CURRENT_BASE_RESUME_INVALID", "The Current Base Resume draft is too large.", "Shorten the draft and try again."); return value.split("\n").map((line) => line.trim()).filter(Boolean); };
   return { contact: read("contact"), summary: read("summary"), experience: read("experience"), projects: read("projects"), education: read("education"), skills: read("skills"), other: read("other") };
+}
+
+function revalidateCareerWorkspaces() {
+  revalidatePath("/");
+  revalidatePath("/resume");
+  revalidatePath("/evidence");
+  revalidatePath("/career-assistant");
 }
 
 export async function currentBaseResumeAction(_: WorkspaceActionState, formData: FormData): Promise<WorkspaceActionState> {
@@ -126,7 +205,7 @@ export async function currentBaseResumeAction(_: WorkspaceActionState, formData:
     else if (command === "resolve") { const decision = String(formData.get("decision") ?? ""); if (decision !== "approved" && decision !== "edited" && decision !== "rejected") throw new WorkspaceError("CURRENT_BASE_RESUME_INVALID", "The proposed change decision is unavailable.", "Choose approve, save edited, or reject and try again."); await resolveCurrentBaseResumeProposal({ proposalId: String(formData.get("proposalId") ?? ""), expectedDecisionRevisionId: String(formData.get("expectedDecisionRevisionId") ?? ""), decision, text: String(formData.get("proposalText") ?? "") || undefined }); }
     else if (command === "approve-version") await approveCurrentBaseResumeVersion({ draftId: String(formData.get("draftId") ?? ""), explicitApproval: formData.get("explicitApproval") === "yes" });
     else throw new WorkspaceError("CURRENT_BASE_RESUME_INVALID", "The requested Current Base Resume action is unavailable.", "Choose a Current Base Resume action and try again.");
-    revalidatePath("/");
+    revalidateCareerWorkspaces();
     return { status: "success", summary: "Current Base Resume action completed." };
   } catch (error) {
     const safeError = toSafeWorkspaceError(error);
@@ -146,7 +225,7 @@ export async function evidenceAction(_: WorkspaceActionState, formData: FormData
     else if (command === "remove") await removeEvidence({ evidenceId, expectedRevisionId });
     else if (command === "edit") await editEvidence({ evidenceId, expectedRevisionId, factualText: String(formData.get("factualText") ?? "") });
     else throw new WorkspaceError("EVIDENCE_INVALID", "The requested evidence action is unavailable.", "Choose an individual evidence action and try again.");
-    revalidatePath("/");
+    revalidateCareerWorkspaces();
     return { status: "success", summary: "Evidence review action completed." };
   } catch (error) { await recordEvidenceFailure().catch(() => undefined); const safeError = toSafeWorkspaceError(error); return { status: "error", summary: safeError.summary, safeNextAction: safeError.safeNextAction }; }
 }
@@ -164,19 +243,19 @@ export async function evidenceLibraryAction(_: WorkspaceActionState, formData: F
     }
     else if (command === "document-for-resume") {
       const proposals = await documentFolderForResume({ sourceDirectory: String(formData.get("sourceDirectory") ?? ""), disclosed: formData.get("localModelDisclosure") === "yes", document: documentWithLocalModel });
-      revalidatePath("/");
+      revalidateCareerWorkspaces();
       return { status: "success", summary: `${proposals.length} review-only evidence proposal${proposals.length === 1 ? "" : "s"} generated. Decide each item individually.` };
     }
     else if (command === "resolve-document-proposal") {
       const decision = String(formData.get("decision") ?? "");
       if (decision !== "accepted" && decision !== "edited" && decision !== "rejected") throw new WorkspaceError("EVIDENCE_DOCUMENTER_INVALID", "The proposal decision is unavailable.", "Choose accept, save edited, or reject for this proposal.");
       await resolveDocumenterProposal({ proposalId: String(formData.get("proposalId") ?? ""), expectedRevisionId: String(formData.get("expectedRevisionId") ?? ""), decision, factualText: String(formData.get("factualText") ?? "") || undefined });
-      revalidatePath("/");
+      revalidateCareerWorkspaces();
       return { status: "success", summary: "Proposal decision recorded. Accepted evidence remains unreviewed." };
     }
     else if (command === "refresh") result = await refreshEvidenceLibrary();
     else throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "The requested library action is unavailable.", "Choose Add Project, Add Experience, or Refresh Library and try again.");
-    revalidatePath("/");
+    revalidateCareerWorkspaces();
     return { status: "success", summary: `${result!.documentsAdded} document${result!.documentsAdded === 1 ? "" : "s"} and ${result!.candidatesAdded} unreviewed evidence candidate${result!.candidatesAdded === 1 ? "" : "s"} were added.` };
   } catch (error) {
     const command = String(formData.get("libraryCommand") ?? "");

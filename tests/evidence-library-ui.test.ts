@@ -8,6 +8,7 @@ test("Resume & Evidence Library exposes explicit, labelled keyboard-native contr
   assert.match(ui, /Add Project/); assert.match(ui, /Add Experience/); assert.match(ui, /Refresh Library/);
   assert.match(ui, /<label/); assert.match(ui, /required/); assert.match(ui, /role="status"/); assert.match(ui, /aria-live="polite"/); assert.match(ui, /<button/);
   assert.match(ui, /type="file"/); assert.match(ui, /accept="\.md,text\/markdown"/);
+  assert.match(ui, /Inspect only the readable Markdown/); assert.match(ui, /starts Ready for review/);
   assert.match(actions, /addProjectToEvidenceLibrary/); assert.match(actions, /addExperienceToEvidenceLibrary/); assert.match(actions, /refreshEvidenceLibrary/);
 });
 

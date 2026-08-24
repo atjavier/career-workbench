@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 
 import { createAuditEvent, createUuidV7 } from "@/audit/audit-event";
-import { adapterKey, sourceAdapterRegistry, type SourceAdapter, type SourceAdapterResult } from "@/adapters/sources/source-adapter";
+import { adapterKey, sourceAdapterRegistry, type SourceAdapter, type SourceAdapterListing, type SourceAdapterResult } from "@/adapters/sources/source-adapter";
+import { persistAdapterListings, validateAdapterListings } from "@/domain/discovery/job-listings";
 import { validateSourceConfiguration, type SourceConfiguration } from "@/domain/discovery/source-configurations";
 import { WorkspaceError } from "@/domain/workspace/types";
 import { resolveAppDataPaths } from "@/files/app-data";
@@ -35,18 +36,19 @@ async function withDatabase<T>(options: Options, write: boolean, work: (database
 function eligible(source: SourceConfiguration): boolean { return source.values.enabled && source.values.policyApproved && source.values.accessPath !== "manual-browser-handoff" && source.values.requestBudget > 0 && source.values.rateLimitPerMinute > 0; }
 function toOutcome(source: Candidate, refreshRunId: string, status: RefreshSourceOutcome["status"], requestCount: number, recoveryGuidance: string, startedAt: string): RefreshSourceOutcome { const guidance = recoveryGuidance.trim().slice(0, 500) || failedGuidance; return { id: createUuidV7(), refreshRunId, sourceId: source.sourceId, sourceConfigurationRevisionId: source.revisionId, sourceName: source.values.name, status, requestCount, recoveryGuidance: guidance, startedAt, completedAt: new Date().toISOString() }; }
 function validStatus(value: unknown): value is SourceAdapterResult["status"] { return value === "completed" || value === "partial" || value === "failed" || value === "blocked" || value === "throttled"; }
-function normalizeResult(result: SourceAdapterResult): { status: RefreshSourceOutcome["status"]; recoveryGuidance: string } {
-  if (!result || typeof result !== "object" || !validStatus(result.status)) return { status: "failed", recoveryGuidance: failedGuidance };
-  if (result.httpStatus === 429) return { status: "throttled", recoveryGuidance: result.recoveryGuidance ?? failedGuidance };
-  if (result.httpStatus === 401 || result.httpStatus === 403) return { status: "blocked", recoveryGuidance: result.recoveryGuidance ?? failedGuidance };
-  return { status: result.status, recoveryGuidance: result.recoveryGuidance ?? failedGuidance };
+function normalizeResult(result: SourceAdapterResult): { status: RefreshSourceOutcome["status"]; recoveryGuidance: string; listings: SourceAdapterListing[] } {
+  if (!result || typeof result !== "object" || !validStatus(result.status)) return { status: "failed", recoveryGuidance: failedGuidance, listings: [] };
+  const listings = Array.isArray(result.listings) ? result.listings : [];
+  if (result.httpStatus === 429) return { status: "throttled", recoveryGuidance: result.recoveryGuidance ?? failedGuidance, listings: [] };
+  if (result.httpStatus === 401 || result.httpStatus === 403) return { status: "blocked", recoveryGuidance: result.recoveryGuidance ?? failedGuidance, listings: [] };
+  return { status: result.status, recoveryGuidance: result.recoveryGuidance ?? failedGuidance, listings: result.status === "completed" || result.status === "partial" ? listings : [] };
 }
 async function withSourceLock<T>(key: string, work: () => Promise<T>): Promise<T> {
   const previous = sourceLocks.get(key) ?? Promise.resolve(); let release!: () => void; const current = new Promise<void>((resolve) => { release = resolve; }); sourceLocks.set(key, previous.then(() => current));
   await previous; try { return await work(); } finally { release(); if (sourceLocks.get(key) === current) sourceLocks.delete(key); }
 }
-async function runAdapter(adapter: SourceAdapter, source: Candidate, timeoutMs: number, consumeRequest: () => void): Promise<{ status: RefreshSourceOutcome["status"]; recoveryGuidance: string }> {
-  if (adapter.sourceId !== source.sourceId || adapter.sourceConfigurationRevisionId !== source.revisionId) return { status: "blocked", recoveryGuidance: source.values.failureGuidance };
+async function runAdapter(adapter: SourceAdapter, source: Candidate, timeoutMs: number, consumeRequest: () => void): Promise<{ status: RefreshSourceOutcome["status"]; recoveryGuidance: string; listings: SourceAdapterListing[] }> {
+  if (adapter.sourceId !== source.sourceId || adapter.sourceConfigurationRevisionId !== source.revisionId) return { status: "blocked", recoveryGuidance: source.values.failureGuidance, listings: [] };
   const signal = AbortSignal.timeout(timeoutMs); const timeout = new Promise<never>((_, reject) => signal.addEventListener("abort", () => reject(new WorkspaceError("REFRESH_UNAVAILABLE", timeoutGuidance, timeoutGuidance)), { once: true }));
   const result = await Promise.race([adapter.refresh({ source, signal, consumeRequest }), timeout]);
   return normalizeResult(result);
@@ -80,17 +82,19 @@ export async function startRefreshRun(input: Options & { sourceIds: string[]; co
     if (!adapter) { outcomes.push(toOutcome(source, runId, "blocked", 0, source.values.failureGuidance, startedAt)); continue; }
     let requestCount = 0; const attempts: number[] = [];
     const consumeRequest = () => { const now = Date.now(); while (attempts.length && attempts[0] <= now - 60_000) attempts.shift(); if (requestCount >= source.values.requestBudget) throw new WorkspaceError("REFRESH_POLICY_UNRESOLVED", "The source request budget was reached.", source.values.failureGuidance); if (attempts.length >= source.values.rateLimitPerMinute) throw new WorkspaceError("REFRESH_POLICY_UNRESOLVED", "The source rate limit was reached.", source.values.failureGuidance); requestCount += 1; attempts.push(now); };
-    const outcome = await withSourceLock(adapterKey(source.sourceId, source.revisionId), async () => {
+    const adapterOutcome = await withSourceLock(adapterKey(source.sourceId, source.revisionId), async () => {
       try {
         const result = await runAdapter(adapter, source, input.timeoutMs ?? 10_000, consumeRequest);
-        return toOutcome(source, runId, result.status, requestCount, result.recoveryGuidance, startedAt);
+        validateAdapterListings(result.listings.map((listing) => ({ appDataRoot: input.appDataRoot, sourceId: source.sourceId, sourceConfigurationRevisionId: source.revisionId, refreshRunId: runId, ...listing })));
+        return { outcome: toOutcome(source, runId, result.status, requestCount, result.recoveryGuidance, startedAt), listings: result.listings };
       } catch (error) {
         const status = error instanceof WorkspaceError && error.code === "REFRESH_POLICY_UNRESOLVED" ? "throttled" : "failed";
-        return toOutcome(source, runId, status, requestCount, error instanceof WorkspaceError ? error.safeNextAction : failedGuidance, startedAt);
+        return { outcome: toOutcome(source, runId, status, requestCount, error instanceof WorkspaceError ? error.safeNextAction : failedGuidance, startedAt), listings: [] };
       }
     });
+    const outcome = adapterOutcome.outcome;
     try {
-      await withDatabase(input, true, (database) => insertRefreshSourceOutcome(database, { ...outcome, contentDigest: digest({ refreshRunId: outcome.refreshRunId, sourceId: outcome.sourceId, revisionId: outcome.sourceConfigurationRevisionId, status: outcome.status, requestCount: outcome.requestCount }) }));
+      await withDatabase(input, true, (database) => { insertRefreshSourceOutcome(database, { ...outcome, contentDigest: digest({ refreshRunId: outcome.refreshRunId, sourceId: outcome.sourceId, revisionId: outcome.sourceConfigurationRevisionId, status: outcome.status, requestCount: outcome.requestCount }) }); persistAdapterListings(database, adapterOutcome.listings.map((listing) => ({ appDataRoot: input.appDataRoot, sourceId: source.sourceId, sourceConfigurationRevisionId: source.revisionId, refreshRunId: runId, ...listing }))); });
       outcomes.push(outcome);
     } catch (error) {
       await withDatabase(input, true, (database) => { failRefreshRun(database, runId, new Date().toISOString()); appendAuditEvent(database, createAuditEvent({ actor: "local-os-user", action: "discovery.refresh_failed", outcome: "failure", entityId: runId, contentHash: digest({ runId, sourceId: source.sourceId }) })); }).catch(() => undefined);

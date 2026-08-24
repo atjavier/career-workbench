@@ -72,9 +72,10 @@ test("Current Base Resume import, append-only editing, eligible-evidence proposa
 
 test("Current Base Resume UI uses labeled PDF-only controls, native decisions and safe status feedback", async () => {
   const ui = await readFile(new URL("../src/app/current-base-resume.tsx", import.meta.url), "utf8");
-  const page = await readFile(new URL("../src/app/page.tsx", import.meta.url), "utf8");
+  const page = await readFile(new URL("../src/app/resume-workspace.tsx", import.meta.url), "utf8");
   assert.match(ui, /htmlFor="current-resume-pdf"/); assert.match(ui, /accept="application\/pdf,.pdf"/); assert.match(ui, /role="status"/); assert.match(ui, /aria-live="polite"/); assert.match(ui, /value="approved"/); assert.match(ui, /value="rejected"/);
   assert.doesNotMatch(ui, /storageLocation|contentDigest|absolute path|parser diagnostics/i);
-  assert.match(ui, /Evidence support revision/); assert.match(ui, /Evidence support revisions/);
+  assert.match(ui, /Evidence support:/); assert.match(ui, /retained evidence reference that is no longer available/);
+  assert.match(ui, /Review this evidence/); assert.match(ui, /Save the displayed edits before approving this revision/);
   assert.match(page, /sourceCount: value\.sources\.length/); assert.doesNotMatch(page, /\(\{ \.\.\.value, error: undefined \}\)/);
 });

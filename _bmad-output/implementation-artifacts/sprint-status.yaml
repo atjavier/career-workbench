@@ -1,0 +1,161 @@
+# generated: 2026-08-07
+# project: Resume
+# project_key: resume
+# tracking_system: file-system
+# story_location: _bmad-output/implementation-artifacts
+#
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic is defined but work has not started
+#   - in-progress: Epic is actively being implemented
+#   - done: All stories in epic are complete
+#
+# Epic Status Transitions:
+#   - backlog -> in-progress: Automatically when first story file is created
+#   - in-progress -> done: Manually when all stories are done
+#
+# Story Status:
+#   - backlog: Story exists only in epics.md
+#   - ready-for-dev: Story file created in implementation artifacts
+#   - in-progress: Developer actively implementing
+#   - review: Ready for code review
+#   - done: Story completed
+#
+# Retrospective Status:
+#   - optional: May be completed but is not required
+#   - done: Retrospective has been completed
+#
+# WORKFLOW NOTES:
+# ===============
+# - Epics move to in-progress automatically when their first story becomes active.
+# - Stories should be implemented in listed order.
+# - A retrospective is available after each epic is complete.
+
+generated: 2026-08-07
+last_updated: 2026-08-25
+project: Resume
+project_key: resume
+tracking_system: file-system
+story_location: _bmad-output/implementation-artifacts
+
+development_status:
+  epic-0: done
+  0-1-establish-the-application-shell: done
+  0-2-build-the-jobs-first-home: done
+  0-3-create-the-applications-workspace: done
+  0-4-create-the-resume-and-evidence-library-workspace: done
+  0-5-add-the-career-assistant-workspace: done
+  0-6-create-the-google-sheets-workspace: done
+  0-7-polish-the-shared-visual-system-content-states-and-responsive-behavior: done
+  epic-0-retrospective: optional
+
+  epic-1: done
+  1-1-start-a-private-local-workspace: done
+  1-2-import-and-preserve-the-base-resume: done
+  1-3-review-candidate-evidence: done
+  1-4-control-local-data-recovery-and-audit-history: done
+  1-5-build-resume-evidence-library: done
+  1-6-parse-and-version-current-base-resume: done
+  1-7-document-project-for-resume: done
+  1-8-create-resume-evidence-documenter-skill: done
+  epic-1-retrospective: done
+
+  epic-2: done
+  2-1-set-job-eligibility-preferences: done
+  2-2-approve-permitted-discovery-sources: done
+  2-3-run-a-bounded-source-refresh: done
+  2-4-inspect-normalized-job-listings: done
+  epic-2-retrospective: done
+
+  epic-3: in-progress
+  3-1-calculate-a-versioned-fit-assessment: review
+  3-2-inspect-fit-provenance-and-decide-to-pursue: backlog
+  epic-3-retrospective: optional
+
+  epic-7: in-progress
+  7-1-reframe-jobs-as-an-opportunity-library: done
+  7-2-capture-an-opportunity-from-user-provided-content: done
+  7-3-confirm-and-preserve-captured-opportunity-details: review
+  7-4-replace-discovery-states-with-capture-and-library-states: backlog
+  epic-7-retrospective: optional
+
+  epic-4: backlog
+  4-1-connect-the-local-drafting-model-safely: backlog
+  4-2-generate-provenance-backed-draft-content: backlog
+  4-3-render-versioned-latex-materials: backlog
+  4-4-approve-and-export-immutable-material-versions: backlog
+  epic-4-retrospective: optional
+
+  epic-5: backlog
+  5-1-save-and-update-a-local-application-record: backlog
+  5-2-manage-follow-ups-and-interview-rounds: backlog
+  epic-5-retrospective: optional
+
+  epic-6: backlog
+  6-1-authorize-and-identify-a-sheets-tracker: backlog
+  6-2-create-an-idempotent-tracker-mirror: backlog
+  6-3-reconcile-sync-failures-and-remote-divergence: backlog
+  epic-6-retrospective: optional
+
+action_items:
+  - id: decision-local-encryption-at-rest
+    status: resolved
+    resolution: Windows OS-account boundary plus device/full-disk encryption; no application-level database or file encryption for this personal-device MVP.
+    target_sprint: 0
+    blocks:
+      - 1-1-start-a-private-local-workspace
+  - id: decision-permitted-source-catalog-and-rate-budgets
+    status: resolved
+    resolution: Superseded for the MVP by approved Manual Opportunity Capture. The historical manual-browser-only catalog remains disabled; no enabled retrieval adapter exists. Future source work requires a separate post-MVP decision.
+    target_sprint: 2
+    blocks:
+      - 2-2-approve-permitted-discovery-sources
+      - 2-3-run-a-bounded-source-refresh
+  - id: decision-texworks-compiler-command-path
+    status: open
+    target_sprint: 4
+    blocks:
+      - 4-3-render-versioned-latex-materials
+  - epic: 1
+    action: "Approve the initial permitted-source catalog, approved access methods, and request budgets before enabling a source."
+    owner: "Adrian (Project Lead)"
+    status: resolved
+    resolution: "Approved conservative baseline: five manual-browser-only sources; no enabled external source."
+  - epic: 1
+    action: "Include source-policy, bounded-operation, and recovery checks in each Epic 2 story's acceptance criteria and tests."
+    owner: "Amelia (Developer)"
+    status: resolved
+    resolution: "Superseded for forward MVP by manual opportunity capture; completed Epic 2 history is retained."
+  - epic: 2
+    action: "Carry source-policy, bounded-operation, and recovery checks into every future discovery and fit story."
+    owner: "Amelia (Developer)"
+    status: resolved
+    resolution: "Superseded for forward MVP by Captured Opportunity requirements; no external retrieval is planned."
+  - epic: 2
+    action: "Keep source records, evidence revisions, and preference revisions immutable when adding fit and provenance features."
+    owner: "Amelia (Developer)"
+    status: open
+  - epic: 2
+    action: "Review unresolved Freshness, duplicate, and fit-rubric assumptions before expanding scope."
+    owner: "Adrian (Project Lead)"
+    status: open
+  - epic: 2
+    action: "Continue ending workflow handoffs with the next skill and copy-ready prompt."
+    owner: "Amelia (Developer)"
+    status: open
+  - epic: 1
+    action: "End each completed task or workflow handoff with the next relevant skill and a copy-ready prompt."
+    owner: "Amelia (Developer)"
+    status: open
+  - id: decision-manual-opportunity-capture-mvp
+    status: resolved
+    resolution: "Approved 2026-08-24. External discovery is followed by explicit URL plus copied-description capture; no URL fetching, scraping, source adapters, or refresh in the MVP."
+    target_sprint: 7
+    blocks:
+      - 7-2-capture-an-opportunity-from-user-provided-content
+      - 7-3-confirm-and-preserve-captured-opportunity-details
+  - epic: 3
+    action: "Re-review Story 3.1 against immutable Captured Opportunity revisions before accepting review; do not begin Story 3.2 until Stories 7.2 and 7.3 establish the input model."
+    owner: "Amelia (Developer)"
+    status: open

@@ -69,6 +69,17 @@ test("refresh requires confirmation and no generic retrieval surface is introduc
   assert.doesNotMatch(source, /fetch\s*\(|setInterval|setTimeout|window\.|proxy|credential (?:store|access)|browser automation/i);
 });
 
+test("a bounded adapter may pass validated listing records into the local inspection seam", async () => {
+  const value = await fixture();
+  try {
+    const source = await saveSourceConfiguration({ ...value, values: approved("ListingFeed") });
+    const registry = new Map<string, SourceAdapter>([[adapterKey(source.sourceId, source.revisionId), { sourceId: source.sourceId, sourceConfigurationRevisionId: source.revisionId, async refresh(context) { context.consumeRequest(); return { status: "completed", listings: [{ title: "Junior Developer", company: "Example Co", originalUrl: "https://listingfeed.example.test/jobs/1" }] }; } }]]);
+    await startRefreshRun({ ...value, sourceIds: [source.sourceId], confirmed: true, registry });
+    const { listJobListings } = await import("../src/domain/discovery/job-listings");
+    assert.equal((await listJobListings(value)).listings[0]?.sourceRecords[0]?.originalUrl, "https://listingfeed.example.test/jobs/1");
+  } finally { await rm(value.root, { recursive: true, force: true }); }
+});
+
 test("timeout, adapter identity, and malformed results become bounded safe outcomes", async () => {
   const value = await fixture();
   try {

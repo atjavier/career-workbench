@@ -3,3 +3,17 @@ node_modules/
 *.tsbuildinfo
 .env*
 coverage/
+
+# Unrelated local portfolios, agent tooling, scratch data, and generated resume artifacts.
+.agents/
+AgriMart/
+ARTEMIS/
+BioEvidence/
+MetaWatt/
+tmp/
+Resume.pdf
+resume.aux
+resume.log
+resume.out
+resume.synctex.gz
+resume.tex

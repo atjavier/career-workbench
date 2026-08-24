@@ -19,4 +19,8 @@ export const migrations = [
   { id: "0013_filipino_manual_sources", sql: readFileSync(join(migrationDirectory, "0013_filipino_manual_sources.sql"), "utf8") },
   { id: "0014_source_configuration_hardening", sql: readFileSync(join(migrationDirectory, "0014_source_configuration_hardening.sql"), "utf8") },
   { id: "0015_refresh_runs", sql: readFileSync(join(migrationDirectory, "0015_refresh_runs.sql"), "utf8") },
+  { id: "0016_job_listings", sql: readFileSync(join(migrationDirectory, "0016_job_listings.sql"), "utf8") },
+  { id: "0017_job_listing_hardening", sql: readFileSync(join(migrationDirectory, "0017_job_listing_hardening.sql"), "utf8") },
+  { id: "0018_fit_assessments", sql: readFileSync(join(migrationDirectory, "0018_fit_assessments.sql"), "utf8") },
+  { id: "0019_captured_opportunities", sql: readFileSync(join(migrationDirectory, "0019_captured_opportunities.sql"), "utf8") },
 ] as const;
