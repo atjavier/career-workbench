@@ -24,6 +24,7 @@ test("Applications gives an honest, accessible empty tracking state and useful h
   assert.match(workspace, /<Link href="\/">Browse Jobs<\/Link>/);
   assert.doesNotMatch(workspace, /href="\/google-sheets"/);
   assert.match(workspace, /Ordered rounds, dates, statuses, outcomes, notes, and next actions\./);
+  assert.match(workspace, /captured opportunities/i);
 });
 
 test("Applications preserves local-first scope and does not manufacture tracking or sync behavior", async () => {

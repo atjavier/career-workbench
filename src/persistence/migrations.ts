@@ -23,4 +23,5 @@ export const migrations = [
   { id: "0017_job_listing_hardening", sql: readFileSync(join(migrationDirectory, "0017_job_listing_hardening.sql"), "utf8") },
   { id: "0018_fit_assessments", sql: readFileSync(join(migrationDirectory, "0018_fit_assessments.sql"), "utf8") },
   { id: "0019_captured_opportunities", sql: readFileSync(join(migrationDirectory, "0019_captured_opportunities.sql"), "utf8") },
+  { id: "0020_captured_opportunity_url_constraint", sql: readFileSync(join(migrationDirectory, "0020_captured_opportunity_url_constraint.sql"), "utf8") },
 ] as const;

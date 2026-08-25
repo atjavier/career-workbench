@@ -36,7 +36,7 @@ export type OpportunityCaptureActionState = {
   submittedCopiedDescription?: string;
   draft?: OpportunityCaptureDraft;
 };
-export type OpportunityConfirmationActionState = OpportunityCaptureActionState & { fieldErrors?: Partial<Record<"postingUrl" | "copiedDescription" | "title" | "company" | "location" | "workStyle" | "requirements" | "postedAt", string>>; probableDuplicate?: boolean };
+export type OpportunityConfirmationActionState = OpportunityCaptureActionState & { fieldErrors?: Partial<Record<"postingUrl" | "copiedDescription" | "title" | "company" | "location" | "workStyle" | "requirements" | "postedAt", string>>; probableDuplicate?: { title: string; company: string; capturedAt: string } };
 
 export async function opportunityCaptureAction(_: OpportunityCaptureActionState, formData: FormData): Promise<OpportunityCaptureActionState> {
   try {
@@ -52,7 +52,7 @@ export async function opportunityCaptureAction(_: OpportunityCaptureActionState,
 export async function opportunityConfirmationAction(_: OpportunityConfirmationActionState, formData: FormData): Promise<OpportunityConfirmationActionState> {
   const submitted = { submittedPostingUrl: String(formData.get("postingUrl") ?? ""), submittedCopiedDescription: String(formData.get("copiedDescription") ?? "") };
   try {
-    const result = await confirmCapturedOpportunity({ postingUrl: formData.get("postingUrl"), copiedDescription: formData.get("copiedDescription"), title: formData.get("title"), company: formData.get("company"), location: formData.get("location"), workStyle: formData.get("workStyle"), requirements: formData.get("requirements"), postedAt: formData.get("postedAt") });
+    const result = await confirmCapturedOpportunity({ postingUrl: formData.get("postingUrl"), copiedDescription: formData.get("copiedDescription"), capturedAt: formData.get("capturedAt"), title: formData.get("title"), company: formData.get("company"), location: formData.get("location"), workStyle: formData.get("workStyle"), requirements: formData.get("requirements"), postedAt: formData.get("postedAt") });
     revalidatePath("/");
     return { status: "success", summary: `${result.opportunity.title} at ${result.opportunity.company} was saved locally.`, probableDuplicate: result.probableDuplicate, ...submitted };
   } catch (error) {

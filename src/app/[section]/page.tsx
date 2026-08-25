@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { ApplicationShell, applicationDestinations } from "@/app/application-shell";
 
 const titles: Record<string, { title: string; summary: string }> = {
-  settings: { title: "Settings", summary: "Manage preferences, permitted sources, privacy, and local storage here." },
+  settings: { title: "Settings", summary: "Manage local preferences, privacy, and storage here." },
 };
 
 export default async function PlaceholderPage({ params }: { params: Promise<{ section: string }> }) {

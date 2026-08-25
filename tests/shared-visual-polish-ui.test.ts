@@ -33,7 +33,7 @@ test("shared visual polish uses semantic actions, resilient cards, and disclosur
   assert.match(styles, /\.job-listing-facts \{ grid-template-columns: 1fr;/);
   assert.match(styles, /\.applications-future-fields \{ grid-template-columns: 1fr;/);
   assert.match(styles, /overflow-wrap: anywhere/);
-  assert.match(jobs, /className="danger-action"/);
+  assert.match(jobs, /className="affirmative-action add-opportunity-action"/);
   assert.match(applications, /applications-future-fields/);
   assert.match(current, /className="danger-action"/);
   assert.match(current, /<details><summary>Technical support details<\/summary>/);
@@ -47,6 +47,6 @@ test("polished presentation stays local, truthful, and accessible", async () => 
   assert.match(combined, /No applications to track yet/);
   assert.match(combined, /Google Sheets is not connected yet/);
   assert.match(combined, /No scripts, remote assets, or cloud processing are used/);
-  assert.match(combined, /No saved opportunities match your current search or filters/);
+  assert.match(combined, /No captured opportunities match your search/);
   assert.doesNotMatch(combined, /fetch\s*\(|setInterval|setTimeout|oauth|automatic retry|automatic scan/i);
 });

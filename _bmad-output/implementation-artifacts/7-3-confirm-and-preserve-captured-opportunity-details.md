@@ -4,7 +4,7 @@ baseline_commit: NO_VCS
 
 # Story 7.3: Confirm and Preserve Captured Opportunity Details
 
-Status: review
+Status: done
 
 ## Story
 
@@ -137,7 +137,18 @@ GPT-5.6
 - tests/captured-opportunities.test.ts
 - tests/opportunity-capture-ui.test.ts
 
+### Review Findings
+
+- [x] [Review][Patch] Preserve the reviewed draft capture timestamp through confirmation [src/domain/opportunities/captured-opportunities.ts:16]
+- [x] [Review][Patch] Identify both records in a probable-duplicate suggestion without exposing IDs [src/app/opportunity-capture.tsx:54]
+- [x] [Review][Patch] Validate every stored identity and revision field before exposing its projection [src/persistence/captured-opportunities-repository.ts:7]
+- [x] [Review][Patch] Reject requirements whose JSON representation exceeds the persisted column bound [src/domain/opportunities/captured-opportunities.ts:16]
+- [x] [Review][Patch] Make the post-save return control close the modal before returning to All opportunities [src/app/opportunity-capture.tsx:54]
+- [x] [Review][Patch] Reset confirmation state when reviewing another draft in the same open modal [src/app/opportunity-capture.tsx:43]
+- [x] [Review][Patch] Allow valid HTTPS URLs that contain @ outside embedded credentials [src/persistence/migrations/0020_captured_opportunity_url_constraint.sql:1]
+
 ## Change Log
 
 - 2026-08-25: Created Story 7.3 implementation guide for immutable captured-opportunity confirmation and local duplicate suggestions.
 - 2026-08-25: Implemented captured-opportunity confirmation, duplicate suggestions, UI recovery, and automated coverage.
+- 2026-08-25: Resolved all code-review findings and verified the forward-only workspace upgrade path.
