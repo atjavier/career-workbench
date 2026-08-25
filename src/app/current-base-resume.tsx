@@ -8,13 +8,13 @@ import type { EvidenceRevision } from "@/persistence/evidence-repository";
 import type { CurrentBaseResumeDraft, CurrentBaseResumeProposal, CurrentBaseResumeVersion } from "@/persistence/current-base-resume-repository";
 
 const initial: WorkspaceActionState = { status: "idle", summary: "Choose a text-readable PDF to create a Current Base Resume." };
-type Props = { sourceCount: number; draft?: CurrentBaseResumeDraft; proposals: CurrentBaseResumeProposal[]; versions: CurrentBaseResumeVersion[]; evidence: EvidenceRevision[]; error?: { summary: string; safeNextAction: string } };
+type Props = { sourceCount: number; sourceId?: string; originalPdfAvailable: boolean; draft?: CurrentBaseResumeDraft; proposals: CurrentBaseResumeProposal[]; versions: CurrentBaseResumeVersion[]; evidence: EvidenceRevision[]; error?: { summary: string; safeNextAction: string } };
 const fields: Array<keyof CurrentBaseResumeDraft["content"]> = ["contact", "summary", "experience", "projects", "education", "skills", "other"];
 
 function labelFor(field: string) { return field[0].toUpperCase() + field.slice(1); }
 function evidenceLabel(evidence: EvidenceRevision) { return `${evidence.sourceDocument}, ${evidence.sourceSection}`; }
 
-export function CurrentBaseResume({ sourceCount, draft, proposals, versions, evidence, error }: Props) {
+export function CurrentBaseResume({ sourceCount, sourceId, originalPdfAvailable, draft, proposals, versions, evidence, error }: Props) {
   const [state, action, pending] = useActionState(currentBaseResumeAction, initial);
   const revisionKey = draft ? `${draft.id}-${draft.revisionNumber}` : "no-draft";
   const [previewState, setPreviewState] = useState({ revisionKey, content: draft?.content, hasUnsavedEdits: false });
@@ -24,6 +24,7 @@ export function CurrentBaseResume({ sourceCount, draft, proposals, versions, evi
   const hasUnsavedEdits = previewMatchesDraft && previewState.hasUnsavedEdits;
   const evidenceByRevision = new Map(evidence.map((item) => [item.id, item]));
   const openProposals = proposals.filter((proposal) => proposal.decision === "open");
+  const originalPdfUrl = sourceId && originalPdfAvailable ? `/api/current-base-resume/${encodeURIComponent(sourceId)}/pdf` : undefined;
 
   return <section aria-labelledby="current-base-resume-heading" className="current-base-resume">
     <p id={message.status === "error" ? "current-resume-error" : undefined} role="status" aria-live="polite" className={message.status === "error" ? "status status-error" : "status"}>{message.summary}</p>
@@ -37,14 +38,13 @@ export function CurrentBaseResume({ sourceCount, draft, proposals, versions, evi
           <div className="resume-pane-head"><div><h2 id="current-base-resume-heading">Manual resume review</h2><p>Review your local draft and choose each change yourself.</p></div><span className="resume-pane-chip">Coach not available</span></div>
           <p className="resume-context">Current Base Resume · local only · evidence-backed review</p>
           {sourceCount ? <p className="resume-source-count">{sourceCount} retained PDF source {sourceCount === 1 ? "is" : "are"} available. The original stays read-only.</p> : null}
-          <p className="revision-status">Editing local draft revision {draft.revisionNumber}. {hasUnsavedEdits ? "Preview includes unsaved local edits; save before approving a version." : "Preview matches the saved local revision."}</p>
+          <p className="revision-status">Editing local draft revision {draft.revisionNumber}. {hasUnsavedEdits ? "Your working draft has unsaved edits; save before approving a version." : "Your working draft matches the saved local revision."} The original PDF preview remains unchanged.</p>
           {fields.map((field) => <label key={field} htmlFor={`draft-${field}`}>{labelFor(field)}<textarea id={`draft-${field}`} name={field} value={content[field].join("\n")} onChange={(event) => setPreviewState({ revisionKey, content: { ...content, [field]: event.currentTarget.value.split("\n") }, hasUnsavedEdits: true })} /></label>)}
           <button type="submit" disabled={pending}>Save draft revision</button>
         </form>
-        <aside id="resume-preview" className="resume-preview resume-preview-pane" aria-label="Resume preview" aria-labelledby="resume-preview-heading">
-          <div className="resume-pane-head"><div><h2 id="resume-preview-heading">Preview</h2><p>How your current resume reads.</p></div><span className="resume-pane-chip">{hasUnsavedEdits ? "Unsaved local edits" : "Ready to review"}</span></div>
-          <article className="resume-paper">{fields.map((field) => content[field].length ? <section key={field}><h3>{labelFor(field)}</h3>{content[field].map((line, index) => <p key={`${field}-${index}`}>{line}</p>)}</section> : null)}</article>
-          <p className="preview-boundary"><strong>Local preview.</strong> No scripts, remote assets, or cloud processing are used. If this preview is unavailable, your draft remains local and available as a safe text-only review.</p>
+        <aside id="resume-preview" className="resume-preview resume-preview-pane" aria-label="Original Resume PDF preview" aria-labelledby="resume-preview-heading">
+          <div className="resume-pane-head"><div><h2 id="resume-preview-heading">Original PDF</h2><p>The read-only source you imported.</p></div><span className="resume-pane-chip">Original source</span></div>
+          {originalPdfUrl ? <><div className="resume-original-pdf-frame"><iframe className="resume-original-pdf-viewer" src={originalPdfUrl} title="Original, read-only Resume PDF" /><a className="resume-original-pdf-fallback" href={originalPdfUrl} target="_blank" rel="noopener noreferrer">Open original PDF</a></div><p className="preview-boundary"><strong>Original PDF.</strong> This faithful local view is unchanged by saved or unsaved working-draft edits. No scripts, remote assets, or cloud processing are used. If it cannot load, use the link above or restore the original PDF from a local backup, then refresh; your separate working draft remains available.</p></> : <article className="resume-paper resume-paper-empty"><h3>Original PDF unavailable</h3><p>Your working draft remains available. Restore the original PDF from a local backup, then refresh to restore this read-only view.</p></article>}
         </aside>
       </div>
       <section id="resume-warnings" className="resume-follow-up" aria-labelledby="proposal-heading"><h2 id="proposal-heading">Warnings and proposed changes</h2>{proposals.length ? <ul className="resume-proposal-list">{proposals.map((proposal) => { const support = evidenceByRevision.get(proposal.evidenceRevisionId); return <li key={proposal.id}><p>{proposal.proposedText}</p><p>Evidence support: {support ? <>{evidenceLabel(support)}. {support.origin === "extracted" ? "Extracted" : "User-entered"}. <Link href={`/evidence#evidence-${support.id}`}>Review this evidence</Link></> : <>The evidence reference is unavailable. <Link href="/evidence#evidence-heading">Open Evidence Review</Link></>}</p>{proposal.decision === "open" ? <form action={action}><input type="hidden" name="currentResumeCommand" value="resolve" /><input type="hidden" name="proposalId" value={proposal.id} /><input type="hidden" name="expectedDecisionRevisionId" value={proposal.decisionRevisionId} /><label htmlFor={`proposal-${proposal.id}`}>Edited wording (optional)</label><textarea id={`proposal-${proposal.id}`} name="proposalText" /><div className="proposal-actions"><button className="affirmative-action" name="decision" value="approved" type="submit">Approve</button><button className="neutral-action" name="decision" value="edited" type="submit">Save edited</button><button className="danger-action" name="decision" value="rejected" type="submit">Reject</button></div></form> : <p>Resolved: {proposal.decision}</p>}</li>; })}</ul> : <p>No proposed changes have been generated. Resume Coach is not available; you can still save and review your local draft manually.</p>}</section>

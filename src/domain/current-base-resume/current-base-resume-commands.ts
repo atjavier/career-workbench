@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { basename } from "node:path";
 import { parseResumePdf, validateResumeDraftContent, type ResumeDraftContent } from "@/adapters/resume-parser/pdf-text-parser";
 import { createAuditEvent, createUuidV7 } from "@/audit/audit-event";
-import { cleanupCurrentBaseResume, stageCurrentBaseResume } from "@/files/current-base-resume";
+import { cleanupCurrentBaseResume, readRetainedCurrentBaseResumePdf, stageCurrentBaseResume } from "@/files/current-base-resume";
 import { resolveAppDataPaths } from "@/files/app-data";
 import { listApprovedEvidence } from "@/persistence/evidence-repository";
 import { WorkspaceError } from "@/domain/workspace/types";
@@ -40,3 +40,21 @@ export async function generateCurrentBaseResumeProposals(input: Options & { draf
 export async function resolveCurrentBaseResumeProposal(input: Options & { proposalId: string; expectedDecisionRevisionId: string; decision: "approved" | "edited" | "rejected"; text?: string }): Promise<void> { if (!(["approved", "edited", "rejected"] as const).includes(input.decision)) throw new WorkspaceError("CURRENT_BASE_RESUME_INVALID", "The proposed change decision is unavailable.", "Choose approve, save edited, or reject and try again."); const paths = await resolveAppDataPaths(input.appDataRoot); transaction(paths.root, (db) => { const proposal = db.prepare("SELECT draft_id FROM current_base_resume_proposals WHERE id = ?").get(input.proposalId) as { draft_id: string } | undefined; if (!proposal) throw new WorkspaceError("CURRENT_BASE_RESUME_NOT_FOUND", "That proposed change is unavailable.", "Refresh proposed changes and try again."); if (currentDraft(db)?.id !== proposal.draft_id) throw new WorkspaceError("CURRENT_BASE_RESUME_STALE", "The draft changed before this proposed change could be resolved.", "Refresh proposed changes and try again."); const item = listProposals(db, proposal.draft_id).find((value) => value.id === input.proposalId); if (!item || item.decisionRevisionId !== input.expectedDecisionRevisionId || item.decision !== "open") throw new WorkspaceError("CURRENT_BASE_RESUME_STALE", "That proposed change was already resolved.", "Refresh proposed changes and try again."); if (input.decision === "edited" && !input.text?.trim()) throw new WorkspaceError("CURRENT_BASE_RESUME_INVALID", "An edited proposed change needs text.", "Enter the reviewed wording or reject the proposal."); appendProposalDecision(db, item, createUuidV7(), input.decision, input.text?.trim(), new Date().toISOString()); audit(db, "current_base_resume.proposal_resolved", "success", item.id, item.contentDigest); }); }
 export async function approveCurrentBaseResumeVersion(input: Options & { draftId: string; explicitApproval: boolean }): Promise<CurrentBaseResumeVersion> { if (!input.explicitApproval) throw new WorkspaceError("CURRENT_BASE_RESUME_UNRESOLVED", "Explicit approval is required before creating a Current Base Resume version.", "Review all proposed changes and approve the version explicitly."); const paths = await resolveAppDataPaths(input.appDataRoot); return transaction(paths.root, (db) => { const draft = findDraft(db, input.draftId); if (!draft || currentDraft(db)?.id !== input.draftId) throw new WorkspaceError("CURRENT_BASE_RESUME_STALE", "The draft changed before version approval.", "Refresh the Current Base Resume and try again."); if (listVersions(db).some((version) => version.draftId === draft.id)) throw new WorkspaceError("CURRENT_BASE_RESUME_STALE", "That Current Base Resume version was already approved.", "Refresh the retained versions and create a new draft revision if needed."); const proposals = listProposals(db, draft.id); if (proposals.some((proposal) => proposal.decision === "open")) throw new WorkspaceError("CURRENT_BASE_RESUME_UNRESOLVED", "All proposed changes must be resolved before approval.", "Approve, edit, or reject each proposed change first."); const support = proposals.filter((proposal) => proposal.decision === "approved" || proposal.decision === "edited").map((proposal) => proposal.evidenceRevisionId).sort(); const source = db.prepare("SELECT filename FROM current_base_resume_sources WHERE id = ?").get(draft.sourceId) as { filename: string }; const item: CurrentBaseResumeVersion = { id: createUuidV7(), sourceId: draft.sourceId, sourceFilename: source.filename, draftId: draft.id, draftRevisionNumber: draft.revisionNumber, approvedAt: new Date().toISOString(), contentDigest: draft.contentDigest, evidenceRevisionIds: support }; insertVersion(db, item); audit(db, "current_base_resume.version_approved", "success", item.id, item.contentDigest); return item; }); }
 export async function listCurrentBaseResume(input: Options = {}): Promise<{ sources: CurrentBaseResumeSource[]; draft?: CurrentBaseResumeDraft; proposals: CurrentBaseResumeProposal[]; versions: CurrentBaseResumeVersion[] }> { const paths = await resolveAppDataPaths(input.appDataRoot); return transaction(paths.root, (db) => { const draft = currentDraft(db); return { sources: listSources(db), draft, proposals: draft ? listProposals(db, draft.id) : [], versions: listVersions(db) }; }); }
+
+export async function readCurrentBaseResumePdf(input: Options & { sourceId: string }): Promise<Uint8Array | undefined> {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.sourceId)) return undefined;
+
+  try {
+    const paths = await resolveAppDataPaths(input.appDataRoot);
+    const source = transaction(paths.root, (db) => {
+      const draft = currentDraft(db);
+      return draft?.sourceId === input.sourceId ? listSources(db).find((item) => item.id === input.sourceId) : undefined;
+    });
+    if (!source) return undefined;
+    const bytes = await readRetainedCurrentBaseResumePdf(paths.root, source);
+    if (!bytes || bytes.byteLength !== source.byteSize || digest(bytes) !== source.contentDigest) return undefined;
+    return transaction(paths.root, (db) => currentDraft(db)?.sourceId === source.id) ? bytes : undefined;
+  } catch {
+    return undefined;
+  }
+}

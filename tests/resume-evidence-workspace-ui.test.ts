@@ -39,14 +39,15 @@ test("Resume uses an approved split, review-safe local editor and preview patter
     readFile(new URL("../src/app/current-base-resume.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/app/globals.css", import.meta.url), "utf8"),
   ]);
-  for (const text of ["Guided resume steps", "Evidence and skills", "Manual resume review", "Coach not available", "Preview", "Warnings", "Provenance", "safe text-only review"]) assert.match(resume + stepper + current, new RegExp(text));
+  for (const text of ["Guided resume steps", "Evidence and skills", "Manual resume review", "Coach not available", "Original PDF", "Warnings", "Provenance", "Open original PDF"]) assert.match(resume + stepper + current, new RegExp(text));
   assert.match(stepper, /aria-current/); assert.match(stepper, /href={`#\$\{id\}`}/);
   assert.match(current, /revisionNumber/);
   assert.match(current, /Save the displayed edits before approving this revision/);
   assert.match(current, /Review this evidence/); assert.match(current, /sourceDocument/); assert.match(current, /sourceSection/);
   assert.match(current, /evidence-\$\{support\.id\}/); assert.match(styles, /scroll-margin-top/);
   assert.match(current, /aria-label="Resume preview"/);
-  assert.match(current, /No scripts, remote assets, or cloud processing are used/);
+  assert.match(current, /The original PDF preview remains unchanged/);
+  assert.match(current, /Original, read-only Resume PDF/);
   assert.match(current, /Resume Coach is not available/);
   assert.doesNotMatch(current, /fetch\s*\(|setInterval|setTimeout|telemetry|oauth/i);
   assert.match(styles, /\.resume-editor-preview/);

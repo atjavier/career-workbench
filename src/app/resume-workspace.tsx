@@ -2,7 +2,7 @@ import { BaseResumeImporter } from "@/app/base-resume-importer";
 import { CurrentBaseResume } from "@/app/current-base-resume";
 import { listStoredBaseResumes } from "@/domain/base-resume/list-base-resumes";
 import { listStoredEvidence } from "@/domain/evidence/list-stored-evidence";
-import { listCurrentBaseResume } from "@/domain/current-base-resume/current-base-resume-commands";
+import { listCurrentBaseResume, readCurrentBaseResumePdf } from "@/domain/current-base-resume/current-base-resume-commands";
 
 const safeError = (error: unknown, fallback: string) => error instanceof Error && "summary" in error && "safeNextAction" in error ? { summary: String(error.summary), safeNextAction: String(error.safeNextAction) } : { summary: fallback, safeNextAction: "Check local workspace storage, then refresh the page." };
 
@@ -10,9 +10,22 @@ export async function ResumeWorkspace() {
   const [legacy, current, evidence] = await Promise.all([
     listStoredBaseResumes().catch((error) => ({ resumes: [], error: safeError(error, "Retained resume history is unavailable.") })),
     listCurrentBaseResume()
-      .then((value) => ({ sourceCount: value.sources.length, proposals: value.proposals, versions: value.versions, draft: value.draft, error: undefined }))
+      .then(async (value) => {
+        const sourceId = value.draft?.sourceId;
+        return {
+          sourceCount: value.sources.length,
+          sourceId,
+          originalPdfAvailable: sourceId ? Boolean(await readCurrentBaseResumePdf({ sourceId })) : false,
+          proposals: value.proposals,
+          versions: value.versions,
+          draft: value.draft,
+          error: undefined,
+        };
+      })
       .catch((error) => ({
         sourceCount: 0,
+        sourceId: undefined,
+        originalPdfAvailable: false,
         proposals: [],
         versions: [],
         draft: undefined,

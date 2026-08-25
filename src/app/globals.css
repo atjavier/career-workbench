@@ -346,6 +346,9 @@ button, input, textarea, select { font: inherit; }
 .resume-review-pane textarea { min-height: 6rem; }
 .resume-review-pane button, .resume-version-actions button { box-shadow: 0 3px 8px rgb(33 86 66 / 20%); min-height: 0; padding: 10px 15px; }
 .resume-preview-pane { background: #E9F0E9; border-left: 1px solid #DBE5DB; }
+.resume-original-pdf-frame { background: var(--surface-raised); box-shadow: 0 10px 23px rgb(27 62 42 / 11%); min-height: 34rem; overflow: hidden; position: relative; }
+.resume-original-pdf-viewer { border: 0; display: block; height: clamp(34rem, 72vh, 68rem); width: 100%; }
+.resume-original-pdf-fallback { background: var(--surface-raised); border-top: 1px solid #D2DFD2; color: var(--accent); display: block; font-size: 13px; font-weight: 720; padding: 10px 14px; }
 .resume-paper { background: var(--surface-raised); box-shadow: 0 10px 23px rgb(27 62 42 / 11%); color: #253D34; min-height: 34rem; padding: clamp(25px, 5vw, 52px); }
 .resume-paper h3 { border-top: 1px solid #D2DFD2; color: var(--accent); font-size: 12px; letter-spacing: 0.08em; margin: 20px 0 6px; padding-top: 18px; text-transform: uppercase; }
 .resume-paper section:first-child h3 { border-top: 0; margin-top: 0; padding-top: 0; }
@@ -386,4 +389,5 @@ button, input, textarea, select { font: inherit; }
   .resume-version-actions { grid-template-columns: 1fr; }
   .proposal-actions button, .resume-review-pane button, .resume-version-actions button { width: 100%; }
   .resume-paper { min-height: 0; padding: 27px 22px; }
+  .resume-original-pdf-viewer { height: min(68vh, 40rem); }
 }
