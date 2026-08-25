@@ -77,5 +77,9 @@ test("Current Base Resume UI uses labeled PDF-only controls, native decisions an
   assert.doesNotMatch(ui, /storageLocation|contentDigest|absolute path|parser diagnostics/i);
   assert.match(ui, /Evidence support:/); assert.match(ui, /retained evidence reference that is no longer available/);
   assert.match(ui, /Review this evidence/); assert.match(ui, /Save the displayed edits before approving this revision/);
+  assert.match(ui, /Manual resume review/); assert.match(ui, /Coach not available/);
+  assert.match(ui, /Resume Coach is not available/);
+  assert.match(ui, /retained PDF source/); assert.match(ui, /The original stays read-only/);
+  assert.match(ui, /View retained Current Base Resume versions/);
   assert.match(page, /sourceCount: value\.sources\.length/); assert.doesNotMatch(page, /\(\{ \.\.\.value, error: undefined \}\)/);
 });
