@@ -659,22 +659,26 @@ So that I can prioritize roles from supported evidence rather than a hiring pred
 ### Story 3.2: Inspect fit provenance and decide to pursue
 
 As Adrian,
-I want to inspect fit evidence and save or hand off a listing,
+I want an evidence-grounded local AI assessment of a captured opportunity and a clear way to act on it,
 So that I can make an informed personal decision.
 
 **Acceptance Criteria:**
 
-**Given** a calculated assessment
-**When** Adrian opens Fit Explanation
-**Then** matched evidence, gaps/uncertainty, seniority, work-style/location, Freshness, and short posting excerpts are separate and accessible.
+**Given** a confirmed Captured Opportunity and approved evidence
+**When** Adrian explicitly requests an assessment
+**Then** one local, structured AI request assesses only the pinned inputs and returns readable strengths, gaps/uncertainty, seniority, work-style/location, Freshness, and short captured-posting excerpts; it never predicts hiring.
+
+**Given** identical profile/evidence, opportunity, model configuration, and prompt-schema inputs
+**When** Adrian revisits the assessment
+**Then** the exact cached local result is reused without another request; changed inputs require renewed explicit consent and a new assessment.
 
 **Given** a matched fact or requirement summary
 **When** Adrian follows its provenance link
-**Then** it identifies the approved evidence revision or the relevant source excerpt/original URL.
+**Then** it identifies the approved evidence revision or the relevant captured excerpt/original URL.
 
 **Given** a Potential or Stretch listing
 **When** Adrian saves it, sets personal priority, or opens the original link
-**Then** the personal state remains separate from the calculated label and the outbound handoff names its host and never prefills or submits an employer form.
+**Then** the personal state remains separate from the assessment and the outbound handoff names its host and never prefills or submits an employer form.
 
 ## Epic 4: Truthful tailored application materials
 
@@ -950,3 +954,64 @@ So that I never mistake pasted content for an automatically retrieved listing.
 - **Story 3.1** must be reviewed against Captured Opportunity revisions before its review status can be accepted.
 - **Story 3.2** must wait for Stories 7.2 and 7.3; it will inspect fit provenance from captured input, not retained source/refresh provenance.
 - **Epics 4–6** retain their scope but consume a Captured Opportunity wherever they previously named a retrieved Job Listing.
+
+## Approved Change - 2026-08-25: Profile-led Resume Generation
+
+Story 1.6 is complete historical work but is superseded as the active Resume experience: retained sources stay private and preserved, while its manual Current Base Resume editor must not be extended. Epic 4 retains truthfulness, review, and export gates but consumes the profile, template, and material model below.
+
+## Epic 8: Profile-led Resume Generation
+
+Adrian manages reviewed candidate details and a protected visual resume template, then uses an explicitly consented local Coach to produce structured, reviewable material drafts from selected source material.
+
+### Story 8.1: Version Candidate Profile and designate Resume template
+
+As Adrian, I want versioned profile details and a protected `Resume.pdf` template, so that generated materials use my reviewed identity data without changing the source file.
+
+**Acceptance Criteria**
+
+- Required name, contact, and education details and optional honors and profile URLs are versioned; incomplete profiles cannot be used for generation.
+- The selected template's digest is pinned, it is read-only, and current historical resume records remain available after migration.
+- Saving profile changes cannot overwrite a template, evidence, material version, or prior profile revision.
+
+### Story 8.2: Build simplified Resume Edit and preview-only state
+
+As Adrian, I want a compact Resume page, so that I can manage my profile and inspect the visual template without developer-facing controls.
+
+**Acceptance Criteria**
+
+- The page contains only profile details, Coach availability/consent state, and the native PDF preview with an accessible fallback.
+- When local AI is unavailable, profile and template preview remain usable and no manual editor or substitute generation flow appears.
+- Old warnings, evidence/skills cards, current-base-resume approval controls, and manual editing controls are removed from this experience.
+
+### Story 8.3: Provide safe local Resume Coach requests
+
+As Adrian, I want to send a tailored request to my local model, so that I control the material it reads and nothing is sent to a cloud provider.
+
+**Acceptance Criteria**
+
+- A request requires the exact selected profile revision, reviewed Experience and Projects material, optional Captured Opportunity, and explicit per-request consent.
+- `LocalModelGateway` makes one loopback request only to configured LM Studio and model settings; it has no provider fallback, automatic retry, or prompt/response logging.
+- Coach busy, unavailable, error, and response states are keyboard- and screen-reader-accessible.
+- `LocalModelGateway` is the sole shared stateless loopback boundary for explicitly consented local AI capabilities. Each capability has a separate bounded JSON schema and cannot reuse another capability's prompt or response as an authority.
+
+### Story 8.4: Hand off structured material drafts for review
+
+As Adrian, I want each Coach response stored as a separate draft, so that I can review claims before any resume output is created.
+
+**Acceptance Criteria**
+
+- Each material draft records its profile, evidence, optional opportunity, and template provenance and exposes its full generated content for review.
+- `Use as draft` hands off to the established review flow; it does not silently approve claims, alter the template, or export a resume.
+- Claim validation, material version approval, rendering, and export remain explicit downstream gates.
+
+### Story 8.5: Document source folders and review Experience & Projects artifacts
+
+As Adrian,
+I want a simple, reviewable Projects and Experiences collection,
+so that I can document real local work folders without confusing their source material with resume evidence or my immutable Resume.pdf template.
+
+**Acceptance Criteria**
+
+- Resume > Experience & Projects uses the same Resume mini-tab visual grammar as Edit and presents separate Projects and Experiences collections with compact, expandable detail rows.
+- Each category has one explicit real-source-folder documentation handoff. The local `resume-evidence-documenter` skill safely and read-only inspects the selected working folder, then produces exactly the three proposed artifacts outside that folder; the application does not directly import or parse raw source files.
+- The user explicitly imports generated documentation artifacts and individually approves resulting evidence before claim use. A bounded summary comes only from `project-overview.md`; it never becomes evidence authority or invents content. `Resume.pdf` and legacy Base Resume extraction do not appear in the active collection.

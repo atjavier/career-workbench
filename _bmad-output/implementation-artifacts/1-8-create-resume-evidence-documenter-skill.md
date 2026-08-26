@@ -2,7 +2,7 @@
 title: 'Story 1.8 - Create Resume Evidence Documenter Skill'
 type: 'feature'
 created: '2026-08-23'
-status: 'review'
+status: 'done'
 baseline_commit: NO_VCS
 context:
   - '{project-root}/_bmad-output/implementation-artifacts/epic-1-context.md'
@@ -63,6 +63,14 @@ so that I can document project folders into the same resume-evidence format outs
 - [x] [Review][Patch] Validate every overview claim and Markdown fence form [.agents/skills/resume-evidence-documenter/validation/validate-contract.mjs:29] — only triple-backtick fences are excluded, and arbitrary overview bullets and Source Map rows are not reconciled to inspected source lines. Reject tilde-fenced provenance and parse every factual overview row and Source Map entry through the same provenance checker.
 - [x] [Review][Patch] Enforce complete explicit-unknowns and unambiguous entry linkage [.agents/skills/resume-evidence-documenter/validation/validate-contract.mjs:34] — any non-empty unknowns value passes, duplicate IDs/fields are accepted, and two templates omit unsupported skills. Require each mandatory unknown category (or a structured explicit value), reject duplicate evidence/bullet IDs and repeated fields, and align all templates with the canonical provenance/unknowns schema.
 - [x] [Review][Patch] Make the fixture validate a documented successful invocation and rejection non-mutation [.agents/skills/resume-evidence-documenter/validation/validate-contract.mjs:32] — the harness writes hard-coded artifact strings instead of exercising generation from the delivered templates/instructions; its rejection helper snapshots only the root directory and does not cover a valid new output directory. Drive the active fixture through the documented workflow/asset contract, test output-directory creation, and compare full source/output snapshots for every rejection.
+
+### Review Findings (Re-review 2026-08-26)
+
+- [x] [Review][Patch] Permit bounded local filesystem operations required to inspect the source and write the three artifacts [.agents/skills/resume-evidence-documenter/SKILL.md:31]
+- [x] [Review][Patch] Require atomic staged publication and rollback rather than direct artifact writes [.agents/skills/resume-evidence-documenter/instructions.md:19]
+- [x] [Review][Patch] Make the active fixture derive its result from the delivered workflow assets and inspected source [.agents/skills/resume-evidence-documenter/validation/validate-contract.mjs:89]
+- [x] [Review][Patch] Support and validate the documented zero-evidence outcome without requiring fabricated entries [.agents/skills/resume-evidence-documenter/validation/validate-contract.mjs:98]
+- [x] [Review][Patch] Close artifact/provenance parsing so all factual content and non-fenced headings are verified [.agents/skills/resume-evidence-documenter/validation/validate-contract.mjs:76]
 
 ## Dev Notes
 

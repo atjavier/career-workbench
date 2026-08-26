@@ -417,3 +417,15 @@ An Opportunity has immutable captured revisions, user-provided description conte
 ### Deferred enhancement
 
 Approved company/ATS APIs, feeds, or policy-reviewed retrieval may be considered after MVP only through a separate reviewed decision. They cannot silently activate when Adrian pastes a URL and cannot replace manual capture as the reliable default.
+
+## 16. Approved Change - Profile-led Resume Generation
+
+This change supersedes the editable Current Base Resume model in Section 14 as the active Resume experience. `Resume.pdf` is an immutable visual template and reference. Candidate Profile revisions hold required name, contact, and education data plus optional honors and URLs. A local model receives only the explicitly selected profile, reviewed Experience and Projects material, and optional Captured Opportunity after per-request consent. It returns a structured material draft only; it never changes the template. A deterministic renderer remains a later, separately reviewed gate for claim-bearing output and template fidelity.
+
+## 17. Approved Change - AI-Grounded Opportunity Assessment
+
+FR-8 and FR-9 remain decision-support requirements, but the primary explanation may be produced by one explicit, local AI request rather than title/keyword matching alone. The request is grounded only in immutable approved evidence, the selected Candidate Profile summary, and the user-provided immutable Captured Opportunity revision. It produces bounded structured strengths, gaps, uncertainty, relevant evidence references, and short captured-posting excerpts; it never predicts interview, offer, hiring, or employer intent.
+
+The app retains deterministic safety disclosures for explicit Unknown/stale input and unambiguous seniority, location, or work-style constraints. Those disclosures do not replace the AI explanation or imply semantic understanding.
+
+An assessment is cached only for an exact fingerprint of profile/evidence revisions, captured-opportunity revision, model configuration, and prompt/schema version. Any change invalidates the cache and requires a new explicit consented request. The system does not fetch the URL, call cloud services, use model tools/MCP, retry automatically, or log prompt/response bodies. Personal Pursue/Priority remains a local state independent of the assessment.

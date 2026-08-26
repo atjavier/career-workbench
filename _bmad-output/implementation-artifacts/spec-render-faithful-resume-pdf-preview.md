@@ -64,6 +64,13 @@ context:
 - Given a saved or unsaved structured draft edit, when the user views Preview, then the UI accurately identifies the PDF as the unchanged original and retains current explicit save/approval behavior.
 - Given no source draft or a narrow viewport, when Resume Edit loads, then import/empty recovery remains intact and the viewer has no hidden essential control or horizontal page layout overflow.
 
+### Review Findings
+
+- [x] [Review][Patch] Replace the unsupported original-PDF recovery instruction with an honest unavailable state — preserve the editable draft but do not claim a local backup/refresh can repair the managed retained copy. [src/app/current-base-resume.tsx:47]
+- [x] [Review][Patch] Remove the retained-source availability count — it can say a source is available while the verified preview is unavailable, and the count does not help the editing task. [src/app/current-base-resume.tsx:40]
+- [x] [Review][Patch] Streamline Original PDF copy — retain the essential read-only/draft distinction and fallback link, but remove repeated labels and implementation jargon. [src/app/current-base-resume.tsx:46]
+- [x] [Review][Patch] Remove raw evidence revision identifiers from version history — internal UUIDs do not help an end user make a resume decision. [src/app/current-base-resume.tsx:57]
+
 ## Spec Change Log
 
 ## Design Notes

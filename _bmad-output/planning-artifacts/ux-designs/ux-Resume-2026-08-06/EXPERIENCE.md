@@ -3,7 +3,7 @@ name: Personal Job Discovery and Application Materials Tool
 status: final
 sources:
   - ../../prds/prd-Resume-2026-08-06/prd.md
-updated: 2026-08-25
+updated: 2026-08-26
 ---
 
 # Personal Job Discovery and Application Materials Tool — Experience Spine
@@ -234,7 +234,7 @@ The full-width header is deliberately independent of the content container's mar
 | **Jobs** | **Browse** | Familiar search field, compact filters, result count, scan-friendly job cards/rows, and an obvious listing-detail route. | Search preferences, permitted sources, source outcomes, fit rationale, freshness, and dedupe remain contextual or progressively disclosed. |
 | **Jobs** | **Applied** | Applied roles, stage, next follow-up, interview progress, and an empty state that routes to Browse. See [Applied mock](mockups/key-jobs-applied.html). | Google Sheets tracker link, connection state, authorization, sync status, and recovery live here; local tracking never depends on Sheets. |
 | **Resume** | **Edit** | A desktop split workspace: editable controls/actions on one side and a read-only local preview on the other. | Provenance, warnings, material versions, and export review remain available in the edit flow rather than competing for top-level space. |
-| **Resume** | **Experience & Projects** | Conventional experience/project management and reviewable skill/evidence chips. See [Experience & Projects mock](mockups/key-resume-projects.html). | Add project, add experience, local folder selection, optional document-for-resume workflow, and individual evidence review live here. It is deliberately local-directories-only; no online or GitHub import is offered. |
+| **Resume** | **Experience & Projects** | Conventional experience/project management and reviewable skill/evidence chips. See [Experience & Projects collection mock](mockups/key-resume-experience-projects-collection.html). | Add project, add experience, local folder selection, optional document-for-resume workflow, and individual evidence review live here. It is deliberately local-directories-only; no online or GitHub import is offered. |
 | **Settings** | Privacy, AI, data | Plain-language controls for consequential preferences and storage. See [Settings mock](mockups/key-settings.html). | Data lifecycle, provider disclosure, budget, disablement, export, deletion, and recovery are available without taking space from task workflows. |
 
 There is no standalone Applications, Evidence Library, Google Sheets, or Career Assistant destination. Existing capabilities map into the surfaces above. Experience & Projects accepts only selected local directories; no remote-GitHub import, clone, or fetch control is offered.
@@ -318,3 +318,119 @@ After confirmation, status names the saved role and company, gives a non-technic
 **Add opportunity** opens one centered native dialog from either Jobs view. Initial focus moves to **Original posting URL**; `Escape` and **Close** dismiss only while no capture or save action is pending, preserve entered text, and restore focus to the invoking **Add opportunity** control. The dialog is the only active capture layer; review and confirmation remain inside it rather than opening nested dialogs.
 
 The entry stage is deliberately compact: URL, copied role details, then **Review capture**. A valid review reveals the existing editable structured-details stage below the entry state without changing the local-only, attribution-only, or explicit-save contract. A successful save disables repeat confirmation, announces the result, and retains the existing return path to **All opportunities**. At narrow widths and 400% zoom, the dialog reflows to a single column with no hidden close path, clipped status, or horizontal scrolling. This supersedes the earlier same-page capture-card behavior in favor of a bounded dialog, while preserving all manual Opportunity Library semantics.
+
+## Approved Change - 2026-08-25: Simplified Resume Edit
+
+This change supersedes every conflicting Resume Edit rule above. It changes the Resume working model from a manual structured-draft editor to a **profile-led local-LLM generation workspace**. It does not alter the local-first, explicit-action, immutable-source, provenance, accessibility, or truthful-claim requirements.
+
+### Information architecture
+
+| Surface | Reached from | Purpose |
+|---|---|---|
+| **Resume > Edit** | Resume navigation; **Use as resume context** from a captured opportunity | Collect basic personal details, show the immutable `Resume.pdf` template, and converse with the local Resume Coach. It is the only place to request resume generation. |
+| **Profile details** | Resume > Edit | First Name, optional Middle Name, Last Name, email, phone number, education, GWA, optional Latin honors, optional LinkedIn URL, and optional GitHub URL. The profile is the user-entered source for generated identity/contact/education content. |
+| **Resume template preview** | Resume > Edit | Read-only native view of the immutable local `Resume.pdf`. It is a style/template reference, not an editable draft or a live rendering of chat output. |
+| **Experience & Projects** | Resume mini-tab | Existing selected local project/experience material and individual evidence review. It remains the source material the local model may use after review; it is not repeated in Edit. |
+| **AI settings** | Settings | Local model setup/status. It is the recovery destination for an unavailable local model; no endpoint, token, or diagnostic enters Resume Edit. |
+
+### Resume Edit behavior
+
+- Resume Edit exposes only a compact profile form, the local Resume Coach, and the immutable template preview. It removes the manual resume-section textareas, review summary, warnings/proposed changes panel, evidence and skills panel, version history/approval, direct evidence-update action, technical status, and internal identifiers from the primary interface.
+- The required profile fields are First Name, Last Name, email, phone number, and education. Middle Name, GWA, Latin honors, LinkedIn URL, and GitHub URL are optional. Validation uses field labels and direct plain-language errors; optional fields are never represented as missing defects.
+- `Resume.pdf` is a fixed local visual template/reference. It is never mutated, never described as a generated draft, and never treated as proof that generated content already matches its layout. The model returns structured content only; a future deterministic renderer is responsible for creating a generated material that follows the approved template contract.
+- Resume Coach is the only tailoring/generation input. It can answer questions about the resume, request missing context, and propose or generate structured content from the saved profile, a deliberately selected captured opportunity when present, and reviewed Experience & Projects material. It never reads an arbitrary folder, fetches a URL, silently sends data, edits the PDF, modifies profile fields, approves evidence, or exports/submits anything.
+- Before the first generation and after local model configuration changes, show a brief plain-language local-only disclosure and the selected categories (profile, selected opportunity if any, reviewed experiences/projects). Do not show prompts, model output diagnostics, token values, endpoint details, or raw provenance in the primary conversation.
+- Generated content is a separate reviewable material draft. The only primary-screen proposal controls are **Use this version** and **Keep current**. Detailed claim support, warning resolution, approval, and export occur in the later material-review flow, not as cards beside the template.
+
+### Local AI state pattern
+
+| State | Resume Edit treatment |
+|---|---|
+| **Ready** | Profile form, chat input, and one explicit generation action are available. The template remains visibly read-only. |
+| **Generating** | Preserve typed chat/profile context; announce that a local draft is being prepared; prevent duplicate generation. No background retry. |
+| **Unavailable** | Keep profile and template readable. Replace Coach controls with: “Local AI is not ready. You can still view your resume template.” Provide one **Set up local AI** action to Settings. No manual resume editor or fallback generation is shown. |
+| **Invalid response or generation failure** | Preserve the profile and prior accepted draft; show one concise retry action after the user returns to ready state. Do not persist partial output, retry automatically, or expose technical diagnostics. |
+
+### Accessibility and responsive behavior
+
+- On desktop, Profile & Resume Coach and Resume template sit in two clearly labelled panes. At narrow widths or 400% zoom, order is Profile, Coach/unavailable state, then Resume template; all fields are single-column and no content/action requires horizontal scrolling.
+- The chat input, generate button, proposal controls, and local-AI recovery action are keyboard operable with visible focus and announced status. The template iframe has a precise read-only title and a visible open-PDF fallback.
+- Any selected opportunity context is named in plain language and can be cleared before generation. The UI never implies that profile, project, experience, or opportunity data was sent until the user invokes the explicit local generation action.
+
+### Key flow: Adrian creates a tailored resume
+
+1. Adrian opens **Resume > Edit** and completes the short profile form.
+2. He adds or reviews his local work samples in **Experience & Projects** when needed.
+3. He optionally returns from a captured opportunity with that role visibly selected.
+4. He reads the immutable Resume template beside the Coach and asks a plain-language question or requests a tailored resume.
+5. He confirms the local data categories and explicitly starts generation.
+6. **Climax:** The Coach presents one concise proposed version; Adrian chooses **Use this version** or **Keep current** without touching the source PDF.
+7. A later material-review flow handles claim support, approval, and export before any file is produced.
+
+Failure: if local AI is unavailable, Adrian can still read the template and save profile details. The page offers **Set up local AI**; it does not offer manual resume rewriting, cloud fallback, or a false recovery path.
+
+### Validation resolutions
+
+- **Save before generate.** A successful **Save details** is required before any Coach model action. The profile card states either **Details saved** or **Save details to generate**. Education includes the short hint: “School, degree/program, and expected or graduation year.” On validation failure, a linked error summary precedes the form, each error is programmatically associated with its field, and focus moves to the summary or first invalid field after submission.
+- **One explicit local request boundary.** Every Coach model response, including an answer to a question, is an explicit request. Before it, a compact consent panel names **LM Studio on this device (127.0.0.1)** and **Qwen3.5-9B**, then lists the exact saved profile fields, selected opportunity (if any), and individually selected reviewed experiences/projects that will be included. It refreshes whenever that input selection changes. Tokens, endpoint diagnostics, raw prompts, raw model output, and provenance identifiers remain hidden.
+- **Clear readiness and selection.** The Coach names the exact missing prerequisite and links to it: save profile details, choose reviewed material, or set up local AI. Selected opportunity context is a compact **Tailoring for: [role]** row with **Change** and **Clear** controls; it is session-scoped and clears on a new session unless Adrian deliberately selects it again. The consent panel offers **Change selection** for the reviewed materials and shows their readable names, not just a count.
+- **Readable proposals.** A generated proposal exposes an accessible full-content view or section summary before **Use as draft** is enabled. Choosing **Use as draft** creates a separate local material draft, announces that the template is unchanged, and shows one **Review draft** action. **Keep current** leaves the current material draft unchanged. Each new generation is a separate pending draft; no generation silently replaces an accepted draft.
+- **Accessible Coach state.** The Coach has a persistently labelled prompt, semantic chronological transcript, and atomic polite updates for a completed reply or state change. During generation the region is `aria-busy`; focus remains on the initiating control/input, duplicate generation is prevented with an announced reason, and completion/failure is announced without rereading the transcript. A failed request preserves the submitted and typed prompt plus profile and prior accepted draft; **Try again** appears only when the local model is ready, otherwise **Set up local AI** is the single recovery action. Leaving Edit for Settings preserves unsaved profile values and returns focus to the invoking recovery control on return.
+- **Accessible template fallback.** The template frame is constrained to its column, never introduces nested horizontal scrolling at 320 CSS px/400% zoom, and allows visible keyboard entry/exit. Its failure state is announced and retains a visible **Open or download Resume.pdf** fallback. If the PDF is not meaningfully accessible to the user’s viewer, a separate accessible template description is offered. Persistent helper copy says: “Reference only — generated drafts open in review after you choose one.”
+- **Canonical precedence.** The Resume-specific component and behavior text in this section and the paired `DESIGN.md` Profile-led Resume Workspace are the only current Resume Edit contract. Earlier references to manual textareas, accepting proposals into a live preview, warning counts, version controls, evidence panels, and manual drafting are obsolete for Resume > Edit; their review/provenance safeguards move to Experience & Projects and the later material-review flow.
+
+## Approved Change - 2026-08-26: Experience & Projects Collection
+
+This change supersedes every conflicting Experience & Projects, Evidence Library, Base Resume extraction, typed-experience, file-picker, and side-review-dashboard rule above. It does not alter the immutable `Resume.pdf` template or the evidence review/provenance guardrails.
+
+### Information architecture and collection model
+
+| Surface / control | Behavior |
+|---|---|
+| **Resume > Experience & Projects** | Uses the same outer Resume mini-tabs as **Edit**. Its own inner tabs, **Projects** and **Experiences**, show only the selected category. The page is a compact collection, not a form dashboard. |
+| **Collection row** | Shows the readable import name, one bounded derived summary, document count, and plain-language evidence review state. **View details** expands one row in place to show copied Markdown document names and individual evidence review entries. It is keyboard operable and retains its focus on expand/collapse. |
+| **Add project folder** | Opens one explicit folder-selection flow. It imports only safe, readable Markdown recursively from the chosen local project folder; source files and folders are never changed. |
+| **Add experience folder** | Uses the same explicit folder-selection flow and recursive Markdown boundary as project import, but stores the import as an Experience. Typed content and a one-file chooser are removed from the active experience flow. |
+| **Evidence review** | Remains available only from an expanded collection row. Its existing individual approve, edit, reject, and remove actions retain provenance and review-state behavior. |
+| **Base Resume extraction** | Removed from this surface. The immutable `Resume.pdf` remains the visual template in Resume > Edit, never an input to extract, parse, or re-import here. Legacy Base Resume history may remain retained but is not exposed in the active collection. |
+
+### Summary and parsing contract
+
+- [ASSUMPTION] A row summary is derived locally from the first meaningful non-heading Markdown paragraph after stripping list syntax and ignoring blank lines, fenced code, HTML comments, and front matter. It is normalized to one sentence and capped at 240 characters; it must not synthesize or embellish project facts.
+- If no paragraph is present, use the first eligible factual line under the existing 5,000-character safety limit; if none exists, say **No summary found yet.** The row remains importable and reviewable.
+- The parser must retain exact source document name, heading, and line number for every candidate evidence item. It must ignore fenced code, reject invalid UTF-8, reject symlinks/reparse points and unsafe paths, cap document and candidate counts, and make no network request, background scan, model call, or source-folder mutation.
+- The parser must not treat every visible nonblank line as a human-facing summary. Evidence candidates stay separate from row presentation. A later structured Markdown parser may improve heading/list semantics only when it preserves these provenance, integrity, and fallback rules.
+
+### States, interaction, and accessibility
+
+| State | Treatment |
+|---|---|
+| **Empty Projects / Experiences** | Name the selected category, explain that its Markdown remains local, and provide one **Add [category] folder** action. Do not show the other category's empty state or legacy Base Resume controls. |
+| **Choosing / importing** | Keep the trigger unavailable against duplicate submit, preserve the selected category and typed display name, and announce concise atomic progress. No import begins until the folder is deliberately submitted. |
+| **Unreadable, unsafe, or empty folder** | Keep the collection unchanged; provide one concise error and safe next action. Do not expose an absolute path, raw adapter detail, or partial import. |
+| **Imported** | Announce the imported category and document count. New evidence is plainly **Ready for review**; it is not available to Resume Coach until individually approved. |
+| **Expanded details** | The trigger exposes `aria-expanded` and controls its details region. Document names and review actions follow logical reading order; collapse returns focus to its trigger. |
+
+At 320 CSS px and 400% zoom, outer/inner tabs, the add control, collection rows, and expanded review actions reflow into one column without horizontal scrolling. Every add button, tab, expand/collapse control, and evidence review action has a visible focus indicator and accessible name. Status updates use one polite atomic region. The collection shows no local paths, IDs, digests, raw parser diagnostics, prompts, or Base Resume extraction controls.
+
+### Key flow: Adrian adds an experience folder
+
+1. Adrian opens **Resume > Experience & Projects** and chooses **Experiences**.
+2. He selects **Add experience folder**, reads that only local Markdown will be copied, and deliberately chooses a folder.
+3. The workspace validates the bounded local contents and copies eligible Markdown without changing the source.
+4. **Climax:** A new Experience row appears with its derived summary, document count, and **Ready for review** state; Adrian can immediately expand it to inspect and individually review evidence.
+5. Later, only approved entries become selectable for Resume Coach. `Resume.pdf` remains unchanged in Resume > Edit throughout.
+
+Failure: an invalid, empty, oversized, linked, or unreadable folder leaves both collection and source unchanged, retains the selected tab, announces the problem, and offers a safe retry. No Base Resume extraction, cloud, manual-editor, or automatic fallback is offered.
+
+## Approved Change - 2026-08-26: Source-folder resume documentation
+
+### Application-native correction (2026-08-26)
+
+The prior external-Codex handoff interpretation is superseded. Adrian selects a real Project or Experience folder in the app, gives the registered local LLM documentation skill explicit consent, and sees bounded progress and the three proposed review artifacts returned by the application agent. The UI does not ask Adrian to copy a prompt into Codex. The agent may use only its declared skills and typed local file tools; every read/write path, extension, limit, and prohibited operation is enforced by the application boundary. Import and individual evidence approval remain explicit gates.
+
+This supersedes every rule above that treats a Project or Experience source folder as a Markdown import. Adrian selects a real working folder containing code and related project material. The active flow does not copy that source into the evidence library or make it evidence; it explicitly invokes a resume-evidence documentation skill to inspect safe local material and create three proposed/unreviewed artifacts outside the source: `project-overview.md`, `resume-evidence.md`, and `resume-bullet-candidates.md`.
+
+The documentation skill is local, bounded, and read-only: it accepts safe textual documentation, manifest, configuration, source, and test files within an allowlist and exclusion policy; it does not follow links, read arbitrary binary/dependency/generated content, alter the source, watch folders, call a network, or approve evidence. Every retained fact is atomic, selected-folder-relative, and heading/line traceable; unknown metrics, ownership, dates, users, deployment, outcomes, and skills remain explicit unknowns. The three outputs require an explicit import and individual evidence approval before Resume Coach can use them.
+
+The selected inner tab has one **Document project folder** or **Document experience folder** action. Its compact disclosure names the selected-folder scope, non-mutation guarantee, proposed-output consequence, and recovery path. Collection summaries are derived only from `project-overview.md` using the bounded deterministic rule; details show generated artifact names and individual review controls but never raw source paths, IDs, digests, prompts, model data, or diagnostics. `Resume.pdf` remains an immutable template in Resume > Edit and is not read, imported, or extracted here.

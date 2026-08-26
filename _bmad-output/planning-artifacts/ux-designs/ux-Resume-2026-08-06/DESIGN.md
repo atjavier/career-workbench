@@ -4,33 +4,33 @@ description: Private, evidence-led job discovery, material review, and applicati
 status: final
 sources:
   - ../../prds/prd-Resume-2026-08-06/prd.md
-updated: 2026-08-25
+updated: 2026-08-26
 colors:
-  surface-base: '#F6F8F4'
+  surface-base: '#F5F7F3'
   surface-raised: '#FFFFFF'
-  surface-subtle: '#EEF3EE'
-  ink-primary: '#18352C'
-  ink-secondary: '#60756D'
-  border: '#D7E1DA'
-  header: '#173B2D'
+  surface-subtle: '#EDF3EE'
+  ink-primary: '#17372B'
+  ink-secondary: '#62766D'
+  border: '#D6E1D8'
+  header: '#14382A'
   header-foreground: '#F6F8F4'
-  primary: '#2F6B57'
+  primary: '#2F7058'
   primary-foreground: '#FFFFFF'
-  active: '#E3EFE8'
+  active: '#DCECE1'
   success: '#1F6B4F'
   warning: '#75620A'
   danger: '#B42318'
-  focus-ring: '#176B4C'
+  focus-ring: '#126C4A'
 typography:
-  display: { fontFamily: 'system-ui, sans-serif', fontSize: 28px, fontWeight: '700', lineHeight: '1.2' }
+  display: { fontFamily: 'system-ui, sans-serif', fontSize: 31px, fontWeight: '700', lineHeight: '1.2' }
   heading: { fontFamily: 'system-ui, sans-serif', fontSize: 20px, fontWeight: '650', lineHeight: '1.3' }
-  body: { fontFamily: 'system-ui, sans-serif', fontSize: 16px, fontWeight: '400', lineHeight: '1.5' }
+  body: { fontFamily: 'system-ui, sans-serif', fontSize: 15px, fontWeight: '400', lineHeight: '1.5' }
   meta: { fontFamily: 'system-ui, sans-serif', fontSize: 14px, fontWeight: '400', lineHeight: '1.4' }
 rounded: { sm: 6px, md: 10px, lg: 14px }
 spacing: { '1': 4px, '2': 8px, '3': 12px, '4': 16px, '5': 24px, '6': 32px }
 components:
   button-primary: { background: '{colors.primary}', foreground: '{colors.primary-foreground}', radius: '{rounded.md}' }
-  panel: { background: '{colors.surface-raised}', border: '{colors.border}', radius: '{rounded.md}' }
+  panel: { background: '{colors.surface-raised}', border: '{colors.border}', radius: 12px }
   application-header: { background: '{colors.header}', foreground: '{colors.header-foreground}', width: full-bleed }
   selected-tab: { background: '{colors.active}', foreground: '{colors.ink-primary}' }
 ---
@@ -84,7 +84,8 @@ All inspection panels use `{components.panel}`. The following visual names inten
 | **Job listing card** | Bordered, scan-friendly job-board record with job title and company as the anchor; location/work style, freshness, and a plain application state follow. The card presents one clear next step and does not expose raw normalized fields, IDs, or diagnostic data. Illustrated in [Jobs Browse mock](mockups/key-jobs-browse.html). |
 | **Selected job detail** | Focused reading surface for posting details and a clear application action. **Use as resume context** opens Resume Coach with this listing explicitly selected; it is never an autonomous application or hidden AI action. Illustrated in [Job Detail mock](mockups/key-job-detail.html). |
 | **Applied job record** | Compact record in Jobs > Applied that leads with role, company, application stage, next follow-up, and interview progress. The optional tracker link and Google connection/sync status are subordinate contextual utilities. Illustrated in [Applied mock](mockups/key-jobs-applied.html). |
-| **Resume mini-tab** | Plain text-labelled **Edit** and **Experience & Projects** controls within Resume. The latter houses local folder selection and reviewable project evidence; it replaces the separate Evidence Library destination and offers no online repository import. Illustrated in [Experience & Projects mock](mockups/key-resume-projects.html). |
+| **Resume mini-tab** | Plain text-labelled **Edit** and **Experience & Projects** controls within Resume, using the same type scale, baseline, divider, selected underline, focus indicator, and responsive spacing on both surfaces. The latter replaces the separate Evidence Library destination and offers no online repository import. Illustrated in [Experience & Projects collection mock](mockups/key-resume-experience-projects-collection.html). |
+| **Experience & Projects collection** | A compact single-column collection beneath the Resume mini-tabs. A text-labelled inner tab selects **Projects** or **Experiences**; the selected state uses the same non-color underline convention as the Resume mini-tabs. Each closed row leads with its readable name, one bounded summary line, document count, and review state. An explicit **View details** control expands the row in place; it never reveals a local path, identifier, digest, prompt, or raw parser diagnostic. |
 | **Resume Coach** | The sole working interface in Resume's left pane: a calm, contained chat that asks for intent, provides employer-screening and resume-specialist guidance, and offers reviewable change proposals. It does not expose a wall of resume-section forms. Coach guidance uses a soft forest-tint message bubble; Adrian's prompt or response uses a raised neutral bubble, giving the conversation quiet structure. Visible context, data-transfer disclosure, proposal diff, Accept / Keep current controls, and opt-in action are more prominent than decorative chat styling. |
 | **Local draft status chip** | Compact text-first status treatment in the Resume preview header, such as **Ready to review** or **Needs review**. It pairs wording with state and never implies that an export or employer review occurred. |
 | **Experience / skill chip** | Compact rounded label for a reviewed skill, experience, or evidence category. It wraps at narrow widths and never makes eligibility depend on color. |
@@ -139,3 +140,41 @@ Use the exact Jobs Browse visual grammar everywhere: the 70px deep-forest applic
 **Add opportunity** opens a centered, elevated dialog rather than expanding a page-level capture card. The dialog is a focused working surface, not a shrunken page: on desktop it is 640px wide (or the available viewport minus 48px), has a 15px radius, `#F8FBF8` surface, `#C9DDD0` boundary, and the same restrained forest-tinted shadow used by key task surfaces. A low-opacity deep-forest backdrop quiets the library beneath it without making the workspace feel blocked or heavy.
 
 The dialog header leads with **Add an opportunity**, a single short local-only reassurance, and a compact text-close control aligned at the upper right. The entry stage contains URL first, then copied role details, with a narrow vertical rhythm: 12px label-to-input grouping, 16px between fields, and an end-aligned **Review capture** action. The text area is intentionally compact at entry; the larger, editable review stage earns the extra vertical space only after Adrian chooses to review the capture. At phone widths, the dialog becomes a near-full-width sheet with 16px inset; it still retains the same raised-surface and single-column hierarchy. This change supersedes earlier capture-card placement guidance while retaining the canonical [Jobs Browse mock](mockups/key-jobs-browse.html) visual grammar.
+
+## Approved Change - 2026-08-25: Profile-led Resume Workspace
+
+This change supersedes every conflicting Resume editor, Current Base Resume, proposal, warning, evidence-panel, version-approval, and technical-status treatment above. Resume keeps the shared Jobs Browse visual grammar and its two mini-tabs, **Edit** and **Experience & Projects**, but Edit is reduced to the content a jobseeker needs to see.
+
+The desktop workspace has a balanced split: **Profile & Resume Coach** on the left and **Resume template** on the right. The left pane begins with one compact, scannable profile card, not a section-by-section resume editor. It groups First Name, optional Middle Name, Last Name, email, phone number, education, GWA, optional Latin honors, and optional LinkedIn/GitHub URLs into readable personal/contact and education regions. One clear **Save details** action follows the fields. No internal record state, source count, audit term, draft revision, warning count, evidence chip, raw identifier, or developer-focused status appears in this composition.
+
+Below the profile card, a contained **Resume Coach** conversation is the sole tailoring interface. Its default state uses one short introductory message and a single natural-language prompt. When the configured local LLM is ready, it exposes one intentional **Generate resume** action after the chat has enough context. A proposal, when present, shows concise resume wording and only **Use this version** / **Keep current** controls; provenance and detailed claim review remain outside this primary screen. The model must never be represented as editing the PDF itself.
+
+The right pane is titled **Resume template**, with a restrained read-only label and the native PDF page view on a soft backing. It is an immutable visual reference from `Resume.pdf`, never a live mirror of profile typing or chat content. If the local LLM is unavailable, the left pane collapses to one quiet unavailable state with one **Set up local AI** action; the profile card and template preview remain readable, while chat, generation, proposal, and export controls do not appear. The unavailable state names no endpoint, token, diagnostic, or implementation detail.
+
+At narrow widths, the profile card, Coach/unavailable state, and template preview form one named vertical sequence. Inputs remain one column; no horizontal scrolling or hidden action is permitted at 320 CSS px or 400% zoom. The design continues to use `{colors.surface-base}`, `{components.panel}`, `{components.button-primary}`, `{rounded.md}`, and the single restrained preview shadow. The canonical visual reference will be [Resume Edit mock](mockups/key-resume-edit.html); this spine wins on conflict.
+
+## Approved Change - 2026-08-25: AI-Grounded Fit Assessment
+
+An Opportunity detail presents **Assess fit** as one explicit local-AI action after a concise disclosure of the selected profile/evidence and captured role details. The assessment state is calm and bounded: preparing, assessing, ready, unavailable, or error. A ready Fit Explanation has equally clear sections for strengths, gaps and uncertainty, deterministic safety disclosures, approved evidence, and short captured-posting language. It says “AI guidance, not a hiring prediction” beside the assessment summary.
+
+The normal view never shows raw IDs, digests, model diagnostics, the full copied description, or hidden reasoning. Provenance controls name Approved evidence and Captured posting excerpt. A cached matching assessment indicates that it is based on the current selected material without implying a background refresh. **Pursue** and **Priority** are clearly personal choices, visually and semantically separate from the AI guidance. **Open original page on {host}** remains an explicit outbound handoff with the existing no-prefill/no-submission explanation.
+
+## Approved Change - 2026-08-26: Compact Experience & Projects Collection
+
+This change supersedes earlier visual treatment that presents Experience & Projects as a generic Evidence Library, a multi-form action wall, a side review dashboard, or a Base Resume extraction surface. It preserves the polished Muted Forest tokens and Resume mini-tab grammar exactly. The active page uses the same 31px Resume title, 15px supporting copy, tab underline, `{colors.border}` divider, `{colors.surface-raised}` collection surface, `{rounded.md}` controls, and `{colors.focus-ring}` focus treatment as Resume > Edit.
+
+The page contains one compact add control for the selected inner tab and one collection. Projects and Experiences are never visually mixed. A collection row contains a readable title, one bounded summary line, document count, and plain-language review state. Expanding a row reveals the source Markdown document names and its unreviewed/approved evidence items with their existing individual review controls. It does not expose local absolute paths, parser diagnostics, raw evidence IDs, Base Resume records, or `Resume.pdf` as an extraction source.
+
+The add flow is a compact inline panel or one native dialog, never a parallel wall of forms. **Add project folder** and **Add experience folder** use identical control shape and feedback placement; each names that only readable Markdown in the chosen local folder will be copied, that source files remain unchanged, and that review is still required. The empty state retains one forward action for the selected inner tab. The reference composition is [Experience & Projects collection mock](mockups/key-resume-experience-projects-collection.html); this spine wins on conflict.
+
+## Approved Change - 2026-08-26: Source-folder resume documentation
+
+### Application-native correction (2026-08-26)
+
+The collection actions invoke the registered local-LLM resume documentation skill after explicit consent. The page never displays a Codex prompt or developer handoff. Progress, proposed-document completion, and safe recovery use the compact Resume status treatment; private prompts, tool traces, raw paths, model diagnostics, and credentials remain hidden.
+
+This supersedes the Markdown-folder add flow above. The selected Project or Experience folder is an actual working folder that may contain source code, tests, documentation, manifests, configuration, assets, and generated material. The page does not copy or parse that raw folder as evidence. Instead, its compact action is **Document project folder** or **Document experience folder**, which invokes the dedicated, explicitly selected-source resume-evidence documentation skill.
+
+The skill is local, bounded, and read-only. It examines safe textual documentation, manifest, configuration, source, and test material under a declared exclusion policy; it never follows links, reads arbitrary binary/generated/dependency material, changes the source, watches it, or approves evidence. It produces three proposed/unreviewed Markdown artifacts outside the source: `project-overview.md`, `resume-evidence.md`, and `resume-bullet-candidates.md`. Those artifacts require explicit import and individual evidence approval before Resume Coach can use them.
+
+Collection summaries derive only from the generated `project-overview.md`, not source code or an AI assertion: ignore front matter, comments, headings, blank lines, and fences; normalize one leading list marker; display the first meaningful paragraph's first sentence within 240 characters; otherwise show **No summary found yet.** Details may show generated artifact names and individual evidence review controls, never raw source paths, IDs, digests, prompts, model output, or diagnostics. `Resume.pdf` remains the immutable Resume Edit template and never appears in this flow.

@@ -15,7 +15,7 @@
 # The developer moves it to in-progress, then review; code review marks it done.
 
 generated: 2026-08-25
-last_updated: 2026-08-25
+last_updated: 2026-08-26
 project: Resume
 project_key: NOKEY
 tracking_system: file-system
@@ -40,7 +40,7 @@ development_status:
   1-5-build-resume-evidence-library: done
   1-6-parse-and-version-current-base-resume: done
   1-7-document-project-for-resume: done
-  1-8-create-resume-evidence-documenter-skill: review
+  1-8-create-resume-evidence-documenter-skill: done
   epic-1-retrospective: optional
 
   epic-2: done
@@ -52,11 +52,11 @@ development_status:
 
   epic-3: in-progress
   3-1-calculate-a-versioned-fit-assessment: review
-  3-2-inspect-fit-provenance-and-decide-to-pursue: backlog
+  3-2-inspect-fit-provenance-and-decide-to-pursue: done
   epic-3-retrospective: optional
 
-  epic-4: backlog
-  4-1-connect-the-local-drafting-model-safely: backlog
+  epic-4: in-progress
+  4-1-connect-the-local-drafting-model-safely: review
   4-2-generate-provenance-backed-draft-content: backlog
   4-3-render-versioned-latex-materials: backlog
   4-4-approve-and-export-immutable-material-versions: backlog
@@ -79,3 +79,11 @@ development_status:
   7-3-confirm-and-preserve-captured-opportunity-details: done
   7-4-replace-discovery-states-with-capture-and-library-states: done
   epic-7-retrospective: optional
+
+  epic-8: in-progress
+  8-1-version-candidate-profile-and-designate-resume-template: done
+  8-2-build-simplified-resume-edit-and-preview-only-state: done
+  8-3-provide-safe-local-resume-coach-requests: done
+  8-4-hand-off-structured-material-drafts-for-review: done
+  8-5-refine-experience-and-projects-collection: done
+  epic-8-retrospective: optional
