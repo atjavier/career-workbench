@@ -319,6 +319,37 @@ button, input, textarea, select { font: inherit; }
 .resume-view-tabs a[aria-current="page"] { border-bottom-color: var(--primary); color: var(--ink); }
 .resume-view-tabs span { cursor: not-allowed; }
 .resume-view-tabs small { display: block; font-size: 11px; font-weight: 600; }
+.experience-projects-workspace { display: block; }
+.experience-projects-collection { max-width: 920px; }
+.experience-projects-intro { border-bottom: 1px solid var(--border); margin-bottom: 18px; padding-bottom: 16px; }
+.experience-projects-intro h2 { font-size: 20px; margin: 0; }
+.experience-projects-intro p { color: var(--muted-ink); margin-bottom: 0; }
+.experience-project-tabs { display: flex; gap: 18px; margin-bottom: 16px; }
+.experience-project-tabs button { background: transparent; border: 0; border-bottom: 3px solid transparent; border-radius: 0; color: var(--muted-ink); font-size: 14px; font-weight: 730; margin: 0; padding: 9px 2px; }
+.experience-project-tabs button[aria-selected="true"] { border-bottom-color: var(--primary); color: var(--ink); }
+.experience-project-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 12px; margin: 0 0 14px; }
+.experience-project-actions p { color: var(--muted-ink); flex: 1 1 24rem; font-size: 14px; margin: 0; }
+.documentation-handoff { margin: 0 0 12px; max-width: 760px; }
+.documentation-handoff h3 { margin-top: 0; }
+.documentation-prompt { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; min-height: 13rem; }
+.generated-document-import { display: grid; gap: 8px; margin-top: 16px; max-width: 38rem; }
+.generated-document-import button { justify-self: start; }
+.collection-empty { background: var(--surface-subtle); border: 1px dashed var(--border); border-radius: 10px; padding: 18px; }
+.collection-empty h3, .collection-empty p { margin: 0; }
+.collection-empty p { color: var(--muted-ink); margin-top: 6px; }
+.experience-project-list { display: grid; gap: 10px; list-style: none; margin: 0; padding: 0; }
+.experience-project-row { background: var(--surface-raised); border: 1px solid var(--border); border-radius: 10px; display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr) auto; padding: 16px; }
+.experience-project-row h3 { font-size: 16px; margin: 0; }
+.experience-project-row > div > p { margin: 7px 0 0; }
+.collection-meta { color: var(--muted-ink); font-size: 13px; }
+.experience-project-row > button { align-self: start; margin: 0; }
+.experience-project-details { border-top: 1px solid var(--border); grid-column: 1 / -1; padding-top: 12px; }
+.experience-project-details > p { color: var(--muted-ink); font-size: 14px; }
+.experience-project-details ul { display: grid; gap: 10px; list-style: none; margin: 12px 0; padding: 0; }
+.experience-project-details li { border-left: 3px solid var(--border); padding-left: 12px; }
+.experience-project-details li p { margin: 0 0 6px; }
+.experience-project-details form { display: flex; flex-wrap: wrap; gap: 8px; }
+.experience-project-details form button { margin: 0; }
 .resume-review-band { align-items: center; background: var(--surface-subtle); border: 1px solid var(--border); border-radius: 10px; display: flex; gap: 14px; justify-content: space-between; margin-bottom: 18px; padding: 12px 15px; }
 .resume-review-band h2, .resume-review-band p { margin: 0; }
 .resume-review-band h2 { font-size: 14px; }
@@ -372,10 +403,60 @@ button, input, textarea, select { font: inherit; }
 .resume-history summary, .resume-version-history summary { color: var(--ink); cursor: pointer; font-weight: 720; }
 .resume-history > *, .resume-version-history > * { overflow-wrap: anywhere; }
 
+/* Profile-led Resume Edit keeps the template immutable and the Coach truthful until local AI is configured. */
+.resume-profile-layout { background: var(--surface-raised); border: 1px solid #D4E0D7; border-radius: 15px; box-shadow: var(--jobs-shadow); display: grid; grid-template-columns: minmax(15rem, 0.42fr) minmax(0, 1fr); overflow: hidden; }
+.resume-profile-pane { background: #F7FAF6; min-width: 0; }
+.resume-profile-card, .resume-coach-unavailable { min-width: 0; padding: 24px; }
+.resume-profile-card { border-bottom: 0; }
+.resume-profile-groups { display: grid; gap: 0; }
+.resume-profile-group { border-top: 1px solid #DBE5DB; display: grid; gap: 18px; grid-template-columns: minmax(9rem, 0.3fr) minmax(0, 1fr); padding: 18px 0; }
+.resume-profile-group:first-child { border-top: 0; padding-top: 0; }
+.resume-profile-category { align-self: start; padding-top: 2px; }
+.resume-profile-category .eyebrow { color: #4C6D5B; font-size: 11px; margin: 0 0 4px; }
+.resume-profile-category h3 { font-size: 16px; letter-spacing: -0.015em; line-height: 1.25; margin: 0; }
+.resume-profile-fields { display: grid; gap: 12px 14px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.resume-profile-field { display: grid; gap: 6px; min-width: 0; }
+.resume-profile-field label, .resume-profile-education-hint { color: var(--muted-ink); font-size: 12px; font-weight: 720; }
+.resume-profile-field input { border-color: #B8CABD; border-radius: 8px; margin: 0; min-width: 0; padding: 10px 11px; width: 100%; }
+.resume-profile-error-summary { background: #FFF5F3; border-left: 3px solid var(--error); margin: 0 0 14px; padding: 10px 12px; }
+.resume-profile-error-summary:focus { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
+.resume-profile-error-summary p, .field-error, .resume-profile-education-hint { margin: 5px 0 0; }
+.field-error { color: var(--error); font-size: 13px; }
+.resume-profile-save { align-items: center; display: flex; flex-wrap: wrap; gap: 12px; margin-top: 16px; }
+.resume-profile-save p { color: var(--muted-ink); font-size: 13px; margin: 0; }
+.resume-coach-unavailable { background: var(--surface-subtle); border-right: 1px solid #DBE5DB; }
+.resume-coach-unavailable p { margin: 0 0 14px; }
+.resume-coach-unavailable form { display: grid; gap: 12px; }
+.resume-coach-unavailable fieldset { display: grid; gap: 8px; }
+.resume-coach-unavailable select { border-color: #B8CABD; border-radius: 8px; padding: 10px 11px; }
+.material-draft-proposal, .material-draft-actions, .material-draft-review-content, .material-draft-review-state, .material-draft-unavailable { background: var(--surface-raised); border: 1px solid var(--border); border-radius: 12px; margin-top: 16px; padding: 16px; }
+.material-draft-proposal { display: grid; gap: 14px; }
+.material-draft-proposal h3, .material-draft-proposal h4, .material-draft-review-content h2, .material-draft-review-content h3, .material-draft-review-state h2 { margin: 0; }
+.material-draft-proposal section { border-top: 1px solid var(--border); padding-top: 12px; }
+.material-draft-proposal ul, .material-draft-review-content ul { display: grid; gap: 10px; margin: 10px 0 0; padding-left: 20px; }
+.material-draft-proposal li p, .material-draft-review-content li p { margin: 0 0 5px; }
+.material-draft-actions { align-items: start; display: flex; flex-wrap: wrap; gap: 10px; }
+.material-draft-actions > p, .material-draft-actions .status { flex-basis: 100%; margin: 0; }
+.material-draft-actions form { margin: 0; }
+.material-draft-actions .affirmative-action { display: inline-block; text-decoration: none; }
+.material-draft-review { max-width: 920px; }
+.material-draft-review .resume-page-head { margin-bottom: 20px; }
+.material-draft-review-state { background: var(--surface-subtle); }
+.material-draft-review-state p { color: var(--muted-ink); margin: 6px 0 0; }
+.material-draft-review-content { background: #FBFDFB; }
+.material-draft-review-content dl { display: grid; gap: 8px; margin: 0; }
+.material-draft-review-content dl div { display: grid; gap: 2px; }
+.material-draft-review-content dt { color: var(--muted-ink); font-size: 13px; font-weight: 720; }
+.material-draft-review-content dd { margin: 0; }
+
 @media (max-width: 51.25rem) {
   .workspace-shell { padding-inline: 20px; }
   .resume-editor-preview { grid-template-columns: 1fr; }
   .resume-preview-pane { border-left: 0; border-top: 1px solid #DBE5DB; }
+  .resume-profile-layout { grid-template-columns: 1fr; }
+  .resume-coach-unavailable { border-bottom: 1px solid #DBE5DB; border-right: 0; }
+  .resume-profile-group { grid-template-columns: 1fr; gap: 10px; }
+  .resume-profile-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 27.5rem) {
@@ -390,4 +471,14 @@ button, input, textarea, select { font: inherit; }
   .proposal-actions button, .resume-review-pane button, .resume-version-actions button { width: 100%; }
   .resume-paper { min-height: 0; padding: 27px 22px; }
   .resume-original-pdf-viewer { height: min(68vh, 40rem); }
+  .resume-profile-card, .resume-coach-unavailable { padding: 16px; }
+  .resume-profile-fields { grid-template-columns: 1fr; }
+  .resume-profile-save { align-items: stretch; flex-direction: column; }
+  .resume-profile-save button { width: 100%; }
+  .material-draft-actions { align-items: stretch; flex-direction: column; }
+  .material-draft-actions form, .material-draft-actions button, .material-draft-actions .affirmative-action { width: 100%; }
+  .experience-project-row { grid-template-columns: 1fr; }
+  .experience-project-row > button { justify-self: start; }
+  .experience-project-actions { align-items: stretch; flex-direction: column; }
+  .experience-project-actions .affirmative-action, .generated-document-import button { width: 100%; }
 }

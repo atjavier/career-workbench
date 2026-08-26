@@ -1,12 +1,14 @@
 import { createHash } from "node:crypto";
 import { lstat, mkdir, open, readdir, rm, writeFile } from "node:fs/promises";
 import type { Stats } from "node:fs";
-import { basename, join, relative, resolve, sep } from "node:path";
+import { basename, extname, join, relative, resolve, sep } from "node:path";
 import { WorkspaceError } from "@/domain/workspace/types";
+import { getResumeAgentSkill } from "@/domain/resume-agent/skill-registry";
 
 export type LibraryCategory = "project" | "experience";
 export type MarkdownDocument = { absolutePath: string; libraryPath: string; bytes: Uint8Array; text: string; contentDigest: string; category: LibraryCategory };
 export type CopiedLibraryContent = { documents: MarkdownDocument[]; sourceDigest: string; cleanup: () => Promise<void> };
+export type DocumentedArtifactSet = CopiedLibraryContent & { name: string; category: LibraryCategory };
 const digest = (value: string | Uint8Array) => `sha256:${createHash("sha256").update(value).digest("hex")}`;
 const decoder = new TextDecoder("utf-8", { fatal: true });
 const maxDocumentBytes = 2 * 1024 * 1024;
@@ -16,6 +18,7 @@ export function evidenceLibraryRoot(workspaceRoot?: string): string { return res
 function safeSegment(value: string): string { const result = value.trim().replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^[.\s-]+|[.\s-]+$/g, ""); if (!result || result === "." || result === ".." || reservedWindowsNames.has(result.toUpperCase())) throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "The library name needs a safe, non-empty value.", "Use a short name containing letters, numbers, spaces, dots, underscores, or hyphens."); return result; }
 function inside(root: string, target: string): boolean { const value = relative(root, target); return value !== "" && value !== ".." && !value.startsWith(`..${sep}`) && !value.includes(`${sep}..${sep}`); }
 async function requireDirectory(path: string, nextAction: string): Promise<void> { try { const info = await lstat(path); if (!info.isDirectory() || info.isSymbolicLink()) throw new Error("unsafe"); } catch { throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "The selected project folder is unavailable or unsafe.", nextAction); } }
+async function assertSafeAncestors(path: string): Promise<void> { for (let current = resolve(path); ; current = resolve(current, "..")) { const info = await lstat(current).catch(() => undefined); if (info && (info.isSymbolicLink() || (!info.isDirectory() && !info.isFile()))) throw new WorkspaceError("EVIDENCE_DOCUMENTER_INVALID", "The selected folder contains an unsafe link or entry.", "Choose a working folder without links and try again."); const parent = resolve(current, ".."); if (parent === current) return; } }
 async function bytesAndText(path: string, size: number, expected?: Pick<Stats, "dev" | "ino">): Promise<{ bytes: Uint8Array; text: string }> { if (!size || size > maxDocumentBytes) throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "A selected Markdown document is empty or too large.", "Choose Markdown files up to 2 MB and try again."); let handle; try { handle = await open(path, "r"); const opened = await handle.stat(); if (!opened.isFile() || (expected && (opened.dev !== expected.dev || opened.ino !== expected.ino))) throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "A selected Markdown document changed while it was being checked.", "Choose the project folder again and try the import."); const bytes = await handle.readFile(); if (bytes.byteLength !== size) throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "A selected Markdown document changed while it was being read.", "Choose the project folder again and try the import."); try { return { bytes, text: decoder.decode(bytes) }; } catch { throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "A selected Markdown document is not valid UTF-8 text.", "Save the document as UTF-8 Markdown and try again."); } } catch (error) { if (error instanceof WorkspaceError) throw error; throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "A selected Markdown document is unavailable or unsafe.", "Choose a readable Markdown document and try again."); } finally { await handle?.close(); } }
 export async function enumerateMarkdown(root: string, category: LibraryCategory, allowEmpty = false): Promise<MarkdownDocument[]> {
   await requireDirectory(root, "Choose an accessible project folder without links and try again."); const rootPath = resolve(root); const found: MarkdownDocument[] = [];
@@ -37,8 +40,60 @@ export async function copyExperienceMarkdown(input: { name: string; markdown?: s
   const document = { absolutePath: destination, libraryPath: relative(resolve(/* turbopackIgnore: true */ input.workspaceRoot ?? process.cwd()), destination).replaceAll("\\", "/"), ...captured, contentDigest: digest(captured.bytes), category: "experience" as const };
   return { documents: [document], sourceDigest: digest(captured.bytes), cleanup: () => cleanManaged(destination, root) };
 }
+const requiredDocumentationArtifacts = ["project-overview.md", "resume-evidence.md", "resume-bullet-candidates.md"] as const;
+const generatedFileName = (name: string) => /(?:^|[._-])(?:generated|autogen|auto-generated)(?:[._-]|$)|\.min\.(?:js|css)$/i.test(name);
+async function readDocumentationArtifacts(directory: string, category: LibraryCategory, libraryPrefix: string): Promise<MarkdownDocument[]> {
+  await requireDirectory(directory, "Choose an accessible generated-document folder without links and try again.");
+  let entries;
+  try { entries = await readdir(directory, { withFileTypes: true }); } catch { throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "The generated-document folder is unavailable or unsafe.", "Choose the completed documentation output folder and try again."); }
+  const names = entries.map((entry) => entry.name).sort();
+  if (names.length !== requiredDocumentationArtifacts.length || names.some((name, index) => name !== [...requiredDocumentationArtifacts].sort()[index])) throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "The generated-document folder must contain exactly the three required review documents.", "Choose the output folder containing project-overview.md, resume-evidence.md, and resume-bullet-candidates.md.");
+  const documents: MarkdownDocument[] = [];
+  for (const name of requiredDocumentationArtifacts) {
+    const path = join(directory, name); const metadata = await lstat(path).catch(() => undefined);
+    if (!metadata?.isFile() || metadata.isSymbolicLink()) throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "A generated review document is unavailable or unsafe.", "Run the documentation skill again into a new empty output folder.");
+    const captured = await bytesAndText(path, metadata.size, metadata);
+    documents.push({ absolutePath: path, libraryPath: `${libraryPrefix}/${name}`, ...captured, contentDigest: digest(captured.bytes), category });
+  }
+  return documents;
+}
+export async function copyDocumentedEvidenceArtifacts(input: { outputDirectory: string; name: string; category: LibraryCategory; workspaceRoot?: string }): Promise<DocumentedArtifactSet> {
+  const name = safeSegment(input.name); const source = resolve(input.outputDirectory); const root = evidenceLibraryRoot(input.workspaceRoot); const categoryRoot = input.category === "project" ? "projects" : "experiences"; const destination = join(root, categoryRoot, name);
+  if (source === root || inside(root, source)) throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "Generated documents must be outside the managed evidence library.", "Choose the separate output folder created by the documentation skill.");
+  if (!inside(root, destination)) throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "The managed import location is unsafe.", "Choose a different item name and try again.");
+  const sourceDocuments = await readDocumentationArtifacts(source, input.category, `resume-evidence/${categoryRoot}/${name}`);
+  try { await mkdir(join(root, categoryRoot), { recursive: true }); await mkdir(destination); } catch (error) { if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new WorkspaceError("EVIDENCE_LIBRARY_DUPLICATE", "That documented item has already been imported.", "Choose a different item name or review the existing collection item."); throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "The generated documents could not be copied into the managed library.", "Check local folder access and try again."); }
+  try {
+    const documents: MarkdownDocument[] = [];
+    for (const item of sourceDocuments) { const target = join(destination, item.libraryPath.split("/").at(-1)!); await writeFile(target, item.bytes, { flag: "wx" }); documents.push({ ...item, absolutePath: target }); }
+    return { name, category: input.category, documents, sourceDigest: digest(sourceDocuments.map((item) => `${item.libraryPath}:${item.contentDigest}`).join("\n")), cleanup: () => cleanManaged(destination, root) };
+  } catch (error) { await cleanManaged(destination, root); throw error; }
+}
+export async function readManagedDocumentedArtifacts(workspaceRoot?: string): Promise<Array<{ name: string; category: LibraryCategory; documents: MarkdownDocument[] }>> {
+  const root = evidenceLibraryRoot(workspaceRoot); const groups: Array<{ name: string; category: LibraryCategory; documents: MarkdownDocument[] }> = [];
+  for (const [category, directoryName] of [["project", "projects"], ["experience", "experiences"]] as const) {
+    const categoryDirectory = join(root, directoryName); const categoryInfo = await lstat(categoryDirectory).catch(() => undefined);
+    if (!categoryInfo) continue;
+    if (!categoryInfo.isDirectory() || categoryInfo.isSymbolicLink()) throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "A managed collection folder is unavailable or unsafe.", "Check the managed review documents and refresh the page.");
+    for (const entry of await readdir(categoryDirectory, { withFileTypes: true })) {
+      const itemDirectory = join(categoryDirectory, entry.name); const itemInfo = await lstat(itemDirectory);
+      if (itemInfo.isSymbolicLink()) throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "A managed collection item is unsafe.", "Check the managed review documents and refresh the page.");
+      if (!itemInfo.isDirectory()) continue; // Historical Markdown imports are intentionally outside the active collection.
+      const names = (await readdir(itemDirectory)).sort(); const hasArtifactName = names.some((name) => (requiredDocumentationArtifacts as readonly string[]).includes(name));
+      if (!hasArtifactName) continue; // Historical Markdown imports are intentionally outside the active collection.
+      groups.push({ name: entry.name, category, documents: await readDocumentationArtifacts(itemDirectory, category, `resume-evidence/${directoryName}/${entry.name}`) });
+    }
+  }
+  return groups.sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
+}
+export async function readResumeDocumentationSource(sourceDirectory: string, workspaceRoot?: string): Promise<{ files: Array<{ path: string; text: string; contentDigest: string }>; sourceDigest: string }> {
+  const source = resolve(sourceDirectory); const root = evidenceLibraryRoot(workspaceRoot); if (source === root || inside(root, source)) throw new WorkspaceError("EVIDENCE_DOCUMENTER_INVALID", "The selected source folder is not available for documentation.", "Choose the original working folder outside resume-evidence."); await requireDirectory(source, "Choose an accessible working folder without links and try again.");
+  const skill = getResumeAgentSkill("resume.document-source-folder"); const extensions = new Set(skill.allowedExtensions); const excludedDirectories = new Set(skill.excludedDirectories); const files: Array<{ path: string; text: string; contentDigest: string }> = []; let directories = 0; let entriesSeen = 0;
+  async function visit(current: string, depth: number): Promise<void> { if (depth > skill.limits.maxDepth || ++directories > skill.limits.maxDirectories) throw new WorkspaceError("EVIDENCE_DOCUMENTER_INVALID", "The selected source folder exceeds the safe inspection boundary.", "Choose a smaller working folder or exclude generated content."); await assertSafeAncestors(current); const entries = (await readdir(current, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name)); for (const entry of entries) { if (++entriesSeen > skill.limits.maxEntries) throw new WorkspaceError("EVIDENCE_DOCUMENTER_INVALID", "The selected source folder exceeds the safe inspection boundary.", "Choose a smaller working folder or exclude generated content."); const path = join(current, entry.name); const info = await lstat(path); if (info.isSymbolicLink()) throw new WorkspaceError("EVIDENCE_DOCUMENTER_INVALID", "The selected source folder contains a link or reparse point.", "Choose a working folder without links and try again."); if (info.isDirectory()) { if (!excludedDirectories.has(entry.name.toLowerCase())) await visit(path, depth + 1); continue; } if (!info.isFile() || generatedFileName(entry.name) || !extensions.has(extname(entry.name).toLowerCase()) || info.size === 0 || info.size > skill.limits.maxFileBytes || files.length >= skill.limits.maxFiles) continue; const captured = await bytesAndText(path, info.size, info); const relativePath = relative(source, path).replaceAll("\\", "/"); const candidate = { path: relativePath, text: captured.text, contentDigest: digest(captured.bytes) }; if (JSON.stringify([...files, candidate]).length > skill.limits.maxSnapshotChars) continue; files.push(candidate); } }
+  await visit(source, 0); if (!files.length) throw new WorkspaceError("EVIDENCE_DOCUMENTER_INVALID", "No safe text material was found in the selected source folder.", "Choose a working folder containing readable documentation or source files."); files.sort((a, b) => a.path.localeCompare(b.path)); return { files, sourceDigest: digest(files.map((file) => `${file.path}:${file.contentDigest}`).join("\n")) };
+}
 export async function readManagedMarkdown(workspaceRoot?: string): Promise<MarkdownDocument[]> {
   const root = evidenceLibraryRoot(workspaceRoot); try { await requireDirectory(root, "Add a project or experience before refreshing the library."); } catch { throw new WorkspaceError("EVIDENCE_LIBRARY_EMPTY", "The Resume Evidence Library is empty.", "Add a project or experience, then refresh the library."); }
-  const result: MarkdownDocument[] = []; for (const [category, name] of [["project", "projects"], ["experience", "experiences"]] as const) { const categoryRoot = join(root, name); try { await lstat(categoryRoot); } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") continue; throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "A managed library folder is unavailable.", "Check the Resume Evidence Library folder and refresh again."); } result.push(...await enumerateMarkdown(categoryRoot, category, true)); }
+  const result: MarkdownDocument[] = []; for (const [category, name] of [["project", "projects"], ["experience", "experiences"]] as const) { const categoryRoot = join(root, name); try { await lstat(categoryRoot); } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") continue; throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "A managed library folder is unavailable.", "Check the Resume Evidence Library folder and refresh again."); } const documents = await enumerateMarkdown(categoryRoot, category, true); const documentedParents = new Set<string>(); for (const document of documents) { const parent = resolve(document.absolutePath, ".."); if (document.libraryPath.split("/").length === 2) { const names = (await readdir(parent)).sort(); if (names.length === requiredDocumentationArtifacts.length && names.every((entry, index) => entry === [...requiredDocumentationArtifacts].sort()[index])) documentedParents.add(parent); } } result.push(...documents.filter((document) => !documentedParents.has(resolve(document.absolutePath, "..")))); }
   if (!result.length) throw new WorkspaceError("EVIDENCE_LIBRARY_EMPTY", "The Resume Evidence Library has no Markdown documents.", "Add a project or experience, then refresh the library."); return result.map((item) => ({ ...item, libraryPath: `resume-evidence/${item.category === "project" ? "projects" : "experiences"}/${item.libraryPath}` }));
 }

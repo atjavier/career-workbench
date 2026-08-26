@@ -36,7 +36,7 @@ test("shared visual polish uses semantic actions, resilient cards, and disclosur
   assert.match(jobs, /className="affirmative-action add-opportunity-action"/);
   assert.match(applications, /applications-future-fields/);
   assert.match(current, /className="danger-action"/);
-  assert.match(current, /<details><summary>Technical support details<\/summary>/);
+  assert.doesNotMatch(current, /Technical support details|Retained evidence revision identifiers/);
   assert.match(evidence, /className="danger-action"/);
   assert.match(assistant, /className="danger-action"/);
   assert.match(storage, /danger-action/);
@@ -46,7 +46,7 @@ test("polished presentation stays local, truthful, and accessible", async () => 
   const combined = (await Promise.all(["application-shell.tsx", "compact-navigation.tsx", "job-listings.tsx", "applications.tsx", "current-base-resume.tsx", "evidence-review.tsx", "evidence-library.tsx", "career-assistant.tsx", "google-sheets-workspace.tsx", "data-storage.tsx"].map(source))).join("\n");
   assert.match(combined, /No applications to track yet/);
   assert.match(combined, /Google Sheets is not connected yet/);
-  assert.match(combined, /No scripts, remote assets, or cloud processing are used/);
+  assert.match(combined, /Editing this draft does not change the original PDF/);
   assert.match(combined, /No captured opportunities match your search/);
   assert.doesNotMatch(combined, /fetch\s*\(|setInterval|setTimeout|oauth|automatic retry|automatic scan/i);
 });

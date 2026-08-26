@@ -21,3 +21,9 @@ test("Jobs keeps the capture dialog, local search, accessible states, and narrow
   for (const token of ["copiedDescription", "contentDigest", "revisions.at(-1)"]) assert.ok(!ui.includes(token));
   assert.ok(styles.includes("overflow-wrap: anywhere"));
 });
+
+test("Fit explanation requires consent and preserves local-AI provenance and handoff safety", async () => {
+  const [ui, assessment] = await Promise.all([readFile(new URL("../src/app/job-listings.tsx", import.meta.url), "utf8"), readFile(new URL("../src/app/opportunity-assessment.tsx", import.meta.url), "utf8")]);
+  for (const token of ["OpportunityAssessment", "Fit explanation", "Assess fit", "local AI decision support", "not a hiring prediction", "Approved evidence revision", "Captured posting excerpt", "Safety context", "Save personal decision", "expectedDecisionId", "role=\"status\""]) assert.ok(`${ui}\n${assessment}`.includes(token));
+  assert.doesNotMatch(`${ui}\n${assessment}`, /fetch\s*\(|iframe|automation|refresh|source configuration|credential/i);
+});

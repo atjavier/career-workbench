@@ -6,7 +6,7 @@ import { toSafeWorkspaceError, WorkspaceError } from "@/domain/workspace/types";
 import { revalidatePath } from "next/cache";
 import { addManualEvidence, approveEvidence, editEvidence, extractEvidenceFromBaseResume, rejectEvidence, removeEvidence, recordEvidenceFailure } from "@/domain/evidence/evidence-commands";
 import { cleanupExpiredTrash, createActivityHistoryExport, createLocalBackup, permanentlyDeleteBackup, recordDataStorageFailure, restoreActivityHistoryExport, trashActivityHistoryExport } from "@/domain/data-storage/data-storage";
-import { addExperienceToEvidenceLibrary, addProjectToEvidenceLibrary, recordEvidenceLibraryFailure, refreshEvidenceLibrary } from "@/domain/evidence/evidence-library";
+import { addExperienceToEvidenceLibrary, addProjectToEvidenceLibrary, documentResumeEvidenceFolder, importDocumentedEvidenceArtifacts, recordEvidenceLibraryFailure, refreshEvidenceLibrary, resolveCollectionReviewHandle } from "@/domain/evidence/evidence-library";
 import { documentWithLocalModel } from "@/adapters/evidence-documenter/lm-studio-documenter";
 import { documentFolderForResume, recordDocumenterFailure, resolveDocumenterProposal } from "@/domain/evidence/evidence-documenter";
 import { approveCurrentBaseResumeVersion, generateCurrentBaseResumeProposals, importCurrentBaseResume, resolveCurrentBaseResumeProposal, saveCurrentBaseResumeDraft } from "@/domain/current-base-resume/current-base-resume-commands";
@@ -20,12 +20,145 @@ import { captureOpportunityDraft, OpportunityCaptureValidationError, type Opport
 import { confirmCapturedOpportunity } from "@/domain/opportunities/captured-opportunities";
 import { resolveAppDataPaths } from "@/files/app-data";
 import { applyMigrations, openDatabase } from "@/persistence/database";
+import { saveCandidateProfile, type CandidateProfileInput } from "@/domain/resume-generation/candidate-profile-commands";
+import { requestResumeCoach, resumeCoachConsentFingerprint, type ResumeCoachResponse } from "@/adapters/local-model/local-model-gateway";
+import { readLocalModelGatewayConfiguration } from "@/domain/resume-generation/local-model-configuration-commands";
+import { configureLocalModel } from "@/domain/resume-generation/local-model-configuration-commands";
+import { readCandidateProfileState } from "@/domain/resume-generation/candidate-profile-commands";
+import { listApprovedEvidence } from "@/persistence/evidence-repository";
+import { appendAuditEvent } from "@/persistence/workspace-repository";
+import { createAuditEvent } from "@/audit/audit-event";
+import { findDesignatedResumeTemplate } from "@/persistence/resume-template-repository";
+import { persistResumeCoachDraft } from "@/domain/resume-generation/resume-coach-commands";
+import { findCapturedRevision, listCapturedRevisions, parseStoredRequirements } from "@/persistence/captured-opportunities-repository";
+import { handOffMaterialDraft } from "@/domain/resume-generation/material-draft-commands";
+import { assessCapturedOpportunity, recordOpportunityDecision, type OpportunityAssessmentView } from "@/domain/fit/ai-opportunity-assessment";
 
 export type WorkspaceActionState = {
   status: "idle" | "success" | "error";
   summary: string;
   safeNextAction?: string;
 };
+
+type CandidateProfileField = keyof CandidateProfileInput;
+export type CandidateProfileActionState = WorkspaceActionState & { fieldErrors?: Partial<Record<CandidateProfileField, string>> };
+export type ResumeCoachActionState = WorkspaceActionState & { response?: ResumeCoachResponse; draftId?: string; evidenceLabels?: string[] };
+export type MaterialDraftHandoffActionState = WorkspaceActionState & { draftId?: string };
+export type OpportunityAssessmentActionState = WorkspaceActionState & { assessment?: OpportunityAssessmentView; decisionId?: string };
+
+export async function localModelSettingsAction(_: WorkspaceActionState, formData: FormData): Promise<WorkspaceActionState> {
+  try {
+    await configureLocalModel({ modelIdentifier: String(formData.get("modelIdentifier") ?? ""), token: String(formData.get("token") ?? "") });
+    revalidatePath("/settings"); revalidatePath("/resume");
+    return { status: "success", summary: "Local AI is ready to use on this computer." };
+  } catch (error) { const safe = toSafeWorkspaceError(error); return { status: "error", summary: safe.summary, safeNextAction: safe.safeNextAction }; }
+}
+
+export async function opportunityAssessmentAction(_: OpportunityAssessmentActionState, formData: FormData): Promise<OpportunityAssessmentActionState> {
+  try {
+    const command = String(formData.get("opportunityAssessmentCommand") ?? ""); const opportunityId = String(formData.get("opportunityId") ?? "");
+    if (command === "assess") { const assessment = await assessCapturedOpportunity({ opportunityId, evidenceIds: [...new Set(formData.getAll("evidenceId").map(String))], consent: formData.get("consent") === "yes" }); revalidatePath("/"); return { status: "success", summary: assessment.cached ? "Your saved local-AI fit assessment is ready." : "Your new local-AI fit assessment is ready.", assessment }; }
+    if (command === "decision") { const priority = String(formData.get("priority") ?? ""); if (priority !== "low" && priority !== "normal" && priority !== "high") throw new WorkspaceError("OPPORTUNITY_ASSESSMENT_INVALID", "Choose a valid personal priority.", "Choose low, normal, or high priority and try again."); const decision = await recordOpportunityDecision({ opportunityId, assessmentId: String(formData.get("assessmentId") ?? ""), expectedDecisionId: String(formData.get("expectedDecisionId") ?? "") || undefined, pursue: formData.get("pursue") === "yes", priority }); revalidatePath("/"); return { status: "success", summary: "Your personal opportunity decision was saved.", decisionId: decision.id }; }
+    throw new WorkspaceError("OPPORTUNITY_ASSESSMENT_INVALID", "The requested fit action is unavailable.", "Assess fit or save a personal decision again.");
+  } catch (error) { const safe = toSafeWorkspaceError(error); return { status: "error", summary: safe.summary, safeNextAction: safe.safeNextAction }; }
+}
+
+export async function resumeCoachAction(_: ResumeCoachActionState, formData: FormData): Promise<ResumeCoachActionState> {
+  const userRequest = String(formData.get("request") ?? "");
+  let auditContext: { databasePath: string; profileRevisionId: string; fingerprint: string } | undefined;
+  try {
+    if (formData.get("consent") !== "yes") throw new WorkspaceError("RESUME_COACH_INVALID", "Confirm what Resume Coach may read before sending the request.", "Select the local-model consent checkbox and try again.");
+    const configured = await readLocalModelGatewayConfiguration();
+    const connection = { configurationRevisionId: configured.id, configurationDigest: configured.configurationDigest, modelIdentifier: configured.modelIdentifier, token: configured.token };
+    const profile = await readCandidateProfileState(); if (!profile.revision) throw new WorkspaceError("RESUME_COACH_INVALID", "Save your profile details before asking Resume Coach.", "Complete and save your profile details first.");
+    const selectedIds = [...new Set(formData.getAll("evidenceId").map(String))];
+    const paths = await resolveAppDataPaths(); const db = openDatabase(paths.databasePath); let evidence; let template; let opportunity;
+    try {
+      applyMigrations(db); evidence = listApprovedEvidence(db); template = findDesignatedResumeTemplate(db);
+      const selectedOpportunityRevisionId = String(formData.get("opportunityRevisionId") ?? "");
+      if (selectedOpportunityRevisionId) {
+        const selectedRevision = findCapturedRevision(db, selectedOpportunityRevisionId);
+        const currentRevision = selectedRevision ? listCapturedRevisions(db, selectedRevision.opportunityId).at(-1) : undefined;
+        if (!selectedRevision || currentRevision?.id !== selectedRevision.id) throw new WorkspaceError("RESUME_COACH_INVALID", "The selected opportunity is no longer available.", "Choose a current local opportunity and confirm the request again.");
+        opportunity = { revisionId: selectedRevision.id, contentDigest: selectedRevision.contentDigest, title: selectedRevision.title, company: selectedRevision.company, requirements: parseStoredRequirements(selectedRevision.requirements), copiedDescription: selectedRevision.copiedDescription };
+      }
+    } finally { db.close(); }
+    if (!template) throw new WorkspaceError("RESUME_COACH_INVALID", "A verified Resume template is required before asking Resume Coach.", "Refresh Resume, then try again.");
+    const selected = evidence.filter((item) => selectedIds.includes(item.id)).map(({ id, contentDigest, factualText, sourceDocument, sourceSection }) => ({ id, contentDigest, factualText, label: `Approved evidence: ${sourceDocument} — ${sourceSection}` }));
+    if (!selected.length || selected.length !== selectedIds.length) throw new WorkspaceError("RESUME_COACH_INVALID", "Choose at least one currently approved Experience or Projects item.", "Review the approved material selection and try again.");
+    const consentNonce = String(formData.get("consentNonce") ?? "");
+    const profileSnapshot = profile.revision.canonicalContent;
+    const consentFingerprint = resumeCoachConsentFingerprint({ connection, profileRevisionId: profile.revision.id, profileDigest: profile.revision.contentDigest, profileSnapshot, templateId: template.id, templateDigest: template.contentDigest, evidence: selected, opportunity, userRequest, consentNonce });
+    if (!consentNonce) throw new WorkspaceError("RESUME_COACH_INVALID", "That local-model consent is unavailable.", "Review the disclosure and confirm the request again.");
+    auditContext = { databasePath: paths.databasePath, profileRevisionId: profile.revision.id, fingerprint: consentFingerprint };
+    const auditDb = openDatabase(paths.databasePath); try { applyMigrations(auditDb); auditDb.exec("BEGIN IMMEDIATE;"); try { auditDb.prepare("INSERT INTO resume_coach_consent_uses (consent_fingerprint, created_at) VALUES (?, ?)").run(consentFingerprint, new Date().toISOString()); appendAuditEvent(auditDb, createAuditEvent({ actor: "local-os-user", action: "resume.coach_requested", outcome: "success", entityId: profile.revision.id, contentHash: consentFingerprint })); auditDb.exec("COMMIT;"); } catch (error) { auditDb.exec("ROLLBACK;"); if (String(error).includes("UNIQUE constraint failed")) throw new WorkspaceError("RESUME_COACH_INVALID", "That local-model consent has already been used or changed.", "Review the disclosure and confirm the request again."); throw error; } } finally { auditDb.close(); }
+    const response = await requestResumeCoach({ connection, profileRevisionId: profile.revision.id, profileDigest: profile.revision.contentDigest, profileSnapshot, templateId: template.id, templateDigest: template.contentDigest, evidence: selected, opportunity, userRequest, consentNonce, consentFingerprint });
+    const draft = persistResumeCoachDraft({ databasePath: paths.databasePath, profileRevisionId: profile.revision.id, profileDigest: profile.revision.contentDigest, templateId: template.id, templateDigest: template.contentDigest, evidence: selected, opportunity: opportunity ? { revisionId: opportunity.revisionId, contentDigest: opportunity.contentDigest } : undefined, requestText: userRequest, consentFingerprint, response });
+    return { status: "success", summary: "Local AI guidance is ready to review. Your Resume template is unchanged.", response, draftId: draft.id, evidenceLabels: selected.map((item) => item.label) };
+  } catch (error) {
+    if (auditContext) { const auditDb = openDatabase(auditContext.databasePath); try { appendAuditEvent(auditDb, createAuditEvent({ actor: "local-os-user", action: "resume.coach_failed", outcome: "failure", entityId: auditContext.profileRevisionId, contentHash: auditContext.fingerprint })); } catch { /* Preserve the original safe model error. */ } finally { auditDb.close(); } }
+    const safeError = toSafeWorkspaceError(error); return { status: "error", summary: safeError.summary, safeNextAction: safeError.safeNextAction };
+  }
+}
+
+export async function materialDraftHandoffAction(_: MaterialDraftHandoffActionState, formData: FormData): Promise<MaterialDraftHandoffActionState> {
+  const draftId = String(formData.get("draftId") ?? "");
+  try {
+    await handOffMaterialDraft({ draftId });
+    revalidatePath("/resume");
+    return { status: "success", summary: "This local draft is ready for review. Your Resume template and Resume.pdf are unchanged.", draftId };
+  } catch (error) {
+    const safeError = toSafeWorkspaceError(error);
+    return { status: "error", summary: safeError.summary, safeNextAction: safeError.safeNextAction };
+  }
+}
+
+function candidateProfileFieldError(summary: string): CandidateProfileField | undefined {
+  const value = summary.toLowerCase();
+  if (value.includes("first name")) return "firstName";
+  if (value.includes("middle name")) return "middleName";
+  if (value.includes("last name")) return "lastName";
+  if (value.includes("email")) return "email";
+  if (value.includes("phone")) return "phone";
+  if (value.includes("school")) return "school";
+  if (value.includes("program")) return "program";
+  if (value.includes("graduation year")) return "graduationYear";
+  if (value.includes("gwa")) return "gwa";
+  if (value.includes("latin honors")) return "latinHonors";
+  if (value.includes("linkedin")) return "linkedInUrl";
+  if (value.includes("github")) return "githubUrl";
+  return undefined;
+}
+
+export async function saveCandidateProfileAction(_: CandidateProfileActionState, formData: FormData): Promise<CandidateProfileActionState> {
+  const expectedStateRevisionNumber = Number(formData.get("expectedStateRevisionNumber"));
+  try {
+    await saveCandidateProfile({
+      profileId: String(formData.get("profileId") ?? "") || undefined,
+      expectedStateRevisionNumber: Number.isSafeInteger(expectedStateRevisionNumber) ? expectedStateRevisionNumber : undefined,
+      values: {
+        firstName: String(formData.get("firstName") ?? ""),
+        middleName: String(formData.get("middleName") ?? ""),
+        lastName: String(formData.get("lastName") ?? ""),
+        email: String(formData.get("email") ?? ""),
+        phone: String(formData.get("phone") ?? ""),
+        school: String(formData.get("school") ?? ""),
+        program: String(formData.get("program") ?? ""),
+        graduationYear: String(formData.get("graduationYear") ?? ""),
+        gwa: String(formData.get("gwa") ?? ""),
+        latinHonors: String(formData.get("latinHonors") ?? ""),
+        linkedInUrl: String(formData.get("linkedInUrl") ?? ""),
+        githubUrl: String(formData.get("githubUrl") ?? ""),
+      },
+    });
+    revalidatePath("/resume");
+    return { status: "success", summary: "Details saved." };
+  } catch (error) {
+    const safeError = toSafeWorkspaceError(error);
+    const field = candidateProfileFieldError(safeError.summary);
+    return { status: "error", summary: safeError.summary, safeNextAction: safeError.safeNextAction, fieldErrors: field ? { [field]: safeError.summary } : undefined };
+  }
+}
 
 export type OpportunityCaptureActionState = {
   status: "idle" | "success" | "error";
@@ -216,8 +349,10 @@ export async function currentBaseResumeAction(_: WorkspaceActionState, formData:
 export async function evidenceAction(_: WorkspaceActionState, formData: FormData): Promise<WorkspaceActionState> {
   try {
     const command = String(formData.get("evidenceCommand") ?? "");
-    const evidenceId = String(formData.get("evidenceId") ?? "");
-    const expectedRevisionId = String(formData.get("expectedRevisionId") ?? "");
+    let evidenceId = String(formData.get("evidenceId") ?? "");
+    let expectedRevisionId = String(formData.get("expectedRevisionId") ?? "");
+    const reviewHandle = String(formData.get("reviewHandle") ?? "");
+    if (reviewHandle && (command === "approve" || command === "reject")) ({ evidenceId, expectedRevisionId } = await resolveCollectionReviewHandle(reviewHandle));
     if (command === "add") await addManualEvidence({ factualText: String(formData.get("factualText") ?? ""), sourceDocument: String(formData.get("sourceDocument") ?? ""), sourceSection: String(formData.get("sourceSection") ?? "") });
     else if (command === "extract") await extractEvidenceFromBaseResume({ baseResumeId: String(formData.get("baseResumeId") ?? "") });
     else if (command === "approve") await approveEvidence({ evidenceId, expectedRevisionId });
@@ -234,7 +369,17 @@ export async function evidenceLibraryAction(_: WorkspaceActionState, formData: F
   try {
     const command = String(formData.get("libraryCommand") ?? "");
     let result;
-    if (command === "add-project") result = await addProjectToEvidenceLibrary({ sourceDirectory: String(formData.get("sourceDirectory") ?? ""), name: String(formData.get("projectName") ?? "") || undefined });
+    if (command === "document-source-folder") {
+      const category = String(formData.get("category") ?? "");
+      if (category !== "project" && category !== "experience") throw new WorkspaceError("EVIDENCE_DOCUMENTER_INVALID", "Choose Projects or Experiences before documenting a folder.", "Select a work type and try the documentation again.");
+      result = await documentResumeEvidenceFolder({ category, name: String(formData.get("itemName") ?? ""), sourceDirectory: String(formData.get("sourceDirectory") ?? ""), disclosed: formData.get("localModelDisclosure") === "yes" });
+    }
+    else if (command === "import-documentation-artifacts") {
+      const category = String(formData.get("category") ?? "");
+      if (category !== "project" && category !== "experience") throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "Choose Projects or Experiences before importing generated documents.", "Select a work type and try the import again.");
+      result = await importDocumentedEvidenceArtifacts({ category, name: String(formData.get("itemName") ?? ""), outputDirectory: String(formData.get("outputDirectory") ?? "") });
+    }
+    else if (command === "add-project") result = await addProjectToEvidenceLibrary({ sourceDirectory: String(formData.get("sourceDirectory") ?? ""), name: String(formData.get("projectName") ?? "") || undefined });
     else if (command === "add-experience") {
       const selected = formData.get("experienceFile");
       if (selected instanceof File && selected.size > 0 && (!selected.name.toLowerCase().endsWith(".md") || selected.size > 2 * 1024 * 1024)) throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "The selected experience document is unavailable or unsupported.", "Choose one readable Markdown file up to 2 MB and try again.");
@@ -254,12 +399,12 @@ export async function evidenceLibraryAction(_: WorkspaceActionState, formData: F
       return { status: "success", summary: "Proposal decision recorded. Accepted evidence remains unreviewed." };
     }
     else if (command === "refresh") result = await refreshEvidenceLibrary();
-    else throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "The requested library action is unavailable.", "Choose Add Project, Add Experience, or Refresh Library and try again.");
+    else throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "The requested library action is unavailable.", "Document a source folder, then import its generated review documents.");
     revalidateCareerWorkspaces();
     return { status: "success", summary: `${result!.documentsAdded} document${result!.documentsAdded === 1 ? "" : "s"} and ${result!.candidatesAdded} unreviewed evidence candidate${result!.candidatesAdded === 1 ? "" : "s"} were added.` };
   } catch (error) {
     const command = String(formData.get("libraryCommand") ?? "");
-    if (command === "document-for-resume" || command === "resolve-document-proposal") await recordDocumenterFailure().catch(() => undefined);
+    if (command === "document-for-resume" || command === "document-source-folder" || command === "resolve-document-proposal") await recordDocumenterFailure().catch(() => undefined);
     else await recordEvidenceLibraryFailure().catch(() => undefined);
     const safeError = toSafeWorkspaceError(error);
     return { status: "error", summary: safeError.summary, safeNextAction: safeError.safeNextAction };

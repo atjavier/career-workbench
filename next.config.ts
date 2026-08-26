@@ -6,7 +6,7 @@ const nextConfig: NextConfig = {
       bodySizeLimit: "16mb",
     },
   },
-  serverExternalPackages: ["pdfjs-dist"],
+  serverExternalPackages: ["pdfjs-dist", "@napi-rs/keyring"],
   turbopack: {
     root: process.cwd(),
   },

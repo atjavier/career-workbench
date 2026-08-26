@@ -33,7 +33,7 @@ test("confirmation persists one immutable local revision and metadata-only audit
     assert.match(result.opportunity.id, /^[0-9a-f-]+$/i);
     const library = await listCapturedOpportunities(value);
     assert.equal(library.opportunities.length, 1);
-    assert.deepEqual(library.opportunities[0], { title: "Product Designer", company: "Northstar Studio", location: "Makati", workStyle: "Hybrid", postedAt: "2026-08-20T00:00:00.000Z", capturedAt: input.capturedAt, originalUrl: input.postingUrl });
+    assert.deepEqual(library.opportunities[0], { id: result.opportunity.id, revisionId: result.opportunity.revisions[0]!.id, title: "Product Designer", company: "Northstar Studio", location: "Makati", workStyle: "Hybrid", postedAt: "2026-08-20T00:00:00.000Z", capturedAt: input.capturedAt, originalUrl: input.postingUrl });
     assert.doesNotMatch(JSON.stringify(library), /copiedDescription|contentDigest|This copied description/);
     const database = openDatabase(join(value.appDataRoot, "workspace.sqlite"));
     try {
