@@ -4,7 +4,7 @@ baseline_commit: 380c24dbc8a9b3dc6cc70a235da0888b7cb447db
 
 # Story 3.1: Calculate a Versioned Fit Assessment
 
-Status: review
+Status: done
 
 ## Story
 
@@ -43,6 +43,16 @@ so that I can prioritize roles from supported evidence rather than a hiring pred
   - [x] Run `npm test`, `npm run typecheck`, `npm run lint`, and `npm run build`.
 
 ## Dev Notes
+
+### Review Findings
+
+- [x] [Review][Patch] Fit assessment is connected to immutable captured-opportunity revisions and the active Jobs UI.
+- [x] [Review][Patch] Strong requires captured requirement evidence, not title/company word overlap.
+- [x] [Review][Patch] Freshness is derived from the persisted calculation timestamp.
+- [x] [Review][Patch] Captured-fit records and approved-evidence links have immutable database integrity checks.
+- [x] [Review][Patch] Country and NCR hybrid/onsite preferences are evaluated explicitly.
+- [x] [Review][Patch] Evidence snapshot size is bounded with a safe recovery error.
+- [x] [Review][Patch] Latest captured-fit reads have a stable timestamp-and-ID ordering.
 
 ### Developer Context
 

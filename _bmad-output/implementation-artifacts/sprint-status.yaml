@@ -51,7 +51,7 @@ development_status:
   epic-2-retrospective: optional
 
   epic-3: in-progress
-  3-1-calculate-a-versioned-fit-assessment: review
+  3-1-calculate-a-versioned-fit-assessment: done
   3-2-inspect-fit-provenance-and-decide-to-pursue: done
   epic-3-retrospective: optional
 
