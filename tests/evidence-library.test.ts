@@ -6,6 +6,7 @@ import test from "node:test";
 
 import { approveEvidence, listClaimEligibleEvidence } from "../src/domain/evidence/evidence-commands";
 import { importDocumentedEvidenceArtifacts, listExperienceProjectCollection, resolveCollectionReviewHandle, summaryFromProjectOverview } from "../src/domain/evidence/evidence-library";
+import { readUploadedResumeDocumentationSource } from "../src/files/evidence-library";
 
 const unknowns = "ownership, metrics, users, dates, deployment status, outcomes, and skills are unknown unless directly evidenced.";
 async function fixture() {
@@ -56,4 +57,20 @@ test("a valid no-supported-evidence document set remains reviewable without manu
     const result = await importDocumentedEvidenceArtifacts({ ...value, outputDirectory: value.output, name: "No Evidence", category: "experience" });
     assert.equal(result.documentsAdded, 3); assert.equal(result.candidatesAdded, 0); assert.equal((await listExperienceProjectCollection(value))[0].evidence.length, 0);
   } finally { await rm(value.root, { recursive: true, force: true }); }
+});
+
+test("browser folder snapshots accept only paired, bounded, safe relative source files", async () => {
+  const file = new File(["# Overview\nBuilt safely."], "README.md", { type: "text/markdown" });
+  const manifest = (path: string, name = "README.md", size = file.size) => JSON.stringify({ root: "project", files: [{ path, name, size }] });
+  const source = await readUploadedResumeDocumentationSource({ files: [file], manifest: manifest("project/README.md") });
+  assert.equal(source.files[0]?.path, "README.md"); assert.match(source.sourceDigest, /^sha256:/);
+  await assert.rejects(readUploadedResumeDocumentationSource({ files: [file], manifest: manifest("../secret.md") }), { code: "EVIDENCE_DOCUMENTER_INVALID" });
+  await assert.rejects(readUploadedResumeDocumentationSource({ files: [file], manifest: manifest("project/README.md", "other.md") }), { code: "EVIDENCE_DOCUMENTER_INVALID" });
+  const generated = new File(["x"], "bundle.min.js");
+  await assert.rejects(readUploadedResumeDocumentationSource({ files: [generated], manifest: JSON.stringify({ root: "project", files: [{ path: "project/bundle.min.js", name: "bundle.min.js", size: generated.size }] }) }), { code: "EVIDENCE_DOCUMENTER_INVALID" });
+  await assert.rejects(readUploadedResumeDocumentationSource({ files: [file], manifest: JSON.stringify({ root: "project", files: [{ path: "other/README.md", name: "README.md", size: file.size }] }) }), { code: "EVIDENCE_DOCUMENTER_INVALID" });
+  const second = new File(["# Notes"], "notes.md");
+  await assert.rejects(readUploadedResumeDocumentationSource({ files: [file, second], manifest: JSON.stringify({ root: "project", files: [{ path: "project/README.md", name: "README.md", size: file.size }, { path: "other/notes.md", name: "notes.md", size: second.size }] }) }), { code: "EVIDENCE_DOCUMENTER_INVALID" });
+  const nul = new File([new Uint8Array([65, 0, 66])], "notes.md");
+  await assert.rejects(readUploadedResumeDocumentationSource({ files: [nul], manifest: JSON.stringify({ root: "project", files: [{ path: "project/notes.md", name: "notes.md", size: nul.size }] }) }), { code: "EVIDENCE_DOCUMENTER_INVALID" });
 });

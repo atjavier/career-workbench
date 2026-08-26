@@ -9,6 +9,8 @@ export type LibraryCategory = "project" | "experience";
 export type MarkdownDocument = { absolutePath: string; libraryPath: string; bytes: Uint8Array; text: string; contentDigest: string; category: LibraryCategory };
 export type CopiedLibraryContent = { documents: MarkdownDocument[]; sourceDigest: string; cleanup: () => Promise<void> };
 export type DocumentedArtifactSet = CopiedLibraryContent & { name: string; category: LibraryCategory };
+export type ResumeDocumentationSource = { files: Array<{ path: string; text: string; contentDigest: string }>; sourceDigest: string };
+type UploadedSourceManifest = { root: string; files: Array<{ path: string; name: string; size: number }> };
 const digest = (value: string | Uint8Array) => `sha256:${createHash("sha256").update(value).digest("hex")}`;
 const decoder = new TextDecoder("utf-8", { fatal: true });
 const maxDocumentBytes = 2 * 1024 * 1024;
@@ -91,6 +93,35 @@ export async function readResumeDocumentationSource(sourceDirectory: string, wor
   const skill = getResumeAgentSkill("resume.document-source-folder"); const extensions = new Set(skill.allowedExtensions); const excludedDirectories = new Set(skill.excludedDirectories); const files: Array<{ path: string; text: string; contentDigest: string }> = []; let directories = 0; let entriesSeen = 0;
   async function visit(current: string, depth: number): Promise<void> { if (depth > skill.limits.maxDepth || ++directories > skill.limits.maxDirectories) throw new WorkspaceError("EVIDENCE_DOCUMENTER_INVALID", "The selected source folder exceeds the safe inspection boundary.", "Choose a smaller working folder or exclude generated content."); await assertSafeAncestors(current); const entries = (await readdir(current, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name)); for (const entry of entries) { if (++entriesSeen > skill.limits.maxEntries) throw new WorkspaceError("EVIDENCE_DOCUMENTER_INVALID", "The selected source folder exceeds the safe inspection boundary.", "Choose a smaller working folder or exclude generated content."); const path = join(current, entry.name); const info = await lstat(path); if (info.isSymbolicLink()) throw new WorkspaceError("EVIDENCE_DOCUMENTER_INVALID", "The selected source folder contains a link or reparse point.", "Choose a working folder without links and try again."); if (info.isDirectory()) { if (!excludedDirectories.has(entry.name.toLowerCase())) await visit(path, depth + 1); continue; } if (!info.isFile() || generatedFileName(entry.name) || !extensions.has(extname(entry.name).toLowerCase()) || info.size === 0 || info.size > skill.limits.maxFileBytes || files.length >= skill.limits.maxFiles) continue; const captured = await bytesAndText(path, info.size, info); const relativePath = relative(source, path).replaceAll("\\", "/"); const candidate = { path: relativePath, text: captured.text, contentDigest: digest(captured.bytes) }; if (JSON.stringify([...files, candidate]).length > skill.limits.maxSnapshotChars) continue; files.push(candidate); } }
   await visit(source, 0); if (!files.length) throw new WorkspaceError("EVIDENCE_DOCUMENTER_INVALID", "No safe text material was found in the selected source folder.", "Choose a working folder containing readable documentation or source files."); files.sort((a, b) => a.path.localeCompare(b.path)); return { files, sourceDigest: digest(files.map((file) => `${file.path}:${file.contentDigest}`).join("\n")) };
+}
+function invalidSnapshot(message: string, nextAction = "Choose the folder again and try documentation."): never { throw new WorkspaceError("EVIDENCE_DOCUMENTER_INVALID", message, nextAction); }
+function snapshotPath(value: string): string {
+  if (!value || value.length > 600 || value.includes("\\") || /[\u0000-\u001f]/.test(value) || value.startsWith("/") || /^[a-z]:/i.test(value)) invalidSnapshot("The selected folder snapshot has an unsafe relative path.");
+  const parts = value.split("/"); if (parts.some((part) => !part || part === "." || part === "..")) invalidSnapshot("The selected folder snapshot has an unsafe relative path.");
+  return value;
+}
+/** Converts a browser-selected, untrusted file list into the registered skill's bounded source snapshot. */
+export async function readUploadedResumeDocumentationSource(input: { files: File[]; manifest: string }): Promise<ResumeDocumentationSource> {
+  if (input.manifest.length > 64_000) invalidSnapshot("The selected folder details exceed the safe inspection boundary.", "Choose a smaller folder and try documentation.");
+  let manifest: unknown; try { manifest = JSON.parse(input.manifest); } catch { invalidSnapshot("The selected folder details are unavailable."); }
+  if (!manifest || typeof manifest !== "object" || !Array.isArray((manifest as UploadedSourceManifest).files) || !(manifest as UploadedSourceManifest).files.length || (manifest as UploadedSourceManifest).files.length !== input.files.length || typeof (manifest as UploadedSourceManifest).root !== "string") invalidSnapshot("The selected folder details do not match its files.");
+  const skill = getResumeAgentSkill("resume.document-source-folder"); const extensions = new Set(skill.allowedExtensions); const excluded = new Set(skill.excludedDirectories); const paths = new Set<string>(); const directories = new Set<string>(); const files: ResumeDocumentationSource["files"] = [];
+  const root = snapshotPath((manifest as UploadedSourceManifest).root); if (root.includes("/")) invalidSnapshot("The selected folder details do not match its files.");
+  if (input.files.length > skill.limits.maxFiles) invalidSnapshot("The selected folder has too many eligible files.", "Choose a smaller folder and try documentation.");
+  for (const [index, file] of input.files.entries()) {
+    const item = (manifest as UploadedSourceManifest).files[index];
+    if (!item || typeof item.path !== "string" || typeof item.name !== "string" || !Number.isSafeInteger(item.size) || item.name !== file.name || item.size !== file.size) invalidSnapshot("The selected folder details do not match its files.");
+    const submittedPath = snapshotPath(item.path); const submittedParts = submittedPath.split("/"); if (submittedParts[0] !== root || submittedParts.length < 2) invalidSnapshot("The selected folder details do not describe one folder."); const path = submittedParts.slice(1).join("/"); const parts = path.split("/");
+    if (parts.at(-1) !== file.name || paths.has(path) || parts.length - 1 > skill.limits.maxDepth || parts.slice(0, -1).some((part) => excluded.has(part.toLowerCase())) || generatedFileName(file.name) || !extensions.has(extname(file.name).toLowerCase()) || !file.size || file.size > skill.limits.maxFileBytes) invalidSnapshot("The selected folder contains unsupported or unsafe files.", "Choose a smaller folder with supported source files and try documentation.");
+    paths.add(path); for (let depth = 1; depth < parts.length; depth += 1) directories.add(parts.slice(0, depth).join("/"));
+    if (directories.size > skill.limits.maxDirectories || input.files.length + directories.size > skill.limits.maxEntries) invalidSnapshot("The selected folder exceeds the safe inspection boundary.", "Choose a smaller folder and try documentation.");
+    const bytes = new Uint8Array(await file.arrayBuffer()); if (bytes.byteLength !== file.size || bytes.includes(0)) invalidSnapshot("A selected source file is unsafe or changed while it was being read.");
+    let text: string; try { text = decoder.decode(bytes); } catch { invalidSnapshot("A selected source file is not valid UTF-8 text.", "Choose a folder containing readable source files and try documentation."); }
+    const candidate = { path, text, contentDigest: digest(bytes) }; if (JSON.stringify([...files, candidate]).length > skill.limits.maxSnapshotChars) invalidSnapshot("The selected folder exceeds the safe inspection boundary.", "Choose a smaller folder and try documentation.");
+    files.push(candidate);
+  }
+  files.sort((left, right) => left.path.localeCompare(right.path));
+  return { files, sourceDigest: digest(files.map((file) => `${file.path}:${file.contentDigest}`).join("\n")) };
 }
 export async function readManagedMarkdown(workspaceRoot?: string): Promise<MarkdownDocument[]> {
   const root = evidenceLibraryRoot(workspaceRoot); try { await requireDirectory(root, "Add a project or experience before refreshing the library."); } catch { throw new WorkspaceError("EVIDENCE_LIBRARY_EMPTY", "The Resume Evidence Library is empty.", "Add a project or experience, then refresh the library."); }

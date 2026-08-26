@@ -372,7 +372,9 @@ export async function evidenceLibraryAction(_: WorkspaceActionState, formData: F
     if (command === "document-source-folder") {
       const category = String(formData.get("category") ?? "");
       if (category !== "project" && category !== "experience") throw new WorkspaceError("EVIDENCE_DOCUMENTER_INVALID", "Choose Projects or Experiences before documenting a folder.", "Select a work type and try the documentation again.");
-      result = await documentResumeEvidenceFolder({ category, name: String(formData.get("itemName") ?? ""), sourceDirectory: String(formData.get("sourceDirectory") ?? ""), disclosed: formData.get("localModelDisclosure") === "yes" });
+      const values = formData.getAll("sourceFile");
+      if (!values.length || values.some((value) => !(value instanceof File))) throw new WorkspaceError("EVIDENCE_DOCUMENTER_INVALID", "Choose a folder before documenting it.", "Choose a folder containing supported source files and try again.");
+      result = await documentResumeEvidenceFolder({ category, name: String(formData.get("itemName") ?? ""), sourceSnapshot: { files: values as File[], manifest: String(formData.get("sourceManifest") ?? "") }, disclosed: formData.get("localModelDisclosure") === "yes" });
     }
     else if (command === "import-documentation-artifacts") {
       const category = String(formData.get("category") ?? "");
