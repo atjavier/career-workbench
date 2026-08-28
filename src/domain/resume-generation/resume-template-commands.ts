@@ -4,7 +4,7 @@ import { resolveAppDataPaths } from "@/files/app-data";
 import { cleanupAbandonedResumeTemplateStaging, cleanupResumeTemplate, readBundledResumeTemplate, readVerifiedResumeTemplatePdf, stageBundledResumeTemplate } from "@/files/resume-template";
 import { applyMigrations, openDatabase } from "@/persistence/database";
 import { readResumeGenerationState } from "@/persistence/candidate-profile-repository";
-import { designateResumeTemplate, findBundledResumeTemplateByDigest, findDesignatedResumeTemplate, insertResumeTemplateSource, type ResumeTemplateSource } from "@/persistence/resume-template-repository";
+import { designateResumeTemplate, findBundledResumeTemplateByDigest, findDesignatedResumeTemplate, findResumeTemplateById, insertResumeTemplateSource, type ResumeTemplateSource } from "@/persistence/resume-template-repository";
 import { appendAuditEvent } from "@/persistence/workspace-repository";
 
 type Options = { appDataRoot?: string };
@@ -98,11 +98,33 @@ export async function bootstrapBundledResumeTemplate(input: Options = {}): Promi
 export async function readDesignatedResumeTemplatePdf(input: Options = {}): Promise<Uint8Array | undefined> {
   try {
     const paths = await resolveAppDataPaths(input.appDataRoot);
-    const source = transaction(paths.root, (db) => findDesignatedResumeTemplate(db));
+    // This is a read path. Do not open BEGIN IMMEDIATE or apply migrations
+    // here: a locked/read-only Windows app-data directory must still be able
+    // to serve an already verified template preview.
+    const db = openDatabase(paths.databasePath);
+    let source: ResumeTemplateSource | undefined;
+    try { source = findDesignatedResumeTemplate(db); } finally { db.close(); }
     if (!source || source.origin !== "bundled" || source.state !== "verified") return undefined;
     const bytes = await readVerifiedResumeTemplatePdf(paths.root, source);
     if (!bytes) return undefined;
-    return transaction(paths.root, (db) => findDesignatedResumeTemplate(db)?.id === source.id) ? bytes : undefined;
+    const verifyDb = openDatabase(paths.databasePath);
+    try { return findDesignatedResumeTemplate(verifyDb)?.id === source.id ? bytes : undefined; } finally { verifyDb.close(); }
+  } catch {
+    return undefined;
+  }
+}
+
+export async function readResumeTemplatePdf(input: Options & { templateId: string; templateDigest: string }): Promise<Uint8Array | undefined> {
+  try {
+    const paths = await resolveAppDataPaths(input.appDataRoot);
+    // Draft PDF previews only need a verified row and immutable bytes. A
+    // write transaction here made previews fail with SQLITE_READONLY even
+    // though the private template copy itself was readable.
+    const db = openDatabase(paths.databasePath);
+    let source: ResumeTemplateSource | undefined;
+    try { source = findResumeTemplateById(db, input.templateId, input.templateDigest); } finally { db.close(); }
+    if (!source) return undefined;
+    return readVerifiedResumeTemplatePdf(paths.root, source);
   } catch {
     return undefined;
   }

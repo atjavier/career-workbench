@@ -1,51 +1,44 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
-import { materialDraftHandoffAction, resumeCoachAction, type MaterialDraftHandoffActionState, type ResumeCoachActionState } from "@/app/actions";
+import { generateBaseResumeAction, materialDraftHandoffAction, resumeCoachReviewAction, type MaterialDraftHandoffActionState, type ResumeCoachActionState, type ResumeCoachReviewActionState } from "@/app/actions";
+import type { MaterialDraftView } from "@/domain/resume-generation/material-draft-commands";
+import { ResumePdfPreview } from "@/app/resume-pdf-preview";
 
-const initial: ResumeCoachActionState = { status: "idle", summary: "" };
 const initialHandoff: MaterialDraftHandoffActionState = { status: "idle", summary: "" };
+const initialGeneration: ResumeCoachActionState = { status: "idle", summary: "" };
+const initialReview: ResumeCoachReviewActionState = { status: "idle", summary: "" };
 
-type Material = { id: string; label: string };
-type Opportunity = { revisionId: string; label: string };
-
-function CoachProposal({ response, evidenceLabels }: { response: NonNullable<ResumeCoachActionState["response"]>; evidenceLabels: string[] }) {
-  return <section className="material-draft-proposal" aria-labelledby="material-draft-proposal-heading">
-    <p className="eyebrow">Local AI guidance</p>
-    <h3 id="material-draft-proposal-heading">Review the proposal before using it as a draft</h3>
-    {response.sections.map((section) => <section key={section.heading}><h4>{section.heading}</h4><p>{section.text}</p></section>)}
-    <section aria-labelledby="material-draft-claims-heading"><h4 id="material-draft-claims-heading">Grounded claims</h4><ul>{response.claims.map((claim, index) => {
-      const support = [...new Set(claim.evidenceIndexes.map((evidenceIndex) => evidenceLabels[evidenceIndex]).filter((label): label is string => Boolean(label)))];
-      return <li key={`${claim.text}-${index}`}><p>{claim.text}</p><p><strong>Supported by approved evidence:</strong> {support.join("; ")}</p></li>;
-    })}</ul></section>
-    {response.unknowns.length ? <section><h4>Unknowns to check</h4><ul>{response.unknowns.map((unknown) => <li key={unknown}>{unknown}</li>)}</ul></section> : null}
-  </section>;
-}
-
-export function ResumeCoach({ available, materials, opportunities }: { available: boolean; materials: Material[]; opportunities: Opportunity[] }) {
-  const [state, action, pending] = useActionState(resumeCoachAction, initial);
+export function ResumeCoach({ available, unavailableReason, showSetupLink = false, initialDraft, generationNeeded = false, generationMessage, workspaceId }: { available: boolean; unavailableReason?: string; showSetupLink?: boolean; initialDraft?: MaterialDraftView; generationNeeded?: boolean; generationMessage?: string; workspaceId?: string }) {
+  const router = useRouter();
   const [handoffState, handoffAction, handoffPending] = useActionState(materialDraftHandoffAction, initialHandoff);
-  const [consentNonce, setConsentNonce] = useState("");
+  const [revisionState, revisionAction, revisionPending] = useActionState(generateBaseResumeAction, initialGeneration);
+  const [reviewState, reviewAction, reviewPending] = useActionState(resumeCoachReviewAction, initialReview);
   const [dismissedDraftId, setDismissedDraftId] = useState<string | undefined>();
-  if (!available) return <section className="resume-coach-unavailable" aria-labelledby="resume-coach-heading"><div className="resume-pane-head"><div><p className="eyebrow">Resume Coach</p><h2 id="resume-coach-heading">Resume Coach</h2></div></div><p>Local AI is not ready. You can still save your profile details.</p><Link className="affirmative-action" href="/settings">Set up local AI</Link></section>;
-  const proposalVisible = Boolean(state.response && state.draftId && state.draftId !== dismissedDraftId);
-  return <section className="resume-coach-unavailable" aria-labelledby="resume-coach-heading">
+  const developmentMode = process.env.NODE_ENV === "development";
+  useEffect(() => {
+    if (!generationMessage) return;
+    const timer = window.setInterval(() => router.refresh(), 3_000);
+    return () => window.clearInterval(timer);
+  }, [generationMessage, router]);
+  useEffect(() => { if (revisionState.status === "success") router.refresh(); }, [revisionState.status, router]);
+  if (!available) return <div className="resume-coach-preview-layout"><section className="resume-coach-unavailable" aria-labelledby="resume-coach-heading"><div className="resume-pane-head"><div><p className="eyebrow">Resume Coach</p><h2 id="resume-coach-heading">Resume Coach</h2></div></div><p>{unavailableReason ?? "Resume Coach is unavailable right now."}</p>{showSetupLink ? <Link className="resume-coach-setup-link" href="/settings">Set up local AI</Link> : null}</section><section className="resume-generated-preview" aria-labelledby="resume-generated-preview-heading"><div className="resume-pane-head"><div><p className="eyebrow">Reviewable preview</p><h2 id="resume-generated-preview-heading">Resume</h2></div></div><p className="resume-preview-empty" role="status">Your base resume appears here automatically once onboarding has saved your profile and documented work.</p></section></div>;
+  const activeDraftId = initialDraft?.id;
+  const proposalVisible = Boolean(activeDraftId && activeDraftId !== dismissedDraftId);
+  return <div className="resume-coach-preview-layout">
+    <section className="resume-coach-unavailable" aria-labelledby="resume-coach-heading">
     <div className="resume-pane-head"><div><p className="eyebrow">Resume Coach</p><h2 id="resume-coach-heading">Resume Coach</h2></div></div>
-    <p>Ask for grounded local AI guidance using your saved profile, protected Resume template, selected approved Experience &amp; Projects material, and an optional local opportunity. This is not a hiring prediction or a rendered resume.</p>
-    <p className="resume-context">Before each request, LM Studio on this device (Qwen3.5-9B) receives your saved profile details, the approved material you select below, and the optional local opportunity only after you consent.</p>
-    <form action={action} aria-busy={pending} onChange={(event) => { if ((event.target as HTMLElement).id !== "coach-consent") setConsentNonce(""); }}>
-      <fieldset><legend>Approved material to include</legend>{materials.map((material) => <label key={material.id}><input type="checkbox" name="evidenceId" value={material.id} defaultChecked /> {material.label}</label>)}</fieldset>
-      <label htmlFor="coach-opportunity">Optional local opportunity</label>
-      <select id="coach-opportunity" name="opportunityRevisionId" defaultValue=""><option value="">No opportunity selected</option>{opportunities.map((opportunity) => <option key={opportunity.revisionId} value={opportunity.revisionId}>{opportunity.label}</option>)}</select>
-      <label htmlFor="coach-request">What would you like to improve?</label><textarea id="coach-request" name="request" required minLength={2} maxLength={2000} />
-      <input type="hidden" name="consentNonce" value={consentNonce} />
-      <label><input id="coach-consent" type="checkbox" name="consent" value="yes" required checked={Boolean(consentNonce)} onChange={(event) => setConsentNonce(event.target.checked ? crypto.randomUUID() : "")} /> I consent to send this request and the selected local material to LM Studio on this computer once.</label>
-      <button className="affirmative-action" type="submit" disabled={pending}>{pending ? "Asking Resume Coach..." : "Ask Resume Coach"}</button>
-      {pending ? <p role="status" aria-live="polite">Resume Coach is preparing your local request.</p> : null}
-    </form>
-    {state.status !== "idle" ? <div role="status" aria-live="polite" aria-atomic="true" className={state.status === "error" ? "status status-error" : "status"}><p>{state.summary}</p>{state.safeNextAction ? <p>{state.safeNextAction}</p> : null}</div> : null}
-    {proposalVisible ? <><CoachProposal response={state.response!} evidenceLabels={state.evidenceLabels ?? []} /><div className="material-draft-actions"><p>Your Resume template is unchanged. No resume PDF or export has been created.</p>{handoffState.status === "success" && handoffState.draftId === state.draftId ? <Link className="affirmative-action" href={`/resume/drafts/${state.draftId}`}>Review draft</Link> : <form action={handoffAction} aria-busy={handoffPending}><input type="hidden" name="draftId" value={state.draftId} /><button className="affirmative-action" type="submit" disabled={handoffPending}>{handoffPending ? "Using draft..." : "Use as draft"}</button></form>}<button type="button" onClick={() => setDismissedDraftId(state.draftId)}>Keep current</button>{handoffState.status !== "idle" ? <p role="status" aria-live="polite" aria-atomic="true" className={handoffState.status === "error" ? "status status-error" : "status"}>{handoffState.summary}</p> : null}</div></> : null}
-  </section>;
+    <p>Your local employer-side reviewer and Resume Coach independently reviews the generated resume against every documented Experience &amp; Project. It identifies strengths, missing proof, weak wording, and the highest-value revisions; it does not rebuild the resume on every visit.</p>
+    <p className="resume-context">The base resume is generated automatically during onboarding, then only again after a material change. Job-specific tailoring will use this same evidence base when you add a job listing.</p>
+    {initialDraft ? <><form action={reviewAction} className="resume-coach-request" aria-busy={reviewPending}><input type="hidden" name="draftId" value={initialDraft.id} /><label htmlFor="coach-focus">What should the coach focus on?</label><textarea id="coach-focus" name="coachFocus" rows={3} maxLength={900} defaultValue="General review: clarity, relevance, credibility, specificity, and ATS readability." /><button type="submit" disabled={reviewPending}>{reviewPending ? "Reviewing…" : "Ask Resume Coach"}</button></form>{reviewState.status !== "idle" ? <div className={reviewState.status === "error" ? "status status-error" : "status"} role="status" aria-live="polite"><p>{reviewState.summary}</p>{reviewState.review ? <><p><strong>Objective ratings</strong></p><ul>{reviewState.review.ratings.map((rating) => <li key={rating.area}>{rating.area}: {rating.score}/5 — {rating.rationale}</li>)}</ul>{reviewState.review.concerns.length ? <><p><strong>Concerns</strong></p><ul>{reviewState.review.concerns.map((item) => <li key={item}>{item}</li>)}</ul></> : null}{reviewState.review.recommendations.length ? <><p><strong>Recommended next changes</strong></p><ul>{reviewState.review.recommendations.map((item) => <li key={item}>{item}</li>)}</ul></> : null}</> : null}</div> : null}</> : null}
+    </section>
+    <section className="resume-generated-preview" aria-labelledby="resume-generated-preview-heading">
+      <div className="resume-pane-head"><div><p className="eyebrow">Reviewable preview</p><h2 id="resume-generated-preview-heading">Resume</h2></div></div>
+      {proposalVisible ? <><ResumePdfPreview draftId={activeDraftId!} /><div className="material-draft-actions"><p>Generated from your saved profile and all documented work findings. The Resume template is unchanged.</p>{handoffState.status === "success" && handoffState.draftId === activeDraftId ? <Link className="affirmative-action" href={`/resume/drafts/${activeDraftId}`}>Review base resume</Link> : <form action={handoffAction} aria-busy={handoffPending}><input type="hidden" name="draftId" value={activeDraftId} /><button className="affirmative-action" type="submit" disabled={handoffPending}>{handoffPending ? "Opening base resume..." : "Review base resume"}</button></form>}<form action={revisionAction} aria-busy={revisionPending}><input type="hidden" name="generationCommand" value="revision" /><input type="hidden" name="workspaceId" value={workspaceId ?? ""} /><label htmlFor="resume-revision">Apply a small supported change</label><input id="resume-revision" name="resumeRequest" maxLength={900} placeholder="For example: emphasize API integration in the AgriMart project." /><button type="submit" disabled={revisionPending}>{revisionPending ? "Updating resume…" : "Apply change"}</button></form>{revisionState.status !== "idle" ? <p role="status" aria-live="polite" className={revisionState.status === "error" ? "status status-error" : "status"}>{revisionState.summary}</p> : null}<button type="button" onClick={() => setDismissedDraftId(activeDraftId!)}>Keep current</button>{handoffState.status !== "idle" ? <p role="status" aria-live="polite" aria-atomic="true" className={handoffState.status === "error" ? "status status-error" : "status"}>{handoffState.summary}</p> : null}</div></> : <div><p className={generationMessage?.startsWith("Your resume") ? "resume-preview-empty status status-error" : "resume-preview-empty"} role="status" aria-live="polite">{generationMessage ?? (generationNeeded ? "Your resume needs generation from the documented work." : "Your base resume has not been generated yet.")}</p>{generationNeeded ? <form action={revisionAction} aria-busy={revisionPending}><input type="hidden" name="generationCommand" value="initial" /><input type="hidden" name="workspaceId" value={workspaceId ?? ""} /><button className="affirmative-action" type="submit" disabled={revisionPending}>{revisionPending ? "Generating resume…" : "Generate resume"}</button>{revisionState.status !== "idle" ? <p role="status" aria-live="polite" className={revisionState.status === "error" ? "status status-error" : "status"}>{revisionState.summary}</p> : null}</form> : null}</div>}
+      {developmentMode && proposalVisible ? <form className="material-draft-actions" action={revisionAction} aria-busy={revisionPending}><input type="hidden" name="generationCommand" value="initial" /><input type="hidden" name="workspaceId" value={workspaceId ?? ""} /><button type="submit" disabled={revisionPending}>{revisionPending ? "Generating resume…" : "Generate resume (development)"}</button></form> : null}
+    </section>
+  </div>;
 }

@@ -1,8 +1,6 @@
 import { createHash } from "node:crypto";
 
 import { createAuditEvent, createUuidV7 } from "@/audit/audit-event";
-import type { OsVault } from "@/adapters/os-vault/os-vault";
-import { windowsOsVault } from "@/adapters/os-vault/os-vault";
 import { WorkspaceError } from "@/domain/workspace/types";
 import { resolveAppDataPaths } from "@/files/app-data";
 import { readResumeGenerationState } from "@/persistence/candidate-profile-repository";
@@ -16,16 +14,16 @@ const plain = (value: unknown, maximum: number) => typeof value === "string" && 
 const digest = (value: unknown) => `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
 
 export type LocalModelReadiness = { ready: boolean; displayLabel?: "Qwen3.5-9B" };
-export type ConfigureLocalModelInput = { appDataRoot?: string; modelIdentifier: string; token: string; vault?: OsVault; fetcher?: typeof fetch };
-export type LocalModelGatewayConfiguration = Pick<LocalModelConfiguration, "id" | "modelIdentifier" | "configurationDigest"> & { token: string };
+export type ConfigureLocalModelInput = { appDataRoot?: string; modelIdentifier: string; fetcher?: typeof fetch };
+export type LocalModelGatewayConfiguration = Pick<LocalModelConfiguration, "id" | "modelIdentifier" | "configurationDigest">;
 
 function unavailable(summary: string, next = "Open Settings and verify LM Studio on this computer."): never { throw new WorkspaceError("LOCAL_MODEL_CONFIGURATION_UNAVAILABLE", summary, next); }
 function invalid(summary: string, next = "Choose a loaded Qwen3.5-9B model and try again."): never { throw new WorkspaceError("LOCAL_MODEL_CONFIGURATION_INVALID", summary, next); }
 function validQwenIdentifier(value: string): boolean { return /qwen/i.test(value) && /3[._-]?5/i.test(value) && /9\s*b/i.test(value); }
 
-async function verifyModel(modelIdentifier: string, token: string, fetcher: typeof fetch): Promise<void> {
+async function verifyModel(modelIdentifier: string, fetcher: typeof fetch): Promise<void> {
   let response: Response;
-  try { response = await fetcher(modelsEndpoint, { method: "GET", headers: { authorization: `Bearer ${token}`, accept: "application/json" } }); } catch { unavailable("Local AI is unavailable right now."); }
+  try { response = await fetcher(modelsEndpoint, { method: "GET", headers: { accept: "application/json" } }); } catch { unavailable("Local AI is unavailable right now."); }
   if (!response!.ok) unavailable("Local AI could not be verified right now.");
   let body: unknown;
   try { body = await response!.json(); } catch { invalid("LM Studio returned an unsafe model list."); }
@@ -39,11 +37,10 @@ async function verifyModel(modelIdentifier: string, token: string, fetcher: type
 }
 
 export async function configureLocalModel(input: ConfigureLocalModelInput): Promise<LocalModelReadiness> {
-  const modelIdentifier = input.modelIdentifier.trim(); const token = input.token.trim(); const vault = input.vault ?? windowsOsVault; const fetcher = input.fetcher ?? fetch;
-  if (!plain(modelIdentifier, 240) || !validQwenIdentifier(modelIdentifier) || !plain(token, 2048)) invalid("Enter a valid loaded Qwen3.5-9B model and LM Studio token.");
-  await verifyModel(modelIdentifier, token, fetcher);
+  const modelIdentifier = input.modelIdentifier.trim(); const fetcher = input.fetcher ?? fetch;
+  if (!plain(modelIdentifier, 240) || !validQwenIdentifier(modelIdentifier)) invalid("Enter a valid loaded Qwen3.5-9B model.");
+  await verifyModel(modelIdentifier, fetcher);
   const paths = await resolveAppDataPaths(input.appDataRoot); const now = new Date().toISOString(); const configuration: LocalModelConfiguration = { id: createUuidV7(), endpoint: configurationEndpoint, modelIdentifier, displayLabel: "Qwen3.5-9B", secretReference: createUuidV7(), configurationDigest: digest({ endpoint: configurationEndpoint, modelIdentifier, displayLabel: "Qwen3.5-9B" }), createdAt: now };
-  try { await vault.put(configuration.secretReference, token); } catch { unavailable("The Windows credential vault is unavailable."); }
   const db = openDatabase(paths.databasePath);
   try {
     applyMigrations(db); db.exec("BEGIN IMMEDIATE;");
@@ -54,21 +51,18 @@ export async function configureLocalModel(input: ConfigureLocalModelInput): Prom
       appendAuditEvent(db, createAuditEvent({ actor: "local-os-user", action: "local_model.configured", outcome: "success", entityId: configuration.id, contentHash: configuration.configurationDigest }));
       db.exec("COMMIT;");
     } catch (error) { db.exec("ROLLBACK;"); throw error; }
-  } catch (error) { await vault.remove(configuration.secretReference).catch(() => undefined); throw error; } finally { db.close(); }
+  } finally { db.close(); }
   return { ready: true, displayLabel: "Qwen3.5-9B" };
 }
 
-export async function readLocalModelGatewayConfiguration(input: { appDataRoot?: string; vault?: OsVault } = {}): Promise<LocalModelGatewayConfiguration> {
+export async function readLocalModelGatewayConfiguration(input: { appDataRoot?: string } = {}): Promise<LocalModelGatewayConfiguration> {
   const paths = await resolveAppDataPaths(input.appDataRoot); const db = openDatabase(paths.databasePath);
   let item: LocalModelConfiguration | undefined;
   try { applyMigrations(db); const state = readResumeGenerationState(db); item = state.currentModelConfigurationRevisionId ? findLocalModelConfiguration(db, state.currentModelConfigurationRevisionId) : undefined; } finally { db.close(); }
   if (!item) unavailable("Local AI is not configured.");
-  let token: string | undefined;
-  try { token = await (input.vault ?? windowsOsVault).get(item.secretReference); } catch { unavailable("The Windows credential vault is unavailable."); }
-  if (!plain(token, 2048)) unavailable("Local AI credentials are unavailable.");
-  return { id: item.id, modelIdentifier: item.modelIdentifier, configurationDigest: item.configurationDigest, token: token! };
+  return { id: item.id, modelIdentifier: item.modelIdentifier, configurationDigest: item.configurationDigest };
 }
 
-export async function readLocalModelReadiness(input: { appDataRoot?: string; vault?: OsVault } = {}): Promise<LocalModelReadiness> {
+export async function readLocalModelReadiness(input: { appDataRoot?: string } = {}): Promise<LocalModelReadiness> {
   try { await readLocalModelGatewayConfiguration(input); return { ready: true, displayLabel: "Qwen3.5-9B" }; } catch { return { ready: false }; }
 }

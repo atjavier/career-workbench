@@ -4,8 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { handOffMaterialDraft, readMaterialDraft } from "../src/domain/resume-generation/material-draft-commands";
+import { handOffMaterialDraft, readActiveWorkspaceMaterialDraft, readMaterialDraft } from "../src/domain/resume-generation/material-draft-commands";
 import { persistResumeCoachDraft } from "../src/domain/resume-generation/resume-coach-commands";
+import { createResumeWorkspace } from "../src/domain/resume-generation/resume-workspace-commands";
 import { applyMigrations, openDatabase } from "../src/persistence/database";
 
 const hash = (letter: string) => `sha256:${letter.repeat(64)}`;
@@ -13,6 +14,7 @@ const ids = { profile: "00000000-0000-7000-8000-000000000011", profileRevision: 
 
 async function fixture() {
   const appDataRoot = await mkdtemp(join(tmpdir(), "material-draft-handoff-")); const databasePath = join(appDataRoot, "workspace.sqlite"); const timestamp = "2026-08-26T00:00:00.000Z";
+  const workspace = await createResumeWorkspace({ appDataRoot, name: "Draft test" });
   const db = openDatabase(databasePath); try { applyMigrations(db);
     db.prepare("INSERT INTO candidate_profiles (id, created_at) VALUES (?, ?)").run(ids.profile, timestamp);
     db.prepare("INSERT INTO candidate_profile_revisions (id, profile_id, revision_number, parent_revision_id, first_name, last_name, email, phone, school, program, graduation_year, canonical_content, content_digest, created_at) VALUES (?, ?, 1, NULL, 'A', 'J', 'a@example.test', '+639000000000', 'School', 'Program', 2026, '{}', ?, ?)").run(ids.profileRevision, ids.profile, hash("a"), timestamp);
@@ -20,7 +22,7 @@ async function fixture() {
     db.prepare("INSERT INTO evidence_records (id, created_at) VALUES (?, ?)").run(ids.evidence, timestamp);
     db.prepare("INSERT INTO evidence_revisions (id, evidence_id, revision_number, origin, source_document, source_section, factual_text, review_state, created_at, content_digest) VALUES (?, ?, 1, 'user_entered', 'Portfolio', 'Case study', 'Built TypeScript UI', 'approved', ?, ?)").run(ids.evidenceRevision, ids.evidence, timestamp, hash("c"));
   } finally { db.close(); }
-  const draft = persistResumeCoachDraft({ databasePath, profileRevisionId: ids.profileRevision, profileDigest: hash("a"), templateId: ids.template, templateDigest: hash("b"), evidence: [{ id: ids.evidenceRevision, contentDigest: hash("c") }], requestText: "Tailor my resume", consentFingerprint: hash("d"), response: { schemaVersion: 1, selectionEcho: hash("d"), sections: [{ heading: "Strength", text: "Relevant TypeScript experience." }], claims: [{ text: "Built TypeScript UI", evidenceIndexes: [0] }], unknowns: ["Impact is not established."] } });
+  const draft = persistResumeCoachDraft({ databasePath, workspaceId: workspace.workspace.id, profileRevisionId: ids.profileRevision, profileDigest: hash("a"), templateId: ids.template, templateDigest: hash("b"), evidence: [{ id: ids.evidenceRevision, contentDigest: hash("c") }], requestText: "Tailor my resume", consentFingerprint: hash("d"), response: { schemaVersion: 1, selectionEcho: hash("d"), sections: [{ heading: "Strength", text: "Relevant TypeScript experience." }], claims: [{ text: "Built TypeScript UI", evidenceIndexes: [0] }], unknowns: ["Impact is not established."] } });
   return { appDataRoot, databasePath, draftId: draft.id };
 }
 
@@ -30,8 +32,8 @@ test("a stored draft has a bounded readable projection and one metadata-only rev
     const draft = await readMaterialDraft({ appDataRoot: value.appDataRoot, draftId: value.draftId });
     await assert.rejects(readMaterialDraft({ appDataRoot: value.appDataRoot, draftId: value.draftId, requireHandoff: true }), { code: "MATERIAL_DRAFT_INVALID" });
     assert.equal(draft.sections[0]?.text, "Relevant TypeScript experience.");
-    assert.deepEqual(draft.claims[0]?.evidence, ["Approved evidence: Portfolio — Case study"]);
-    assert.deepEqual(draft.evidenceLabels, ["Approved evidence: Portfolio — Case study"]);
+    assert.deepEqual(draft.claims[0]?.evidence, ["Documented finding: Portfolio — Case study"]);
+    assert.deepEqual(draft.evidenceLabels, ["Documented finding: Portfolio — Case study"]);
     assert.equal(draft.templateLabel, "Resume.pdf");
     assert.equal("contentDigest" in draft, false);
     const handoff = await handOffMaterialDraft({ appDataRoot: value.appDataRoot, draftId: value.draftId });
@@ -57,6 +59,15 @@ test("corrupt material drafts cannot be read or handed off", async () => {
     await assert.rejects(readMaterialDraft({ appDataRoot: value.appDataRoot, draftId: corruptId }), { code: "MATERIAL_DRAFT_INVALID" });
     await assert.rejects(handOffMaterialDraft({ appDataRoot: value.appDataRoot, draftId: corruptId }), { code: "MATERIAL_DRAFT_INVALID" });
     const verify = openDatabase(value.databasePath); try { assert.equal((verify.prepare("SELECT COUNT(*) AS count FROM material_draft_handoffs WHERE draft_id = ?").get(corruptId) as { count: number }).count, 0); } finally { verify.close(); }
+  } finally { await rm(value.appDataRoot, { recursive: true, force: true }); }
+});
+
+test("an active-workspace draft read rejects a draft retained by another resume", async () => {
+  const value = await fixture();
+  try {
+    assert.equal((await readActiveWorkspaceMaterialDraft({ appDataRoot: value.appDataRoot, draftId: value.draftId })).id, value.draftId);
+    await createResumeWorkspace({ appDataRoot: value.appDataRoot, name: "Other resume" });
+    await assert.rejects(readActiveWorkspaceMaterialDraft({ appDataRoot: value.appDataRoot, draftId: value.draftId }), { code: "MATERIAL_DRAFT_INVALID" });
   } finally { await rm(value.appDataRoot, { recursive: true, force: true }); }
 });
 

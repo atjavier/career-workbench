@@ -1,5 +1,4 @@
-import { ApplicationShell } from "@/app/application-shell";
-import { MaterialDraftReview } from "@/app/material-draft-review";
+import { redirect } from "next/navigation";
 import { readMaterialDraft } from "@/domain/resume-generation/material-draft-commands";
 
 export const dynamic = "force-dynamic";
@@ -7,6 +6,9 @@ export const dynamic = "force-dynamic";
 export default async function MaterialDraftReviewPage({ params }: { params: Promise<{ draftId: string }> }) {
   const { draftId } = await params;
   const draft = await readMaterialDraft({ draftId, requireHandoff: true }).catch(() => undefined);
-  if (!draft) return <ApplicationShell active="Resume"><div className="workspace-shell material-draft-unavailable"><h1>Local draft unavailable</h1><p>This local review draft is unavailable. Return to Resume and generate local guidance again.</p></div></ApplicationShell>;
-  return <ApplicationShell active="Resume"><MaterialDraftReview draft={draft} /></ApplicationShell>;
+  // The active Resume workflow has one source of truth: its generated PDF.
+  // Preserve old review URLs as a safe handoff rather than exposing an
+  // orphaned or unavailable Material Draft page after a resume has been regenerated.
+  if (!draft) redirect("/resume");
+  redirect("/resume");
 }

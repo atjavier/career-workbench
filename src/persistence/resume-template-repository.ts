@@ -12,6 +12,11 @@ export function findDesignatedResumeTemplate(db: DatabaseSync): ResumeTemplateSo
   return row ? source(row) : undefined;
 }
 
+export function findResumeTemplateById(db: DatabaseSync, id: string, contentDigest: string): ResumeTemplateSource | undefined {
+  const row = db.prepare(`SELECT ${columns} FROM resume_template_sources WHERE id = ? AND content_digest = ? AND origin = 'bundled' AND state = 'verified'`).get(id, contentDigest) as Record<string, unknown> | undefined;
+  return row ? source(row) : undefined;
+}
+
 export function findBundledResumeTemplateByDigest(db: DatabaseSync, contentDigest: string): ResumeTemplateSource | undefined {
   const row = db.prepare(`SELECT ${columns} FROM resume_template_sources WHERE origin = 'bundled' AND state = 'verified' AND content_digest = ? ORDER BY created_at ASC LIMIT 1`).get(contentDigest) as Record<string, unknown> | undefined;
   return row ? source(row) : undefined;

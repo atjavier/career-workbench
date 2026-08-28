@@ -17,7 +17,7 @@ async function migrateThrough0019(appDataRoot: string) {
   try {
     database.exec("CREATE TABLE schema_migrations (id TEXT PRIMARY KEY, applied_at TEXT NOT NULL);");
     const record = database.prepare("INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)");
-    for (const migration of migrations.slice(0, -1)) {
+    for (const migration of migrations.filter((migration) => migration.id <= "0019_captured_opportunities")) {
       database.exec(migration.sql);
       record.run(migration.id, "2026-08-20T00:00:00.000Z");
     }

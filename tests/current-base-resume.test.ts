@@ -117,7 +117,7 @@ test("Current Base Resume UI remains a safe retained-history component outside t
   assert.match(ui, /Manual resume review/); assert.match(ui, /Coach not available/);
   assert.match(ui, /Resume Coach is not available/);
   assert.match(ui, /View retained Current Base Resume versions/);
-  assert.match(page, /readCandidateProfileState/); assert.match(page, /ResumeProfileForm/); assert.doesNotMatch(page, /CurrentBaseResume|sourceCount: value\.sources\.length|sourceId,/);
+  assert.match(page, /readCandidateProfileState/); assert.match(page, /ResumeOnboarding/); assert.doesNotMatch(page, /CurrentBaseResume|sourceCount: value\.sources\.length|sourceId,/);
 });
 
 test("faithful original-PDF preview keeps source storage private and route responses security-bound", async () => {

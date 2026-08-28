@@ -20,7 +20,16 @@ export function applyMigrations(database: DatabaseSync): void {
     }
     database.exec("BEGIN IMMEDIATE;");
     try {
-      database.exec(migration.sql);
+      // Migration 0028 repairs databases created while material_drafts still
+      // used the earlier opportunity_id column. Fresh databases already have
+      // the replacement column from 0021, so its ALTER TABLE is intentionally
+      // skipped when that column is present.
+      if (migration.id === "0028_resume_draft_schema_compat") {
+        const columns = database.prepare("PRAGMA table_info(material_drafts)").all() as Array<{ name?: string }>;
+        if (!columns.some((column) => column.name === "opportunity_revision_id")) database.exec(migration.sql);
+      } else {
+        database.exec(migration.sql);
+      }
       recordMigration.run(migration.id, new Date().toISOString());
       database.exec("COMMIT;");
     } catch (error) {

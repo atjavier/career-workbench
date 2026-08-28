@@ -5,7 +5,8 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { approveEvidence, listClaimEligibleEvidence } from "../src/domain/evidence/evidence-commands";
-import { importDocumentedEvidenceArtifacts, listExperienceProjectCollection, resolveCollectionReviewHandle, summaryFromProjectOverview } from "../src/domain/evidence/evidence-library";
+import { importDocumentedEvidenceArtifacts, listExperienceProjectCollection, permanentlyDeleteDocumentedEvidenceItem, resolveCollectionReviewHandle, summaryFromProjectOverview } from "../src/domain/evidence/evidence-library";
+import { createResumeWorkspace } from "../src/domain/resume-generation/resume-workspace-commands";
 import { readUploadedResumeDocumentationSource } from "../src/files/evidence-library";
 
 const unknowns = "ownership, metrics, users, dates, deployment status, outcomes, and skills are unknown unless directly evidenced.";
@@ -14,13 +15,16 @@ async function fixture() {
   await writeFile(join(output, "project-overview.md"), "# Project Overview (Proposed / Unreviewed)\n\n## Purpose\n\n- Built a local accessibility report for review. More detail is not needed.\n\n## Limitations and Unknowns\n\n- Unknown: " + unknowns, "utf8");
   await writeFile(join(output, "resume-evidence.md"), "# Resume Evidence (Proposed / Unreviewed)\n\n> Explicit import and individual approval are required.\n\n## Evidence Items\n\n### E-001\n\n- Fact: Built a local accessibility report for review.\n- Provenance: [README.md, Overview, line 3]\n- Explicit unknowns: " + unknowns + "\n- Status: Proposed / unreviewed\n", "utf8");
   await writeFile(join(output, "resume-bullet-candidates.md"), "# Resume Bullet Candidates (Proposed / Unreviewed)\n\n> Explicit import and individual approval are required.\n\n## Candidate Bullets\n\n### B-001\n\n- Candidate: Built a local accessibility report for review.\n- Supporting evidence: E-001\n- Explicit unknowns: " + unknowns + "\n- Status: Proposed / unreviewed; not claim-eligible\n", "utf8");
-  return { root, output, appDataRoot: join(root, "private"), workspaceRoot: join(root, "workspace") };
+  const appDataRoot = join(root, "private");
+  await createResumeWorkspace({ appDataRoot, name: "Test resume" });
+  return { root, output, appDataRoot, workspaceRoot: join(root, "workspace") };
 }
 
-test("imports exactly the three generated review artifacts, leaves their output unchanged, and keeps evidence unreviewed", async () => {
+test("imports the generated documentation set, leaves its output unchanged, and keeps evidence unreviewed", async () => {
   const value = await fixture(); try {
     const before = await readFile(join(value.output, "resume-evidence.md"));
-    const result = await importDocumentedEvidenceArtifacts({ ...value, outputDirectory: value.output, name: "Accessibility Report", category: "project" });
+    const sourceSnapshot = { sourceDigest: `sha256:${"a".repeat(64)}`, files: [{ path: "README.md", text: "# A heading whose display text changed\n\n- Built a local accessibility report for review.\n", contentDigest: `sha256:${"b".repeat(64)}` }] };
+    const result = await importDocumentedEvidenceArtifacts({ ...value, outputDirectory: value.output, name: "Accessibility Report", category: "project", sourceSnapshot });
     assert.equal(result.documentsAdded, 3); assert.equal(result.candidatesAdded, 1);
     assert.deepEqual(await readFile(join(value.output, "resume-evidence.md")), before);
     assert.equal((await lstat(join(value.workspaceRoot, "resume-evidence", "projects", "Accessibility-Report", "project-overview.md"))).isFile(), true);
@@ -28,6 +32,53 @@ test("imports exactly the three generated review artifacts, leaves their output 
     assert.equal((await listClaimEligibleEvidence({ appDataRoot: value.appDataRoot })).length, 0);
     const review = await resolveCollectionReviewHandle(collection[0].evidence[0].reviewHandle, value); await approveEvidence({ appDataRoot: value.appDataRoot, ...review });
     assert.equal((await listClaimEligibleEvidence({ appDataRoot: value.appDataRoot })).length, 1);
+  } finally { await rm(value.root, { recursive: true, force: true }); }
+});
+
+test("permanently deleting documented work removes its workspace records and managed folder", async () => {
+  const value = await fixture(); try {
+    await importDocumentedEvidenceArtifacts({ ...value, outputDirectory: value.output, name: "Accessibility Report", category: "project" });
+    const managedDirectory = join(value.workspaceRoot, "resume-evidence", "projects", "Accessibility-Report");
+    assert.equal((await lstat(managedDirectory)).isDirectory(), true);
+    const deleted = await permanentlyDeleteDocumentedEvidenceItem({ ...value, category: "project", name: "Accessibility-Report", confirmation: "DELETE" });
+    assert.equal(deleted.artifactCleanupIncomplete, false);
+    assert.equal(deleted.findingsDeleted, 1);
+    assert.deepEqual(await listExperienceProjectCollection(value), []);
+    await assert.rejects(lstat(managedDirectory), { code: "ENOENT" });
+  } finally { await rm(value.root, { recursive: true, force: true }); }
+});
+
+test("reclaims an unregistered managed folder before importing the same documented project", async () => {
+  const value = await fixture(); try {
+    const orphan = join(value.workspaceRoot, "resume-evidence", "projects", "Accessibility-Report");
+    await mkdir(orphan, { recursive: true });
+    await writeFile(join(orphan, "resume-evidence.md"), "orphaned generated content", "utf8");
+    const result = await importDocumentedEvidenceArtifacts({ ...value, outputDirectory: value.output, name: "Accessibility-Report", category: "project" });
+    assert.equal(result.candidatesAdded, 1);
+    assert.equal((await lstat(join(orphan, "project-overview.md"))).isFile(), true);
+    assert.equal(await readFile(join(orphan, "resume-evidence.md"), "utf8").then((text) => text.includes("orphaned generated content")), false);
+  } finally { await rm(value.root, { recursive: true, force: true }); }
+});
+
+test("refuses to attach a completed documentation import after the active resume changes", async () => {
+  const value = await fixture(); try {
+    const first = await createResumeWorkspace({ appDataRoot: value.appDataRoot, name: "Original resume" });
+    await createResumeWorkspace({ appDataRoot: value.appDataRoot, name: "Different resume", expectedRevisionNumber: first.revisionNumber });
+    await assert.rejects(importDocumentedEvidenceArtifacts({ ...value, outputDirectory: value.output, name: "Stale documentation", category: "project", expectedWorkspaceId: first.workspace.id }), { code: "RESUME_WORKSPACE_STALE" });
+    await assert.rejects(lstat(join(value.workspaceRoot, "resume-evidence", "projects", "Stale-documentation")), { code: "ENOENT" });
+    assert.deepEqual(await listExperienceProjectCollection(value), []);
+  } finally { await rm(value.root, { recursive: true, force: true }); }
+});
+
+test("documented work retains a BMad-style supporting documentation set beside the resume artifacts", async () => {
+  const value = await fixture(); try {
+    await writeFile(join(value.output, "architecture.md"), "# Architecture\n\n> Generated from a bounded local scan.\n\n## Entry points\n\n- `src/server.js`\n", "utf8");
+    await writeFile(join(value.output, "source-tree-analysis.md"), "# Source Tree Analysis\n\n- `src/server.js`\n", "utf8");
+    await writeFile(join(value.output, "resume-summary.md"), "# Resume Summary (Proposed / Unreviewed)\n\nBuilt a local accessibility report for review.\n", "utf8");
+    const result = await importDocumentedEvidenceArtifacts({ ...value, outputDirectory: value.output, name: "Documented Set", category: "project" });
+    assert.equal(result.documentsAdded, 6);
+    const collection = await listExperienceProjectCollection(value);
+    assert.deepEqual(collection[0]?.artifactNames, ["architecture.md", "project-overview.md", "resume-bullet-candidates.md", "resume-evidence.md", "resume-summary.md", "source-tree-analysis.md"]);
   } finally { await rm(value.root, { recursive: true, force: true }); }
 });
 
@@ -56,6 +107,16 @@ test("a valid no-supported-evidence document set remains reviewable without manu
     await writeFile(join(value.output, "resume-evidence.md"), "# Resume Evidence (Proposed / Unreviewed)\n\n> Explicit import and individual approval are required.\n\n## Evidence Items\n\n- No supported evidence items found.\n", "utf8"); await writeFile(join(value.output, "resume-bullet-candidates.md"), "# Resume Bullet Candidates (Proposed / Unreviewed)\n\n## Candidate Bullets\n\n- No supported bullet candidates found.\n", "utf8");
     const result = await importDocumentedEvidenceArtifacts({ ...value, outputDirectory: value.output, name: "No Evidence", category: "experience" });
     assert.equal(result.documentsAdded, 3); assert.equal(result.candidatesAdded, 0); assert.equal((await listExperienceProjectCollection(value))[0].evidence.length, 0);
+  } finally { await rm(value.root, { recursive: true, force: true }); }
+});
+
+test("imports provenance from Next.js bracketed route paths without mistaking the route segment for a provenance wrapper", async () => {
+  const value = await fixture(); try {
+    const fact = "export default async function PlaceholderPage({ params }: { params: Promise<{ section: string }> }) {";
+    await writeFile(join(value.output, "resume-evidence.md"), `# Resume Evidence (Proposed / Unreviewed)\n\n### E-001\n- Fact: ${fact}\n- Provenance: src/app/[section]/page.tsx, document, line 2\n- Explicit unknowns: ${unknowns}\n- Status: Proposed / unreviewed\n`, "utf8");
+    await writeFile(join(value.output, "resume-bullet-candidates.md"), `# Resume Bullet Candidates (Proposed / Unreviewed)\n\n### B-001\n- Candidate: ${fact}\n- Supporting evidence: E-001\n- Explicit unknowns: ${unknowns}\n- Status: Proposed / unreviewed; not claim-eligible\n`, "utf8");
+    const result = await importDocumentedEvidenceArtifacts({ ...value, outputDirectory: value.output, name: "Bracketed route", category: "project", sourceSnapshot: { sourceDigest: `sha256:${"a".repeat(64)}`, files: [{ path: "src/app/[section]/page.tsx", text: "// route\n" + fact + "\n", contentDigest: `sha256:${"b".repeat(64)}` }] } });
+    assert.equal(result.candidatesAdded, 1);
   } finally { await rm(value.root, { recursive: true, force: true }); }
 });
 

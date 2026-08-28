@@ -6,6 +6,7 @@ import { resolveAppDataPaths } from "@/files/app-data";
 import { applyMigrations, openDatabase } from "@/persistence/database";
 import { findCandidateProfile, findCandidateProfileRevision, insertCandidateProfile, insertCandidateProfileRevision, latestCandidateProfileRevision, readResumeGenerationState, selectActiveProfileRevision, type CandidateProfile, type CandidateProfileRevision, type CandidateProfileValues, type ResumeGenerationState } from "@/persistence/candidate-profile-repository";
 import { appendAuditEvent } from "@/persistence/workspace-repository";
+import { attachProfileToWorkspace, readActiveResumeWorkspace } from "@/persistence/resume-workspace-repository";
 
 type Options = { appDataRoot?: string };
 export type CandidateProfileInput = { firstName: string; middleName?: string; lastName: string; email: string; phone: string; school: string; program: string; graduationYear: string | number; gwa?: string; latinHonors?: string; linkedInUrl?: string; githubUrl?: string };
@@ -59,12 +60,13 @@ export async function saveCandidateProfile(input: SaveCandidateProfileInput): Pr
   const values = normalize(input.values);
   const paths = await resolveAppDataPaths(input.appDataRoot);
   return transaction(paths.root, (db) => {
-    const currentState = readResumeGenerationState(db);
-    const expectedStateRevisionNumber = input.expectedStateRevisionNumber ?? (currentState.activeProfileRevisionId ? Number.NaN : currentState.revisionNumber);
-    if (!Number.isSafeInteger(expectedStateRevisionNumber) || expectedStateRevisionNumber !== currentState.revisionNumber) throw new WorkspaceError("CANDIDATE_PROFILE_STALE", "Your profile changed before it could be saved.", "Refresh your profile details and try again.");
-    const activeRevision = currentState.activeProfileRevisionId ? findCandidateProfileRevision(db, currentState.activeProfileRevisionId) : undefined;
-    if (currentState.activeProfileRevisionId && (!activeRevision || input.profileId !== activeRevision.profileId)) throw new WorkspaceError("CANDIDATE_PROFILE_STALE", "Your profile changed before it could be saved.", "Refresh your profile details and try again.");
-    if (!currentState.activeProfileRevisionId && input.profileId) throw new WorkspaceError("CANDIDATE_PROFILE_STALE", "Your profile changed before it could be saved.", "Refresh your profile details and try again.");
+    const workspaceState = readActiveResumeWorkspace(db); const workspace = workspaceState.workspace;
+    if (!workspace) throw new WorkspaceError("RESUME_WORKSPACE_NOT_FOUND", "Create a resume workspace before saving profile details.", "Name your first resume workspace to begin.");
+    const expectedStateRevisionNumber = input.expectedStateRevisionNumber ?? (workspace.activeProfileRevisionId ? Number.NaN : workspaceState.revisionNumber);
+    if (!Number.isSafeInteger(expectedStateRevisionNumber) || expectedStateRevisionNumber !== workspaceState.revisionNumber) throw new WorkspaceError("CANDIDATE_PROFILE_STALE", "Your profile changed before it could be saved.", "Refresh your profile details and try again.");
+    const activeRevision = workspace.activeProfileRevisionId ? findCandidateProfileRevision(db, workspace.activeProfileRevisionId) : undefined;
+    if (workspace.activeProfileRevisionId && (!activeRevision || input.profileId !== activeRevision.profileId)) throw new WorkspaceError("CANDIDATE_PROFILE_STALE", "Your profile changed before it could be saved.", "Refresh your profile details and try again.");
+    if (!workspace.activeProfileRevisionId && input.profileId) throw new WorkspaceError("CANDIDATE_PROFILE_STALE", "Your profile changed before it could be saved.", "Refresh your profile details and try again.");
     const now = new Date().toISOString();
     const profile = activeRevision ? findCandidateProfile(db, activeRevision.profileId) : { id: createUuidV7(), createdAt: now };
     if (!profile) throw new WorkspaceError("CANDIDATE_PROFILE_NOT_FOUND", "That candidate profile is unavailable.", "Refresh your profile details and try again.");
@@ -73,19 +75,18 @@ export async function saveCandidateProfile(input: SaveCandidateProfileInput): Pr
     const canonical = canonicalContent(values);
     const revision: CandidateProfileRevision = { id: createUuidV7(), profileId: profile.id, revisionNumber: (previous?.revisionNumber ?? 0) + 1, parentRevisionId: previous?.id, values, canonicalContent: canonical, contentDigest: digest(canonical), createdAt: now };
     insertCandidateProfileRevision(db, revision);
-    const nextState = selectActiveProfileRevision(db, expectedStateRevisionNumber, revision.id, now);
-    if (!nextState) throw new WorkspaceError("CANDIDATE_PROFILE_STALE", "Your profile changed before it could be saved.", "Refresh your profile details and try again.");
+    if (!attachProfileToWorkspace(db, workspace.id, profile.id, revision.id, now)) throw new WorkspaceError("CANDIDATE_PROFILE_STALE", "Your profile changed before it could be saved.", "Refresh your profile details and try again.");
     appendAuditEvent(db, createAuditEvent({ actor: "local-os-user", action: "resume.profile_saved", outcome: "success", entityId: revision.id, contentHash: revision.contentDigest }));
-    return { profile, revision, stateRevisionNumber: nextState.revisionNumber };
+    return { profile, revision, stateRevisionNumber: workspaceState.revisionNumber + 1 };
   });
 }
 
 export async function readCandidateProfileState(input: Options = {}): Promise<CandidateProfileState> {
   const paths = await resolveAppDataPaths(input.appDataRoot);
   return transaction(paths.root, (db) => {
-    const state = readResumeGenerationState(db);
-    if (!state.activeProfileRevisionId) return { state };
-    const revision = findCandidateProfileRevision(db, state.activeProfileRevisionId);
+    const state = readResumeGenerationState(db); const workspaceState = readActiveResumeWorkspace(db);
+    if (!workspaceState.workspace?.activeProfileRevisionId) return { state: { ...state, revisionNumber: workspaceState.revisionNumber, activeProfileRevisionId: undefined } };
+    const revision = findCandidateProfileRevision(db, workspaceState.workspace.activeProfileRevisionId);
     if (!revision) return { state };
     return { state, profile: findCandidateProfile(db, revision.profileId), revision };
   });

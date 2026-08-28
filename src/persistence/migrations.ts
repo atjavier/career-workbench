@@ -28,4 +28,9 @@ export const migrations = [
   { id: "0022_ai_opportunity_assessments", sql: readFileSync(join(migrationDirectory, "0022_ai_opportunity_assessments.sql"), "utf8") },
   { id: "0023_resume_coach_consents", sql: readFileSync(join(migrationDirectory, "0023_resume_coach_consents.sql"), "utf8") },
   { id: "0024_captured_fit_assessments", sql: readFileSync(join(migrationDirectory, "0024_captured_fit_assessments.sql"), "utf8") },
+  { id: "0025_resume_workspaces", sql: readFileSync(join(migrationDirectory, "0025_resume_workspaces.sql"), "utf8") },
+  { id: "0026_resume_workspace_ownership", sql: readFileSync(join(migrationDirectory, "0026_resume_workspace_ownership.sql"), "utf8") },
+  { id: "0027_resume_coach_documented_evidence", sql: readFileSync(join(migrationDirectory, "0027_resume_coach_documented_evidence.sql"), "utf8") },
+  { id: "0028_resume_draft_schema_compat", sql: readFileSync(join(migrationDirectory, "0028_resume_draft_schema_compat.sql"), "utf8") },
+  { id: "0029_resume_generation_jobs", sql: readFileSync(join(migrationDirectory, "0029_resume_generation_jobs.sql"), "utf8") },
 ] as const;

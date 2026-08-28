@@ -4,9 +4,10 @@ import { initializeWorkspace } from "@/domain/workspace/initialize-workspace";
 import { importBaseResume, maximumBaseResumeFiles, maximumBaseResumeFileSize, maximumBaseResumeTotalSize } from "@/domain/base-resume/import-base-resume";
 import { toSafeWorkspaceError, WorkspaceError } from "@/domain/workspace/types";
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { addManualEvidence, approveEvidence, editEvidence, extractEvidenceFromBaseResume, rejectEvidence, removeEvidence, recordEvidenceFailure } from "@/domain/evidence/evidence-commands";
 import { cleanupExpiredTrash, createActivityHistoryExport, createLocalBackup, permanentlyDeleteBackup, recordDataStorageFailure, restoreActivityHistoryExport, trashActivityHistoryExport } from "@/domain/data-storage/data-storage";
-import { addExperienceToEvidenceLibrary, addProjectToEvidenceLibrary, documentResumeEvidenceFolder, importDocumentedEvidenceArtifacts, recordEvidenceLibraryFailure, refreshEvidenceLibrary, resolveCollectionReviewHandle } from "@/domain/evidence/evidence-library";
+import { addExperienceToEvidenceLibrary, addProjectToEvidenceLibrary, documentResumeEvidenceFolder, importDocumentedEvidenceArtifacts, permanentlyDeleteDocumentedEvidenceItem, recordEvidenceLibraryFailure, refreshEvidenceLibrary, resolveCollectionReviewHandle } from "@/domain/evidence/evidence-library";
 import { documentWithLocalModel } from "@/adapters/evidence-documenter/lm-studio-documenter";
 import { documentFolderForResume, recordDocumenterFailure, resolveDocumenterProposal } from "@/domain/evidence/evidence-documenter";
 import { approveCurrentBaseResumeVersion, generateCurrentBaseResumeProposals, importCurrentBaseResume, resolveCurrentBaseResumeProposal, saveCurrentBaseResumeDraft } from "@/domain/current-base-resume/current-base-resume-commands";
@@ -21,37 +22,110 @@ import { confirmCapturedOpportunity } from "@/domain/opportunities/captured-oppo
 import { resolveAppDataPaths } from "@/files/app-data";
 import { applyMigrations, openDatabase } from "@/persistence/database";
 import { saveCandidateProfile, type CandidateProfileInput } from "@/domain/resume-generation/candidate-profile-commands";
-import { requestResumeCoach, resumeCoachConsentFingerprint, type ResumeCoachResponse } from "@/adapters/local-model/local-model-gateway";
+import { requestBaseResumeGeneration, requestResumeCoachReview, resumeCoachConsentFingerprint, type ResumeCoachDocumentation, type ResumeCoachResponse, type ResumeCoachReviewResponse } from "@/adapters/local-model/local-model-gateway";
 import { readLocalModelGatewayConfiguration } from "@/domain/resume-generation/local-model-configuration-commands";
 import { configureLocalModel } from "@/domain/resume-generation/local-model-configuration-commands";
 import { readCandidateProfileState } from "@/domain/resume-generation/candidate-profile-commands";
-import { listApprovedEvidence } from "@/persistence/evidence-repository";
+import { listCurrentEvidence } from "@/persistence/evidence-repository";
 import { appendAuditEvent } from "@/persistence/workspace-repository";
-import { createAuditEvent } from "@/audit/audit-event";
+import { createAuditEvent, createUuidV7 } from "@/audit/audit-event";
 import { findDesignatedResumeTemplate } from "@/persistence/resume-template-repository";
+import { listWorkspaceDocumentedEvidenceIds, readActiveResumeWorkspace } from "@/persistence/resume-workspace-repository";
 import { persistResumeCoachDraft } from "@/domain/resume-generation/resume-coach-commands";
-import { findCapturedRevision, listCapturedRevisions, parseStoredRequirements } from "@/persistence/captured-opportunities-repository";
-import { handOffMaterialDraft } from "@/domain/resume-generation/material-draft-commands";
+import { bootstrapBundledResumeTemplate } from "@/domain/resume-generation/resume-template-commands";
+import { handOffMaterialDraft, readMaterialDraft } from "@/domain/resume-generation/material-draft-commands";
 import { assessCapturedOpportunity, recordOpportunityDecision, type OpportunityAssessmentView } from "@/domain/fit/ai-opportunity-assessment";
+import { createResumeWorkspace, permanentlyDeleteResumeWorkspace, readResumeWorkspaceState, selectResumeWorkspace } from "@/domain/resume-generation/resume-workspace-commands";
+import { chooseLocalEvidenceFolder } from "@/files/local-folder-picker";
+import { readManagedDocumentedArtifacts } from "@/files/evidence-library";
+import { getResumeAgentSkill } from "@/domain/resume-agent/skill-registry";
+import { beginResumeGenerationJob } from "@/domain/resume-generation/resume-generation-jobs";
+import { runResumeGenerationJob } from "@/domain/resume-generation/resume-generation-runner";
 
 export type WorkspaceActionState = {
   status: "idle" | "success" | "error";
   summary: string;
   safeNextAction?: string;
+  workspaceId?: string;
 };
 
 type CandidateProfileField = keyof CandidateProfileInput;
 export type CandidateProfileActionState = WorkspaceActionState & { fieldErrors?: Partial<Record<CandidateProfileField, string>> };
 export type ResumeCoachActionState = WorkspaceActionState & { response?: ResumeCoachResponse; draftId?: string; evidenceLabels?: string[] };
+export type ResumeCoachReviewActionState = WorkspaceActionState & { review?: ResumeCoachReviewResponse };
 export type MaterialDraftHandoffActionState = WorkspaceActionState & { draftId?: string };
 export type OpportunityAssessmentActionState = WorkspaceActionState & { assessment?: OpportunityAssessmentView; decisionId?: string };
 
+function ensureProfileSections(response: ResumeCoachResponse, values: { firstName: string; middleName?: string; lastName: string; email: string; phone: string; school: string; program: string; graduationYear: number; gwa?: string; latinHonors?: string; linkedInUrl?: string; githubUrl?: string }): ResumeCoachResponse {
+  // The Resume.pdf/Oboda layout leads directly with Experience. A generic
+  // summary is both low-signal for this candidate and pushes stronger work
+  // below the first scan area, so strip it even when a local model adds one.
+  const sections = response.sections.map((section) => ({ ...section, heading: section.heading.trim() })).filter((section) => !/summary|profile|objective|contact/i.test(section.heading));
+  const pick = (pattern: RegExp) => sections.find((section) => pattern.test(section.heading));
+  const name = [values.firstName, values.middleName, values.lastName].filter(Boolean).join(" ");
+  const contact = [values.email, values.phone, values.linkedInUrl, values.githubUrl].filter(Boolean).join(" | ");
+  const education = [values.program, values.school, String(values.graduationYear), values.gwa ? `GWA ${values.gwa}` : undefined, values.latinHonors].filter(Boolean).join(" | ");
+  const ordered = [
+    { heading: "Contact", text: contact ? `${name}\n${contact}` : name },
+    pick(/^(?:experience|employment|work history)$/i),
+    pick(/^education$/i) ?? { heading: "Education", text: education },
+    pick(/^projects?$/i),
+    pick(/^(?:technical skills|skills)$/i),
+  ].filter((section): section is { heading: string; text: string } => Boolean(section && section.text.trim()));
+  return { ...response, sections: ordered };
+}
+
 export async function localModelSettingsAction(_: WorkspaceActionState, formData: FormData): Promise<WorkspaceActionState> {
   try {
-    await configureLocalModel({ modelIdentifier: String(formData.get("modelIdentifier") ?? ""), token: String(formData.get("token") ?? "") });
+    await configureLocalModel({ modelIdentifier: String(formData.get("modelIdentifier") ?? "") });
     revalidatePath("/settings"); revalidatePath("/resume");
     return { status: "success", summary: "Local AI is ready to use on this computer." };
   } catch (error) { const safe = toSafeWorkspaceError(error); return { status: "error", summary: safe.summary, safeNextAction: safe.safeNextAction }; }
+}
+
+export async function resumeWorkspaceAction(_: WorkspaceActionState, formData: FormData): Promise<WorkspaceActionState> {
+  try {
+    const command = String(formData.get("workspaceCommand") ?? ""); const expectedRevisionNumber = Number(formData.get("expectedRevisionNumber") ?? Number.NaN);
+    if (!Number.isSafeInteger(expectedRevisionNumber)) throw new WorkspaceError("RESUME_WORKSPACE_STALE", "Your resume workspace changed before this action.", "Refresh Resume and try again.");
+    if (command === "create") await createResumeWorkspace({ name: String(formData.get("name") ?? ""), expectedRevisionNumber });
+    else if (command === "select") await selectResumeWorkspace({ workspaceId: String(formData.get("workspaceId") ?? ""), expectedRevisionNumber });
+    else if (command === "delete") { const result = await permanentlyDeleteResumeWorkspace({ workspaceId: String(formData.get("workspaceId") ?? ""), expectedRevisionNumber, confirmation: String(formData.get("confirmation") ?? "") }); revalidatePath("/evidence"); revalidatePath("/settings"); revalidatePath("/resume"); return { status: "success", summary: result.artifactCleanupIncomplete ? `Resume workspace permanently deleted. ${result.reclaimedBytes.toLocaleString()} bytes reclaimed from the database; close any program using its evidence folder to finish removing those files.` : `Resume workspace permanently deleted. ${result.reclaimedBytes.toLocaleString()} bytes reclaimed from local storage.` }; }
+    else throw new WorkspaceError("RESUME_WORKSPACE_INVALID", "The requested resume workspace action is unavailable.", "Create, switch, or explicitly delete a resume workspace.");
+    revalidatePath("/resume"); revalidatePath("/evidence"); return { status: "success", summary: command === "create" ? "New resume workspace created." : "Resume workspace switched." };
+  } catch (error) { const safe = toSafeWorkspaceError(error); return { status: "error", summary: safe.summary, safeNextAction: safe.safeNextAction }; }
+}
+
+export type FolderPickerActionState = WorkspaceActionState & { folderPath?: string; folderName?: string };
+export async function chooseLocalEvidenceFolderAction(_: FolderPickerActionState): Promise<FolderPickerActionState> {
+  try { const folderPath = await chooseLocalEvidenceFolder(); return folderPath ? { status: "success", summary: "Local folder selected.", folderPath, folderName: folderPath.split(/[\\/]/).filter(Boolean).at(-1) } : { status: "idle", summary: "No folder selected." }; } catch (error) { const safe = toSafeWorkspaceError(error); return { status: "error", summary: safe.summary, safeNextAction: safe.safeNextAction }; }
+}
+
+export async function resumeOnboardingAction(_: WorkspaceActionState, formData: FormData): Promise<WorkspaceActionState> {
+  let created: { workspace: { id: string }; revisionNumber: number } | undefined;
+  try {
+    const count = Number(formData.get("workCount") ?? 1); if (!Number.isInteger(count) || count < 1 || count > 12) throw new WorkspaceError("EVIDENCE_DOCUMENTER_INVALID", "Choose between one and twelve local work folders.", "Review your Project and Experience folders, then try again.");
+    const work = Array.from({ length: count }, (_, index) => { const category = String(formData.get(`category-${index}`) ?? ""); const sourceDirectory = String(formData.get(`sourceDirectory-${index}`) ?? "").trim(); if ((category !== "project" && category !== "experience") || !sourceDirectory) throw new WorkspaceError("EVIDENCE_DOCUMENTER_INVALID", "Each Project or Experience needs one local folder.", "Use Browse local folder for every work item and try again."); return { category: category as "project" | "experience", name: String(formData.get(`itemName-${index}`) ?? ""), sourceDirectory }; });
+    created = await createResumeWorkspace({ name: String(formData.get("resumeName") ?? "") });
+    await saveCandidateProfile({ expectedStateRevisionNumber: created.revisionNumber, values: { firstName: String(formData.get("firstName") ?? ""), middleName: String(formData.get("middleName") ?? ""), lastName: String(formData.get("lastName") ?? ""), email: String(formData.get("email") ?? ""), phone: String(formData.get("phone") ?? ""), school: String(formData.get("school") ?? ""), program: String(formData.get("program") ?? ""), graduationYear: String(formData.get("graduationYear") ?? ""), gwa: String(formData.get("gwa") ?? ""), latinHonors: String(formData.get("latinHonors") ?? ""), linkedInUrl: String(formData.get("linkedInUrl") ?? ""), githubUrl: String(formData.get("githubUrl") ?? "") } });
+    if (formData.get("localModelDisclosure") !== "yes") throw new WorkspaceError("EVIDENCE_DOCUMENTER_INVALID", "Confirm that your selected folders may be inspected by local AI.", "Select the local documentation consent checkbox and try again.");
+    await bootstrapBundledResumeTemplate();
+    const job = await beginResumeGenerationJob(created.workspace.id);
+    after(() => runResumeGenerationJob(job.id, work));
+    revalidatePath("/resume"); revalidatePath("/evidence");
+    return { status: "success", workspaceId: created.workspace.id, summary: `Your profile and ${work.length} local work folder${work.length === 1 ? "" : "s"} are saved. Resume generation is starting in the background.` };
+  } catch (error) {
+    // Saving the profile advances the workspace revision. If a later
+    // onboarding step fails, use the current revision to remove only the
+    // workspace this request created rather than silently retaining it.
+    if (created) {
+      const createdWorkspace = created.workspace;
+      const state = await readResumeWorkspaceState().catch(() => undefined);
+      if (state?.workspaces.some((workspace) => workspace.id === createdWorkspace.id)) {
+        await permanentlyDeleteResumeWorkspace({ workspaceId: createdWorkspace.id, expectedRevisionNumber: state.revisionNumber, confirmation: "DELETE" }).catch(() => undefined);
+      }
+    }
+    const safe = toSafeWorkspaceError(error); return { status: "error", summary: safe.summary, safeNextAction: safe.safeNextAction };
+  }
 }
 
 export async function opportunityAssessmentAction(_: OpportunityAssessmentActionState, formData: FormData): Promise<OpportunityAssessmentActionState> {
@@ -64,37 +138,53 @@ export async function opportunityAssessmentAction(_: OpportunityAssessmentAction
   } catch (error) { const safe = toSafeWorkspaceError(error); return { status: "error", summary: safe.summary, safeNextAction: safe.safeNextAction }; }
 }
 
-export async function resumeCoachAction(_: ResumeCoachActionState, formData: FormData): Promise<ResumeCoachActionState> {
-  const userRequest = String(formData.get("request") ?? "");
+export async function generateBaseResumeAction(_: ResumeCoachActionState, formData: FormData): Promise<ResumeCoachActionState> {
+  const generationCommand = String(formData.get("generationCommand") ?? "initial");
+  const expectedWorkspaceId = String(formData.get("workspaceId") ?? "").trim();
+  const requestedRevision = String(formData.get("resumeRequest") ?? "").trim();
+  if (generationCommand !== "initial" && generationCommand !== "revision") return { status: "error", summary: "The requested resume action is unavailable.", safeNextAction: "Refresh Resume and try the requested change again." };
+  if (generationCommand === "revision" && !requestedRevision) return { status: "error", summary: "Describe the small supported change before updating your resume.", safeNextAction: "State the wording, emphasis, or correction you want the Resume Coach to apply." };
+  const userRequest = requestedRevision ? `Create a revised base resume from my saved profile and all documented work. Apply this narrow, evidence-supported revision only: ${requestedRevision}` : "Create a base resume draft from my saved profile and all documented work.";
   let auditContext: { databasePath: string; profileRevisionId: string; fingerprint: string } | undefined;
   try {
-    if (formData.get("consent") !== "yes") throw new WorkspaceError("RESUME_COACH_INVALID", "Confirm what Resume Coach may read before sending the request.", "Select the local-model consent checkbox and try again.");
+    const skill = getResumeAgentSkill("resume.generate-base-resume");
+    if (!skill.requiresConsent || !skill.workflow.includes("make every visible Experience or Projects bullet candidate-facing, outcome-oriented, and linked to a documented finding")) throw new WorkspaceError("RESUME_COACH_INVALID", "The base-resume skill policy is unavailable.", "Review the configured Resume Coach skill and try again.");
     const configured = await readLocalModelGatewayConfiguration();
-    const connection = { configurationRevisionId: configured.id, configurationDigest: configured.configurationDigest, modelIdentifier: configured.modelIdentifier, token: configured.token };
+    const connection = { configurationRevisionId: configured.id, configurationDigest: configured.configurationDigest, modelIdentifier: configured.modelIdentifier };
     const profile = await readCandidateProfileState(); if (!profile.revision) throw new WorkspaceError("RESUME_COACH_INVALID", "Save your profile details before asking Resume Coach.", "Complete and save your profile details first.");
-    const selectedIds = [...new Set(formData.getAll("evidenceId").map(String))];
-    const paths = await resolveAppDataPaths(); const db = openDatabase(paths.databasePath); let evidence; let template; let opportunity;
+    const paths = await resolveAppDataPaths(); const db = openDatabase(paths.databasePath); let evidence; let template; let workspaceId: string; let ownedDocumentPaths = new Set<string>();
     try {
-      applyMigrations(db); evidence = listApprovedEvidence(db); template = findDesignatedResumeTemplate(db);
-      const selectedOpportunityRevisionId = String(formData.get("opportunityRevisionId") ?? "");
-      if (selectedOpportunityRevisionId) {
-        const selectedRevision = findCapturedRevision(db, selectedOpportunityRevisionId);
-        const currentRevision = selectedRevision ? listCapturedRevisions(db, selectedRevision.opportunityId).at(-1) : undefined;
-        if (!selectedRevision || currentRevision?.id !== selectedRevision.id) throw new WorkspaceError("RESUME_COACH_INVALID", "The selected opportunity is no longer available.", "Choose a current local opportunity and confirm the request again.");
-        opportunity = { revisionId: selectedRevision.id, contentDigest: selectedRevision.contentDigest, title: selectedRevision.title, company: selectedRevision.company, requirements: parseStoredRequirements(selectedRevision.requirements), copiedDescription: selectedRevision.copiedDescription };
-      }
+      applyMigrations(db); const workspace = readActiveResumeWorkspace(db).workspace; if (!workspace) throw new WorkspaceError("RESUME_COACH_INVALID", "Create a resume workspace before asking Resume Coach.", "Name your first resume workspace and complete onboarding."); if (!expectedWorkspaceId || workspace.id !== expectedWorkspaceId) throw new WorkspaceError("RESUME_WORKSPACE_STALE", "That resume was changed or deleted before its PDF could be created.", "Open the intended resume workspace and start generation again."); workspaceId = workspace.id; const allowed = new Set(listWorkspaceDocumentedEvidenceIds(db, workspace.id)); evidence = listCurrentEvidence(db).filter((item) => allowed.has(item.id)); ownedDocumentPaths = new Set((db.prepare("SELECT d.library_path AS path FROM evidence_library_documents d JOIN evidence_library_imports i ON i.id = d.import_id JOIN resume_workspace_imports w ON w.import_id = i.id WHERE w.workspace_id = ?").all(workspace.id) as Array<{ path: string }>).map((item) => item.path)); template = findDesignatedResumeTemplate(db);
     } finally { db.close(); }
-    if (!template) throw new WorkspaceError("RESUME_COACH_INVALID", "A verified Resume template is required before asking Resume Coach.", "Refresh Resume, then try again.");
-    const selected = evidence.filter((item) => selectedIds.includes(item.id)).map(({ id, contentDigest, factualText, sourceDocument, sourceSection }) => ({ id, contentDigest, factualText, label: `Approved evidence: ${sourceDocument} — ${sourceSection}` }));
-    if (!selected.length || selected.length !== selectedIds.length) throw new WorkspaceError("RESUME_COACH_INVALID", "Choose at least one currently approved Experience or Projects item.", "Review the approved material selection and try again.");
-    const consentNonce = String(formData.get("consentNonce") ?? "");
+    if (!template) {
+      await bootstrapBundledResumeTemplate();
+      const templateDb = openDatabase(paths.databasePath);
+      try { applyMigrations(templateDb); template = findDesignatedResumeTemplate(templateDb); } finally { templateDb.close(); }
+    }
+    if (!template) throw new WorkspaceError("RESUME_COACH_INVALID", "A verified Resume template is required before asking Resume Coach.", "Restore the bundled Resume.pdf file and try again.");
+    const selectedIds = evidence.map((item) => item.id);
+    const selected = evidence.filter((item) => selectedIds.includes(item.id)).map(({ id, contentDigest, factualText, sourceDocument, sourceSection }) => ({ id, contentDigest, factualText, sourceDocument, sourceSection, label: `Documented finding: ${sourceDocument} — ${sourceSection}` }));
+    if (!selected.length || selected.length !== selectedIds.length) throw new WorkspaceError("RESUME_COACH_INVALID", "Choose at least one currently documented Experience or Projects finding.", "Review the documented material selection and try again.");
+    // The complete documentation set remains available in Experience &
+    // Projects. Resume generation receives every provenance-locked finding
+    // plus only the two curated resume handoff documents, so architecture,
+    // source-tree, configuration, and setup notes cannot distract the
+    // employer-side writer or be mistaken for resume copy.
+    const documentation: ResumeCoachDocumentation[] = (await readManagedDocumentedArtifacts().catch(() => [])).filter((group) => group.documents.some((document) => ownedDocumentPaths.has(document.libraryPath))).map((group) => ({ name: group.name, category: group.category, documents: group.documents.filter((document) => /(?:resume-evidence|resume-bullet-candidates)\.md$/i.test(document.libraryPath)).map((document) => ({ path: document.libraryPath.split("/").at(-1) ?? document.libraryPath, text: document.text.slice(0, 12_000), contentDigest: document.contentDigest })) })).filter((group) => group.documents.length > 0);
+    const consentNonce = createUuidV7();
     const profileSnapshot = profile.revision.canonicalContent;
-    const consentFingerprint = resumeCoachConsentFingerprint({ connection, profileRevisionId: profile.revision.id, profileDigest: profile.revision.contentDigest, profileSnapshot, templateId: template.id, templateDigest: template.contentDigest, evidence: selected, opportunity, userRequest, consentNonce });
-    if (!consentNonce) throw new WorkspaceError("RESUME_COACH_INVALID", "That local-model consent is unavailable.", "Review the disclosure and confirm the request again.");
+    const consentFingerprint = resumeCoachConsentFingerprint({ connection, profileRevisionId: profile.revision.id, profileDigest: profile.revision.contentDigest, profileSnapshot, templateId: template.id, templateDigest: template.contentDigest, evidence: selected, documentation, userRequest, consentNonce });
     auditContext = { databasePath: paths.databasePath, profileRevisionId: profile.revision.id, fingerprint: consentFingerprint };
     const auditDb = openDatabase(paths.databasePath); try { applyMigrations(auditDb); auditDb.exec("BEGIN IMMEDIATE;"); try { auditDb.prepare("INSERT INTO resume_coach_consent_uses (consent_fingerprint, created_at) VALUES (?, ?)").run(consentFingerprint, new Date().toISOString()); appendAuditEvent(auditDb, createAuditEvent({ actor: "local-os-user", action: "resume.coach_requested", outcome: "success", entityId: profile.revision.id, contentHash: consentFingerprint })); auditDb.exec("COMMIT;"); } catch (error) { auditDb.exec("ROLLBACK;"); if (String(error).includes("UNIQUE constraint failed")) throw new WorkspaceError("RESUME_COACH_INVALID", "That local-model consent has already been used or changed.", "Review the disclosure and confirm the request again."); throw error; } } finally { auditDb.close(); }
-    const response = await requestResumeCoach({ connection, profileRevisionId: profile.revision.id, profileDigest: profile.revision.contentDigest, profileSnapshot, templateId: template.id, templateDigest: template.contentDigest, evidence: selected, opportunity, userRequest, consentNonce, consentFingerprint });
-    const draft = persistResumeCoachDraft({ databasePath: paths.databasePath, profileRevisionId: profile.revision.id, profileDigest: profile.revision.contentDigest, templateId: template.id, templateDigest: template.contentDigest, evidence: selected, opportunity: opportunity ? { revisionId: opportunity.revisionId, contentDigest: opportunity.contentDigest } : undefined, requestText: userRequest, consentFingerprint, response });
+    const response = ensureProfileSections(await requestBaseResumeGeneration({ connection, profileRevisionId: profile.revision.id, profileDigest: profile.revision.contentDigest, profileSnapshot, templateId: template.id, templateDigest: template.contentDigest, evidence: selected, documentation, userRequest, consentNonce, consentFingerprint }), profile.revision.values);
+    let draft: { id: string };
+    try { draft = persistResumeCoachDraft({ databasePath: paths.databasePath, workspaceId: workspaceId!, profileRevisionId: profile.revision.id, profileDigest: profile.revision.contentDigest, templateId: template.id, templateDigest: template.contentDigest, evidence: selected, requestText: userRequest, consentFingerprint, response }); }
+    catch (error) { if (error instanceof WorkspaceError) throw error; throw new WorkspaceError("RESUME_COACH_INVALID", "Your base resume could not be saved.", "Refresh Resume and let the current workspace generate its preview again."); }
+    // Resume Coach is also invoked by onboarding as a composed server action.
+    // In that context Next may not expose a static-generation store for a
+    // nested revalidation call. The draft transaction is already durable, so
+    // cache invalidation must never turn a successful save into an error.
+    try { revalidatePath("/resume"); } catch { /* The outer action/page refresh will revalidate it. */ }
     return { status: "success", summary: "Local AI guidance is ready to review. Your Resume template is unchanged.", response, draftId: draft.id, evidenceLabels: selected.map((item) => item.label) };
   } catch (error) {
     if (auditContext) { const auditDb = openDatabase(auditContext.databasePath); try { appendAuditEvent(auditDb, createAuditEvent({ actor: "local-os-user", action: "resume.coach_failed", outcome: "failure", entityId: auditContext.profileRevisionId, contentHash: auditContext.fingerprint })); } catch { /* Preserve the original safe model error. */ } finally { auditDb.close(); } }
@@ -102,9 +192,47 @@ export async function resumeCoachAction(_: ResumeCoachActionState, formData: For
   }
 }
 
+// Compatibility for existing route actions. New code must use the explicit
+// generator name; the interactive Resume Coach is a separate later stage.
+export const resumeCoachAction = generateBaseResumeAction;
+
+export async function resumeCoachReviewAction(_: ResumeCoachReviewActionState, formData: FormData): Promise<ResumeCoachReviewActionState> {
+  try {
+    const skill = getResumeAgentSkill("resume.coach-resume");
+    if (!skill.requiresConsent || !skill.workflow.includes("give independent prioritized criticism and advice without silently rebuilding the base resume")) throw new WorkspaceError("RESUME_COACH_INVALID", "The Resume Coach policy is unavailable.", "Refresh Resume and try again.");
+    const draftId = String(formData.get("draftId") ?? ""); const focus = String(formData.get("coachFocus") ?? "General review").trim();
+    if (!draftId || !focus || focus.length > 900 || /[\u0000-\u001f\u007f-\u009f]/.test(focus)) throw new WorkspaceError("RESUME_COACH_INVALID", "Describe a concise coaching focus and try again.", "Ask Resume Coach about clarity, relevance, credibility, specificity, or ATS readability.");
+    const configured = await readLocalModelGatewayConfiguration(); const connection = { configurationRevisionId: configured.id, configurationDigest: configured.configurationDigest, modelIdentifier: configured.modelIdentifier };
+    const profile = await readCandidateProfileState(); if (!profile.revision) throw new WorkspaceError("RESUME_COACH_INVALID", "Save your profile details before using Resume Coach.", "Complete and save your profile details first.");
+    const paths = await resolveAppDataPaths(); const db = openDatabase(paths.databasePath); let evidence; let template; let ownedDocumentPaths = new Set<string>(); let activeWorkspaceId: string;
+    try { applyMigrations(db); const workspace = readActiveResumeWorkspace(db).workspace; if (!workspace) throw new WorkspaceError("RESUME_COACH_INVALID", "Create a resume workspace before using Resume Coach.", "Create your resume workspace first."); activeWorkspaceId = workspace.id; const allowed = new Set(listWorkspaceDocumentedEvidenceIds(db, workspace.id)); evidence = listCurrentEvidence(db).filter((item) => allowed.has(item.id)); ownedDocumentPaths = new Set((db.prepare("SELECT d.library_path AS path FROM evidence_library_documents d JOIN evidence_library_imports i ON i.id = d.import_id JOIN resume_workspace_imports w ON w.import_id = i.id WHERE w.workspace_id = ?").all(workspace.id) as Array<{ path: string }>).map((item) => item.path)); template = findDesignatedResumeTemplate(db); } finally { db.close(); }
+    if (!template || !evidence.length) throw new WorkspaceError("RESUME_COACH_INVALID", "Resume Coach needs your generated resume and documented work.", "Finish onboarding and wait for the base resume PDF before requesting coaching.");
+    const ownershipDb = openDatabase(paths.databasePath); try { applyMigrations(ownershipDb); const owned = ownershipDb.prepare("SELECT 1 FROM resume_workspace_drafts WHERE workspace_id = ? AND draft_id = ?").get(activeWorkspaceId!, draftId); if (!owned) throw new WorkspaceError("RESUME_COACH_INVALID", "That resume does not belong to the active workspace.", "Open the active resume and try the coaching request again."); } finally { ownershipDb.close(); }
+    const draft = await readMaterialDraft({ draftId });
+    const selected = evidence.map(({ id, contentDigest, factualText, sourceDocument, sourceSection }) => ({ id, contentDigest, factualText, sourceDocument, sourceSection }));
+    // Resume Coach receives the same curated handoff as the generator. Broad
+    // architecture/setup documents are useful for folder documentation, but
+    // they pull an employer-side reviewer back into implementation trivia.
+    const documentation: ResumeCoachDocumentation[] = (await readManagedDocumentedArtifacts().catch(() => [])).filter((group) => group.documents.some((document) => ownedDocumentPaths.has(document.libraryPath))).map((group) => ({ name: group.name, category: group.category, documents: group.documents.filter((document) => /(?:resume-evidence|resume-bullet-candidates)\.md$/i.test(document.libraryPath)).map((document) => ({ path: document.libraryPath.split("/").at(-1) ?? document.libraryPath, text: document.text.slice(0, 12_000), contentDigest: document.contentDigest })) })).filter((group) => group.documents.length > 0);
+    const userRequest = `Review the current base resume. Focus: ${focus}.`;
+    const consentNonce = createUuidV7(); const profileSnapshot = profile.revision.canonicalContent; const consentFingerprint = resumeCoachConsentFingerprint({ connection, profileRevisionId: profile.revision.id, profileDigest: profile.revision.contentDigest, profileSnapshot, templateId: template.id, templateDigest: template.contentDigest, evidence: selected, documentation, currentResumeSections: draft.sections, userRequest, consentNonce });
+    const review = await requestResumeCoachReview({ connection, profileRevisionId: profile.revision.id, profileDigest: profile.revision.contentDigest, profileSnapshot, templateId: template.id, templateDigest: template.contentDigest, evidence: selected, documentation, currentResumeSections: draft.sections, userRequest, consentNonce, consentFingerprint });
+    const auditDb = openDatabase(paths.databasePath); try { applyMigrations(auditDb); appendAuditEvent(auditDb, createAuditEvent({ actor: "local-os-user", action: "resume.coach_reviewed", outcome: "success", entityId: activeWorkspaceId!, contentHash: consentFingerprint })); } finally { auditDb.close(); }
+    return { status: "success", summary: "Resume Coach completed an independent review of your current resume.", review };
+  } catch (error) { const safe = toSafeWorkspaceError(error); return { status: "error", summary: safe.summary, safeNextAction: safe.safeNextAction }; }
+}
+
 export async function materialDraftHandoffAction(_: MaterialDraftHandoffActionState, formData: FormData): Promise<MaterialDraftHandoffActionState> {
   const draftId = String(formData.get("draftId") ?? "");
   try {
+    const paths = await resolveAppDataPaths();
+    const db = openDatabase(paths.databasePath);
+    try {
+      applyMigrations(db);
+      const workspace = readActiveResumeWorkspace(db).workspace;
+      const owned = workspace && db.prepare("SELECT 1 FROM resume_workspace_drafts WHERE workspace_id = ? AND draft_id = ?").get(workspace.id, draftId);
+      if (!owned) throw new WorkspaceError("RESUME_COACH_INVALID", "That resume does not belong to the active workspace.", "Open the correct resume workspace and try again.");
+    } finally { db.close(); }
     await handOffMaterialDraft({ draftId });
     revalidatePath("/resume");
     return { status: "success", summary: "This local draft is ready for review. Your Resume template and Resume.pdf are unchanged.", draftId };
@@ -353,7 +481,7 @@ export async function evidenceAction(_: WorkspaceActionState, formData: FormData
     let evidenceId = String(formData.get("evidenceId") ?? "");
     let expectedRevisionId = String(formData.get("expectedRevisionId") ?? "");
     const reviewHandle = String(formData.get("reviewHandle") ?? "");
-    if (reviewHandle && (command === "approve" || command === "reject")) ({ evidenceId, expectedRevisionId } = await resolveCollectionReviewHandle(reviewHandle));
+    if (reviewHandle && (command === "approve" || command === "reject" || command === "remove")) ({ evidenceId, expectedRevisionId } = await resolveCollectionReviewHandle(reviewHandle));
     if (command === "add") await addManualEvidence({ factualText: String(formData.get("factualText") ?? ""), sourceDocument: String(formData.get("sourceDocument") ?? ""), sourceSection: String(formData.get("sourceSection") ?? "") });
     else if (command === "extract") await extractEvidenceFromBaseResume({ baseResumeId: String(formData.get("baseResumeId") ?? "") });
     else if (command === "approve") await approveEvidence({ evidenceId, expectedRevisionId });
@@ -373,14 +501,25 @@ export async function evidenceLibraryAction(_: WorkspaceActionState, formData: F
     if (command === "document-source-folder") {
       const category = String(formData.get("category") ?? "");
       if (category !== "project" && category !== "experience") throw new WorkspaceError("EVIDENCE_DOCUMENTER_INVALID", "Choose Projects or Experiences before documenting a folder.", "Select a work type and try the documentation again.");
-      const values = formData.getAll("sourceFile");
-      if (!values.length || values.some((value) => !(value instanceof File))) throw new WorkspaceError("EVIDENCE_DOCUMENTER_INVALID", "Choose a folder before documenting it.", "Choose a folder containing supported source files and try again.");
-      result = await documentResumeEvidenceFolder({ category, name: String(formData.get("itemName") ?? ""), sourceSnapshot: { files: values as File[], manifest: String(formData.get("sourceManifest") ?? "") }, disclosed: formData.get("localModelDisclosure") === "yes" });
+      const sourceDirectory = String(formData.get("sourceDirectory") ?? "").trim();
+      if (!sourceDirectory) throw new WorkspaceError("EVIDENCE_DOCUMENTER_INVALID", "Choose a local folder before documenting it.", "Use Browse local folder, then try the documentation again.");
+      const paths = await resolveAppDataPaths(); const database = openDatabase(paths.databasePath); let expectedWorkspaceId: string;
+      try { applyMigrations(database); const workspace = readActiveResumeWorkspace(database).workspace; if (!workspace) throw new WorkspaceError("RESUME_WORKSPACE_NOT_FOUND", "Create a resume workspace before documenting a folder.", "Open Resume and create the workspace that should own this work."); expectedWorkspaceId = workspace.id; } finally { database.close(); }
+      result = await documentResumeEvidenceFolder({ category, name: String(formData.get("itemName") ?? ""), sourceDirectory, expectedWorkspaceId: expectedWorkspaceId!, disclosed: formData.get("localModelDisclosure") === "yes" });
+    }
+    else if (command === "delete-documented-item") {
+      const category = String(formData.get("category") ?? "");
+      if (category !== "project" && category !== "experience") throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "Choose a project or experience to delete.", "Refresh Experience & Projects and try again.");
+      const deleted = await permanentlyDeleteDocumentedEvidenceItem({ category, name: String(formData.get("itemName") ?? ""), confirmation: String(formData.get("confirmation") ?? "") });
+      revalidateCareerWorkspaces();
+      return { status: "success", summary: deleted.artifactCleanupIncomplete ? `${deleted.findingsDeleted} documented finding${deleted.findingsDeleted === 1 ? "" : "s"} deleted. Close programs using the managed evidence folder to finish removing its files.` : `${deleted.findingsDeleted} documented finding${deleted.findingsDeleted === 1 ? "" : "s"} and this ${category} were permanently deleted.` };
     }
     else if (command === "import-documentation-artifacts") {
       const category = String(formData.get("category") ?? "");
       if (category !== "project" && category !== "experience") throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "Choose Projects or Experiences before importing generated documents.", "Select a work type and try the import again.");
-      result = await importDocumentedEvidenceArtifacts({ category, name: String(formData.get("itemName") ?? ""), outputDirectory: String(formData.get("outputDirectory") ?? "") });
+      const paths = await resolveAppDataPaths(); const database = openDatabase(paths.databasePath); let expectedWorkspaceId: string;
+      try { applyMigrations(database); const workspace = readActiveResumeWorkspace(database).workspace; if (!workspace) throw new WorkspaceError("RESUME_WORKSPACE_NOT_FOUND", "Create a resume workspace before importing generated documents.", "Open Resume and create the workspace that should own this work."); expectedWorkspaceId = workspace.id; } finally { database.close(); }
+      result = await importDocumentedEvidenceArtifacts({ category, name: String(formData.get("itemName") ?? ""), outputDirectory: String(formData.get("outputDirectory") ?? ""), expectedWorkspaceId: expectedWorkspaceId! });
     }
     else if (command === "add-project") result = await addProjectToEvidenceLibrary({ sourceDirectory: String(formData.get("sourceDirectory") ?? ""), name: String(formData.get("projectName") ?? "") || undefined });
     else if (command === "add-experience") {

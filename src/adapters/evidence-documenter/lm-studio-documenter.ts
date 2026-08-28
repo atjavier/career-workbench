@@ -33,7 +33,7 @@ export async function documentWithLocalModel(input: DocumenterInput[], fetcher: 
   try {
     const body = JSON.stringify({ model, temperature: 0, response_format: { type: "json_object" }, messages: [{ role: "system", content: evidenceDocumenterSystemInstruction }, { role: "user", content: requestText }] });
     if (body.length > maximumRequestCharacters) throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "The selected Markdown content is unavailable or too large for local documentation.", "Choose a smaller folder of readable Markdown files and try again.");
-    const response = await fetcher("http://127.0.0.1:1234/v1/chat/completions", { method: "POST", headers: { "content-type": "application/json", ...(process.env.LM_STUDIO_API_TOKEN ? { authorization: `Bearer ${process.env.LM_STUDIO_API_TOKEN}` } : {}) }, signal: controller.signal, body });
+    const response = await fetcher("http://127.0.0.1:1234/v1/chat/completions", { method: "POST", headers: { "content-type": "application/json" }, signal: controller.signal, body });
     if (!response.ok) throw new Error("local model unavailable");
     const responseText = await readBoundedBody(response);
     const parsed = JSON.parse(responseText) as { choices?: Array<{ message?: { content?: string } }> }; const content = parsed.choices?.[0]?.message?.content;

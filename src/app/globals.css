@@ -29,7 +29,7 @@ button { background: var(--primary); border: 0; border-radius: 0.625rem; color: 
 button:disabled { cursor: wait; opacity: 0.7; }
 a:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 3px; }
 button:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 3px; }
-input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 3px; }
+input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
 .affirmative-action { background: var(--primary); color: #fff; }
 .neutral-action, .secondary-action { background: var(--surface-base); border: 1px solid var(--accent); color: var(--accent); }
 .danger-action { background: var(--error); color: #fff; }
@@ -311,6 +311,23 @@ button, input, textarea, select { font: inherit; }
 
 /* Resume Edit follows the canonical Jobs Browse visual frame while keeping its local review flow distinct. */
 .resume-workspace { display: block; }
+.resume-onboarding { margin-inline: auto; max-width: 52rem; }
+.resume-onboarding form { display: grid; gap: 8px; }
+.resume-onboarding-fields { display: grid; gap: 10px 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.resume-onboarding-fields label { margin: 0; }
+.resume-onboarding label > :is(input, select) { display: block; margin-top: 6px; }
+.resume-onboarding :is(input, select):focus-visible { outline-offset: 0; }
+.onboarding-work { border: 0; display: grid; gap: 12px; margin: 16px 0 0; padding: 0; }
+.onboarding-work legend { color: var(--ink); font-size: 16px; font-weight: 750; padding: 0; }
+.onboarding-work-item { background: #F7FAF6; border: 1px solid #D4E0D7; border-radius: 10px; display: grid; gap: 10px; grid-template-columns: 1fr; padding: 16px; }
+.onboarding-work-item label { margin: 0; }
+.onboarding-work-item p { color: var(--muted-ink); font-size: 13px; margin: 0; }
+.onboarding-work-item .secondary-action { justify-self: start; }
+.local-folder-input { align-items: stretch; background: var(--surface-raised); border: 1px solid var(--border); border-radius: 0.25rem; display: flex; margin-top: 6px; min-height: 2.5rem; overflow: hidden; width: 100%; }
+.local-folder-input > span { align-items: center; color: var(--muted-ink); display: flex; flex: 1; min-width: 0; overflow: hidden; padding: 0.45rem; text-overflow: ellipsis; white-space: nowrap; }
+.local-folder-input > button { border-radius: 0; flex: 0 0 auto; margin: 0; min-height: 2.5rem; }
+.local-folder-input:focus-within { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
+.local-folder-input > button:focus-visible { outline: 0; }
 .resume-page-head { align-items: end; display: flex; gap: 24px; justify-content: space-between; }
 .resume-page-head h1 { font-size: 31px; letter-spacing: -0.04em; line-height: 1.2; margin: 0; }
 .resume-source-status { color: var(--muted-ink); font-size: 13px; margin: 0; text-align: right; }
@@ -404,7 +421,15 @@ button, input, textarea, select { font: inherit; }
 .resume-history > *, .resume-version-history > * { overflow-wrap: anywhere; }
 
 /* Profile-led Resume Edit keeps the template immutable and the Coach truthful until local AI is configured. */
-.resume-profile-layout { background: var(--surface-raised); border: 1px solid #D4E0D7; border-radius: 15px; box-shadow: var(--jobs-shadow); display: grid; grid-template-columns: minmax(15rem, 0.42fr) minmax(0, 1fr); overflow: hidden; }
+.resume-profile-layout { background: var(--surface-raised); border: 1px solid #D4E0D7; border-radius: 15px; box-shadow: var(--jobs-shadow); margin-bottom: 18px; overflow: hidden; }
+.resume-coach-preview-layout { background: var(--surface-raised); border: 1px solid #D4E0D7; border-radius: 15px; box-shadow: var(--jobs-shadow); display: grid; grid-template-columns: minmax(18rem, .82fr) minmax(22rem, 1.18fr); overflow: hidden; }
+.resume-generated-preview { background: #E9F0E9; min-width: 0; padding: 24px; }
+.resume-preview-empty { align-content: center; background: #FBFDFB; color: var(--muted-ink); display: grid; min-height: 20rem; padding: 24px; }
+.resume-generated-pdf-frame { background: #FBFDFB; border: 1px solid #D4E0D7; border-radius: 10px; display: grid; gap: 10px; min-width: 0; overflow: hidden; padding: 10px; }
+.resume-generated-pdf-viewer { background: #FFF; border: 0; display: block; height: min(74vh, 58rem); min-height: 34rem; width: 100%; }
+.resume-generated-pdf-fallback { color: var(--accent); font-size: 13px; font-weight: 720; text-decoration: underline; text-underline-offset: 0.16em; }
+.resume-preview-links { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; margin-top: 8px; }
+.resume-generated-tex-link { color: var(--muted-ink); font-size: 13px; font-weight: 700; text-decoration: underline; text-underline-offset: 0.16em; }
 .resume-profile-pane { background: #F7FAF6; min-width: 0; }
 .resume-profile-card, .resume-coach-unavailable { min-width: 0; padding: 24px; }
 .resume-profile-card { border-bottom: 0; }
@@ -415,7 +440,7 @@ button, input, textarea, select { font: inherit; }
 .resume-profile-category .eyebrow { color: #4C6D5B; font-size: 11px; margin: 0 0 4px; }
 .resume-profile-category h3 { font-size: 16px; letter-spacing: -0.015em; line-height: 1.25; margin: 0; }
 .resume-profile-fields { display: grid; gap: 12px 14px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.resume-profile-field { display: grid; gap: 6px; min-width: 0; }
+.resume-profile-field { display: grid; gap: 8px; min-width: 0; padding: 3px; }
 .resume-profile-field label, .resume-profile-education-hint { color: var(--muted-ink); font-size: 12px; font-weight: 720; }
 .resume-profile-field input { border-color: #B8CABD; border-radius: 8px; margin: 0; min-width: 0; padding: 10px 11px; width: 100%; }
 .resume-profile-error-summary { background: #FFF5F3; border-left: 3px solid var(--error); margin: 0 0 14px; padding: 10px 12px; }
@@ -426,6 +451,9 @@ button, input, textarea, select { font: inherit; }
 .resume-profile-save p { color: var(--muted-ink); font-size: 13px; margin: 0; }
 .resume-coach-unavailable { background: var(--surface-subtle); border-right: 1px solid #DBE5DB; }
 .resume-coach-unavailable p { margin: 0 0 14px; }
+.resume-coach-setup-link { color: var(--accent); font-weight: 700; text-decoration: underline; text-underline-offset: 0.18em; }
+.local-model-settings form { display: grid; gap: 10px; margin-top: 18px; }
+.local-model-settings :is(input, button):focus-visible { outline-offset: 4px; }
 .resume-coach-unavailable form { display: grid; gap: 12px; }
 .resume-coach-unavailable fieldset { display: grid; gap: 8px; }
 .resume-coach-unavailable select { border-color: #B8CABD; border-radius: 8px; padding: 10px 11px; }
@@ -454,9 +482,13 @@ button, input, textarea, select { font: inherit; }
   .resume-editor-preview { grid-template-columns: 1fr; }
   .resume-preview-pane { border-left: 0; border-top: 1px solid #DBE5DB; }
   .resume-profile-layout { grid-template-columns: 1fr; }
+  .resume-coach-preview-layout { grid-template-columns: 1fr; }
+  .resume-generated-preview { border-top: 1px solid #DBE5DB; }
   .resume-coach-unavailable { border-bottom: 1px solid #DBE5DB; border-right: 0; }
   .resume-profile-group { grid-template-columns: 1fr; gap: 10px; }
   .resume-profile-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .resume-onboarding-fields { grid-template-columns: 1fr; }
+  .onboarding-work-item { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 27.5rem) {
@@ -471,6 +503,7 @@ button, input, textarea, select { font: inherit; }
   .proposal-actions button, .resume-review-pane button, .resume-version-actions button { width: 100%; }
   .resume-paper { min-height: 0; padding: 27px 22px; }
   .resume-original-pdf-viewer { height: min(68vh, 40rem); }
+  .resume-generated-pdf-viewer { height: min(68vh, 40rem); min-height: 28rem; }
   .resume-profile-card, .resume-coach-unavailable { padding: 16px; }
   .resume-profile-fields { grid-template-columns: 1fr; }
   .resume-profile-save { align-items: stretch; flex-direction: column; }

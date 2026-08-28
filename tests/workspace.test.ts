@@ -8,6 +8,11 @@ import { createAuditEvent } from "../src/audit/audit-event";
 import { resolveAppDataPaths } from "../src/files/app-data";
 import { initializeWorkspace } from "../src/domain/workspace/initialize-workspace";
 import { storageProtectionMessage } from "../src/domain/workspace/status-message";
+import { saveCandidateProfile } from "../src/domain/resume-generation/candidate-profile-commands";
+import { createResumeWorkspace, permanentlyDeleteResumeWorkspace, readResumeWorkspaceState } from "../src/domain/resume-generation/resume-workspace-commands";
+import { addManualEvidence } from "../src/domain/evidence/evidence-commands";
+import { openDatabase } from "../src/persistence/database";
+import { attachEvidenceToWorkspace } from "../src/persistence/resume-workspace-repository";
 
 test("creates a private data root and initializes the same SQLite workspace twice", async () => {
   const root = await mkdtemp(join(tmpdir(), "job-workspace-test-"));
@@ -36,6 +41,34 @@ test("rejects an app-data root that is a file", async () => {
     await assert.rejects(resolveAppDataPaths(filePath), {
       code: "APP_DATA_PATH_INVALID",
     });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("permanently deletes a resume workspace after it owns profile data", async () => {
+  const root = await mkdtemp(join(tmpdir(), "resume-workspace-delete-"));
+  try {
+    await initializeWorkspace({ appDataRoot: root });
+    const created = await createResumeWorkspace({ appDataRoot: root, name: "Delete me", expectedRevisionNumber: 0 });
+    const profile = await saveCandidateProfile({ appDataRoot: root, expectedStateRevisionNumber: created.revisionNumber, values: { firstName: "Adrian", lastName: "Javier", email: "adrian@example.com", phone: "+639171234567", school: "University", program: "Computer Science", graduationYear: "2027" } });
+    const evidence = await addManualEvidence({ appDataRoot: root, factualText: "Built a local resume workflow.", sourceDocument: "project-notes.md", sourceSection: "Overview" });
+    const paths = await resolveAppDataPaths(root);
+    const database = openDatabase(paths.databasePath);
+    try {
+      attachEvidenceToWorkspace(database, created.workspace.id, evidence.evidenceId);
+      database.prepare("INSERT INTO resume_generation_jobs (id, workspace_id, status, message, created_at, updated_at) VALUES (?, ?, 'queued', 'Waiting', ?, ?)").run("pending-generation-job", created.workspace.id, new Date().toISOString(), new Date().toISOString());
+    } finally { database.close(); }
+    await permanentlyDeleteResumeWorkspace({ appDataRoot: root, workspaceId: created.workspace.id, expectedRevisionNumber: profile.stateRevisionNumber, confirmation: "DELETE" });
+    const state = await readResumeWorkspaceState({ appDataRoot: root });
+    assert.equal(state.workspaces.length, 0);
+    assert.equal(state.activeWorkspace, undefined);
+    const verify = openDatabase(paths.databasePath);
+    try {
+      assert.equal(Number(verify.prepare("SELECT count(*) AS value FROM evidence_records").get().value), 0);
+      assert.equal(Number(verify.prepare("SELECT count(*) AS value FROM resume_generation_jobs").get().value), 0);
+      assert.equal(Number(verify.prepare("SELECT count(*) AS value FROM material_drafts").get().value), 0);
+    } finally { verify.close(); }
   } finally {
     await rm(root, { recursive: true, force: true });
   }

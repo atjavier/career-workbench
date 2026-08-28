@@ -1,5 +1,12 @@
 # Deferred Work
 
+## Deferred from: Local AI setup UX (2026-08-26)
+
+- Update Resume Coach unavailable copy to identify the actual missing prerequisite (especially unsaved basic profile information or no approved Experience & Projects material) and refresh automatically after prerequisites are met.
+- Restyle the Resume Coach “Set up local AI” control as an underlined text link instead of a dark-green affirmative button.
+- Repair the focused Local AI Settings field layout so its outline does not overlap the label.
+- Remove the user-facing LM Studio API-token input and revise the local connection configuration to use the agreed tokenless local-only flow.
+
 - source_spec: none
   summary: Implement the approved Resume Experience & Projects design as a separate UI scope.
   evidence: It is independently shippable from the Resume Edit visual implementation.

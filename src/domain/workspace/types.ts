@@ -15,6 +15,10 @@ export type SafeWorkspaceErrorCode =
   | "CANDIDATE_PROFILE_INVALID"
   | "CANDIDATE_PROFILE_NOT_FOUND"
   | "CANDIDATE_PROFILE_STALE"
+  | "RESUME_WORKSPACE_INVALID"
+  | "RESUME_WORKSPACE_NOT_FOUND"
+  | "RESUME_WORKSPACE_STALE"
+  | "RESUME_WORKSPACE_DELETE_CONFIRMATION"
   | "RESUME_TEMPLATE_UNAVAILABLE"
   | "RESUME_TEMPLATE_INVALID"
   | "RESUME_TEMPLATE_STALE"
@@ -96,6 +100,14 @@ export type SafeWorkspaceError = Pick<
 export function toSafeWorkspaceError(error: unknown): SafeWorkspaceError {
   if (error instanceof WorkspaceError) {
     return error;
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  if (/readonly database|SQLITE_READONLY|EACCES|EPERM|permission denied/i.test(message)) {
+    return new WorkspaceError(
+      "DATA_STORAGE_UNAVAILABLE",
+      "The private workspace is currently read-only, so this change was not saved.",
+      "Close any other copy of the app, then verify your Windows account can modify its PersonalJobDiscovery app-data folder and try again.",
+    );
   }
   return new WorkspaceError(
     "WORKSPACE_INITIALIZATION_FAILED",

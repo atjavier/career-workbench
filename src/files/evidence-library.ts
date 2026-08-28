@@ -16,6 +16,26 @@ const decoder = new TextDecoder("utf-8", { fatal: true });
 const maxDocumentBytes = 2 * 1024 * 1024;
 const maxDocumentsPerImport = 200;
 const reservedWindowsNames = new Set(["CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"]);
+function documentationSnapshotPriority(path: string): number {
+  const normalized = path.toLowerCase();
+  if (/^(?:package\.json|pyproject\.toml|cargo\.toml|composer\.json|go\.mod|pom\.xml|build\.gradle(?:\.kts)?|requirements(?:\.txt)?|docker-compose(?:\.ya?ml)?|dockerfile)$/.test(normalized)) return 0;
+  if (/^(?:readme|overview|architecture|design|requirements?|documentation)\.(?:md|txt)$/.test(normalized)) return 1;
+  if (/(?:^|\/)(?:main|index|app|server|application)\.(?:[cm]?[jt]sx?|py|go|rs|java|kt|cs|rb|php)$/.test(normalized)) return 2;
+  if (/(?:^|\/)(?:routes?|controllers?|handlers?|api|services?|models?|schemas?|database|db)(?:\/|\.)/.test(normalized)) return 3;
+  if (/(?:^|\/)(?:components?|pages?|views?|client|frontend|ui)(?:\/|\.)/.test(normalized)) return 4;
+  if (/(?:^|\/)(?:docs?|documentation|\.github\/workflows)(?:\/|\.)/.test(normalized)) return 5;
+  if (/(?:^|\/)(?:tests?|__tests__|spec)(?:\/|\.)/.test(normalized)) return 6;
+  if (/(?:^|\/)(?:eslint|vite|webpack|babel|tsconfig|prettier)\b/.test(normalized)) return 9;
+  return 7;
+}
+function documentationTraversalPriority(name: string): number {
+  const normalized = name.toLowerCase();
+  if (/^(?:client|frontend|web|server|backend|api|app|src)$/.test(normalized)) return 0;
+  if (/^(?:routes?|controllers?|handlers?|services?|models?|schemas?|entities|database|db|components?|pages?|views?|ui)$/.test(normalized)) return 1;
+  if (/^(?:docs?|documentation|scripts?|infra|\.github|tests?|__tests__)$/.test(normalized)) return 2;
+  if (/^(?:package\.json|pyproject\.toml|cargo\.toml|composer\.json|go\.mod|readme\.(?:md|txt)|dockerfile|docker-compose(?:\.ya?ml)?)$/.test(normalized)) return 0;
+  return 5;
+}
 export function evidenceLibraryRoot(workspaceRoot?: string): string { return resolve(workspaceRoot ?? process.cwd(), "resume-evidence"); }
 function safeSegment(value: string): string { const result = value.trim().replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^[.\s-]+|[.\s-]+$/g, ""); if (!result || result === "." || result === ".." || reservedWindowsNames.has(result.toUpperCase())) throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "The library name needs a safe, non-empty value.", "Use a short name containing letters, numbers, spaces, dots, underscores, or hyphens."); return result; }
 function inside(root: string, target: string): boolean { const value = relative(root, target); return value !== "" && value !== ".." && !value.startsWith(`..${sep}`) && !value.includes(`${sep}..${sep}`); }
@@ -42,16 +62,24 @@ export async function copyExperienceMarkdown(input: { name: string; markdown?: s
   const document = { absolutePath: destination, libraryPath: relative(resolve(/* turbopackIgnore: true */ input.workspaceRoot ?? process.cwd()), destination).replaceAll("\\", "/"), ...captured, contentDigest: digest(captured.bytes), category: "experience" as const };
   return { documents: [document], sourceDigest: digest(captured.bytes), cleanup: () => cleanManaged(destination, root) };
 }
-const requiredDocumentationArtifacts = ["project-overview.md", "resume-evidence.md", "resume-bullet-candidates.md"] as const;
+const requiredDocumentationArtifacts = {
+  project: ["project-overview.md", "resume-evidence.md", "resume-bullet-candidates.md"],
+  experience: ["experience-overview.md", "resume-evidence.md", "resume-bullet-candidates.md"],
+} as const satisfies Record<LibraryCategory, readonly string[]>;
+const supportingDocumentationArtifacts = ["index.md", "resume-summary.md", "architecture.md", "source-tree-analysis.md", "technology-stack.md", "api-contracts.md", "data-models.md", "component-inventory.md", "development-guide.md", "deployment-guide.md", "integration-architecture.md", "project-parts.md", "contribution-guide.md", "experience-context.md", "work-deliverables.md", "collaboration-and-process.md"] as const;
+function requiredArtifactsFor(category: LibraryCategory): readonly string[] { return requiredDocumentationArtifacts[category]; }
+function allowedArtifactsFor(category: LibraryCategory): Set<string> { return new Set([...requiredArtifactsFor(category), ...supportingDocumentationArtifacts, ...(category === "experience" ? ["project-overview.md"] : [])]); }
+function hasRequiredArtifacts(category: LibraryCategory, names: readonly string[]): boolean { const overviewPresent = category === "experience" ? names.includes("experience-overview.md") || names.includes("project-overview.md") : names.includes("project-overview.md"); return overviewPresent && requiredArtifactsFor(category).filter((name) => !name.endsWith("-overview.md")).every((name) => names.includes(name)); }
 const generatedFileName = (name: string) => /(?:^|[._-])(?:generated|autogen|auto-generated)(?:[._-]|$)|\.min\.(?:js|css)$/i.test(name);
 async function readDocumentationArtifacts(directory: string, category: LibraryCategory, libraryPrefix: string): Promise<MarkdownDocument[]> {
   await requireDirectory(directory, "Choose an accessible generated-document folder without links and try again.");
   let entries;
   try { entries = await readdir(directory, { withFileTypes: true }); } catch { throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "The generated-document folder is unavailable or unsafe.", "Choose the completed documentation output folder and try again."); }
   const names = entries.map((entry) => entry.name).sort();
-  if (names.length !== requiredDocumentationArtifacts.length || names.some((name, index) => name !== [...requiredDocumentationArtifacts].sort()[index])) throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "The generated-document folder must contain exactly the three required review documents.", "Choose the output folder containing project-overview.md, resume-evidence.md, and resume-bullet-candidates.md.");
+  const allowed = allowedArtifactsFor(category);
+  if (!hasRequiredArtifacts(category, names) || names.some((name) => !allowed.has(name))) throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", `The generated ${category} documentation folder is missing a required review document or contains an unsupported file.`, `Choose the output folder containing the ${category} review documents and supported documentation set.`);
   const documents: MarkdownDocument[] = [];
-  for (const name of requiredDocumentationArtifacts) {
+  for (const name of names) {
     const path = join(directory, name); const metadata = await lstat(path).catch(() => undefined);
     if (!metadata?.isFile() || metadata.isSymbolicLink()) throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "A generated review document is unavailable or unsafe.", "Run the documentation skill again into a new empty output folder.");
     const captured = await bytesAndText(path, metadata.size, metadata);
@@ -81,7 +109,7 @@ export async function readManagedDocumentedArtifacts(workspaceRoot?: string): Pr
       const itemDirectory = join(categoryDirectory, entry.name); const itemInfo = await lstat(itemDirectory);
       if (itemInfo.isSymbolicLink()) throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "A managed collection item is unsafe.", "Check the managed review documents and refresh the page.");
       if (!itemInfo.isDirectory()) continue; // Historical Markdown imports are intentionally outside the active collection.
-      const names = (await readdir(itemDirectory)).sort(); const hasArtifactName = names.some((name) => (requiredDocumentationArtifacts as readonly string[]).includes(name));
+      const names = (await readdir(itemDirectory)).sort(); const hasArtifactName = hasRequiredArtifacts(category, names);
       if (!hasArtifactName) continue; // Historical Markdown imports are intentionally outside the active collection.
       groups.push({ name: entry.name, category, documents: await readDocumentationArtifacts(itemDirectory, category, `resume-evidence/${directoryName}/${entry.name}`) });
     }
@@ -90,9 +118,30 @@ export async function readManagedDocumentedArtifacts(workspaceRoot?: string): Pr
 }
 export async function readResumeDocumentationSource(sourceDirectory: string, workspaceRoot?: string): Promise<{ files: Array<{ path: string; text: string; contentDigest: string }>; sourceDigest: string }> {
   const source = resolve(sourceDirectory); const root = evidenceLibraryRoot(workspaceRoot); if (source === root || inside(root, source)) throw new WorkspaceError("EVIDENCE_DOCUMENTER_INVALID", "The selected source folder is not available for documentation.", "Choose the original working folder outside resume-evidence."); await requireDirectory(source, "Choose an accessible working folder without links and try again.");
-  const skill = getResumeAgentSkill("resume.document-source-folder"); const extensions = new Set(skill.allowedExtensions); const excludedDirectories = new Set(skill.excludedDirectories); const files: Array<{ path: string; text: string; contentDigest: string }> = []; let directories = 0; let entriesSeen = 0;
-  async function visit(current: string, depth: number): Promise<void> { if (depth > skill.limits.maxDepth || ++directories > skill.limits.maxDirectories) throw new WorkspaceError("EVIDENCE_DOCUMENTER_INVALID", "The selected source folder exceeds the safe inspection boundary.", "Choose a smaller working folder or exclude generated content."); await assertSafeAncestors(current); const entries = (await readdir(current, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name)); for (const entry of entries) { if (++entriesSeen > skill.limits.maxEntries) throw new WorkspaceError("EVIDENCE_DOCUMENTER_INVALID", "The selected source folder exceeds the safe inspection boundary.", "Choose a smaller working folder or exclude generated content."); const path = join(current, entry.name); const info = await lstat(path); if (info.isSymbolicLink()) throw new WorkspaceError("EVIDENCE_DOCUMENTER_INVALID", "The selected source folder contains a link or reparse point.", "Choose a working folder without links and try again."); if (info.isDirectory()) { if (!excludedDirectories.has(entry.name.toLowerCase())) await visit(path, depth + 1); continue; } if (!info.isFile() || generatedFileName(entry.name) || !extensions.has(extname(entry.name).toLowerCase()) || info.size === 0 || info.size > skill.limits.maxFileBytes || files.length >= skill.limits.maxFiles) continue; const captured = await bytesAndText(path, info.size, info); const relativePath = relative(source, path).replaceAll("\\", "/"); const candidate = { path: relativePath, text: captured.text, contentDigest: digest(captured.bytes) }; if (JSON.stringify([...files, candidate]).length > skill.limits.maxSnapshotChars) continue; files.push(candidate); } }
-  await visit(source, 0); if (!files.length) throw new WorkspaceError("EVIDENCE_DOCUMENTER_INVALID", "No safe text material was found in the selected source folder.", "Choose a working folder containing readable documentation or source files."); files.sort((a, b) => a.path.localeCompare(b.path)); return { files, sourceDigest: digest(files.map((file) => `${file.path}:${file.contentDigest}`).join("\n")) };
+  const skill = getResumeAgentSkill("resume.document-source-folder"); const extensions = new Set(skill.allowedExtensions); const excludedDirectories = new Set(skill.excludedDirectories); const candidates: Array<{ absolutePath: string; path: string; size: number; metadata: Pick<Stats, "dev" | "ino"> }> = []; let directories = 0; let entriesSeen = 0;
+  const pending: Array<{ path: string; depth: number }> = [{ path: source, depth: 0 }];
+  while (pending.length && directories < skill.limits.maxDirectories && entriesSeen < skill.limits.maxEntries) {
+    const current = pending.shift()!; if (current.depth > skill.limits.maxDepth) continue;
+    directories += 1; await assertSafeAncestors(current.path);
+    const entries = (await readdir(current.path, { withFileTypes: true })).sort((left, right) => documentationTraversalPriority(left.name) - documentationTraversalPriority(right.name) || left.name.localeCompare(right.name));
+    for (const entry of entries) {
+      if (entriesSeen >= skill.limits.maxEntries) break;
+      entriesSeen += 1;
+      if (entry.isDirectory() && excludedDirectories.has(entry.name.toLowerCase())) continue;
+      const path = join(current.path, entry.name); const info = await lstat(path);
+      if (info.isSymbolicLink()) throw new WorkspaceError("EVIDENCE_DOCUMENTER_INVALID", "The selected source folder contains a link or reparse point.", "Choose a working folder without links and try again.");
+      if (info.isDirectory()) { pending.push({ path, depth: current.depth + 1 }); continue; }
+      if (!info.isFile() || generatedFileName(entry.name) || !extensions.has(extname(entry.name).toLowerCase()) || info.size === 0 || info.size > skill.limits.maxFileBytes) continue;
+      candidates.push({ absolutePath: path, path: relative(source, path).replaceAll("\\", "/"), size: info.size, metadata: info });
+    }
+  }
+  const files: Array<{ path: string; text: string; contentDigest: string }> = [];
+  for (const candidate of candidates.sort((left, right) => documentationSnapshotPriority(left.path) - documentationSnapshotPriority(right.path) || left.path.localeCompare(right.path))) {
+    if (files.length >= skill.limits.maxFiles) break;
+    const captured = await bytesAndText(candidate.absolutePath, candidate.size, candidate.metadata); const file = { path: candidate.path, text: captured.text, contentDigest: digest(captured.bytes) };
+    if (JSON.stringify([...files, file]).length <= skill.limits.maxSnapshotChars) files.push(file);
+  }
+  if (!files.length) throw new WorkspaceError("EVIDENCE_DOCUMENTER_INVALID", "No safe text material was found in the selected source folder.", "Choose a working folder containing readable documentation or source files."); files.sort((a, b) => a.path.localeCompare(b.path)); return { files, sourceDigest: digest(files.map((file) => `${file.path}:${file.contentDigest}`).join("\n")) };
 }
 function invalidSnapshot(message: string, nextAction = "Choose the folder again and try documentation."): never { throw new WorkspaceError("EVIDENCE_DOCUMENTER_INVALID", message, nextAction); }
 function snapshotPath(value: string): string {
@@ -125,6 +174,6 @@ export async function readUploadedResumeDocumentationSource(input: { files: File
 }
 export async function readManagedMarkdown(workspaceRoot?: string): Promise<MarkdownDocument[]> {
   const root = evidenceLibraryRoot(workspaceRoot); try { await requireDirectory(root, "Add a project or experience before refreshing the library."); } catch { throw new WorkspaceError("EVIDENCE_LIBRARY_EMPTY", "The Resume Evidence Library is empty.", "Add a project or experience, then refresh the library."); }
-  const result: MarkdownDocument[] = []; for (const [category, name] of [["project", "projects"], ["experience", "experiences"]] as const) { const categoryRoot = join(root, name); try { await lstat(categoryRoot); } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") continue; throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "A managed library folder is unavailable.", "Check the Resume Evidence Library folder and refresh again."); } const documents = await enumerateMarkdown(categoryRoot, category, true); const documentedParents = new Set<string>(); for (const document of documents) { const parent = resolve(document.absolutePath, ".."); if (document.libraryPath.split("/").length === 2) { const names = (await readdir(parent)).sort(); if (names.length === requiredDocumentationArtifacts.length && names.every((entry, index) => entry === [...requiredDocumentationArtifacts].sort()[index])) documentedParents.add(parent); } } result.push(...documents.filter((document) => !documentedParents.has(resolve(document.absolutePath, "..")))); }
+  const result: MarkdownDocument[] = []; for (const [category, name] of [["project", "projects"], ["experience", "experiences"]] as const) { const categoryRoot = join(root, name); try { await lstat(categoryRoot); } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") continue; throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "A managed library folder is unavailable.", "Check the Resume Evidence Library folder and refresh again."); } const documents = await enumerateMarkdown(categoryRoot, category, true); const documentedParents = new Set<string>(); for (const document of documents) { const parent = resolve(document.absolutePath, ".."); if (document.libraryPath.split("/").length === 2) { const names = (await readdir(parent)).sort(); if (hasRequiredArtifacts(category, names) && names.every((entry) => allowedArtifactsFor(category).has(entry))) documentedParents.add(parent); } } result.push(...documents.filter((document) => !documentedParents.has(resolve(document.absolutePath, "..")))); }
   if (!result.length) throw new WorkspaceError("EVIDENCE_LIBRARY_EMPTY", "The Resume Evidence Library has no Markdown documents.", "Add a project or experience, then refresh the library."); return result.map((item) => ({ ...item, libraryPath: `resume-evidence/${item.category === "project" ? "projects" : "experiences"}/${item.libraryPath}` }));
 }

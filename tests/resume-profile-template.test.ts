@@ -10,6 +10,7 @@ import { createUuidV7 } from "../src/audit/audit-event";
 import { saveCandidateProfile, readCandidateProfileState } from "../src/domain/resume-generation/candidate-profile-commands";
 import { bootstrapBundledResumeTemplate, readDesignatedResumeTemplatePdf } from "../src/domain/resume-generation/resume-template-commands";
 import { importCurrentBaseResume } from "../src/domain/current-base-resume/current-base-resume-commands";
+import { createResumeWorkspace } from "../src/domain/resume-generation/resume-workspace-commands";
 import { readVerifiedResumeTemplatePdf, stageBundledResumeTemplate } from "../src/files/resume-template";
 import { applyMigrations, openDatabase } from "../src/persistence/database";
 import { migrations } from "../src/persistence/migrations";
@@ -85,6 +86,7 @@ test("0021 preserves legacy metadata as a non-designated candidate and protects 
       db.close();
     }
 
+    await createResumeWorkspace({ appDataRoot: workspace.appDataRoot, name: "Migration test" });
     for (const required of ["firstName", "lastName", "email", "phone", "school", "program", "graduationYear"] as const) {
       await assert.rejects(saveCandidateProfile({ appDataRoot: workspace.appDataRoot, values: { ...validProfile, [required]: "" } }), { code: "CANDIDATE_PROFILE_INVALID" });
     }
@@ -109,7 +111,7 @@ test("0021 preserves legacy metadata as a non-designated candidate and protects 
     try {
       dbAfter.prepare("UPDATE resume_generation_state SET active_profile_revision_id = ?, revision_number = revision_number + 1, updated_at = ? WHERE singleton = 1").run(saved.revision.id, "2026-08-25T00:00:00.000Z");
       const selected = await readCandidateProfileState({ appDataRoot: workspace.appDataRoot });
-      assert.equal(selected.revision?.id, saved.revision.id);
+      assert.equal(selected.revision?.id, next.revision.id);
       assert.throws(() => dbAfter.exec("UPDATE candidate_profile_revisions SET first_name = 'Changed'"), /immutable/i);
       assert.throws(() => dbAfter.exec("DELETE FROM candidate_profiles"), /immutable/i);
       assert.equal((dbAfter.prepare("SELECT COUNT(*) AS count FROM audit_events WHERE action = 'resume.profile_saved' AND outcome = 'success'").get() as { count: number }).count, 2);
@@ -287,7 +289,26 @@ test("concurrent first template bootstrap converges on one immutable bundled sou
   }
 });
 
-test("0021 guards material provenance and refuses a symlinked template directory", async () => {
+test("0028 upgrades an existing material draft schema that used opportunity_id", async () => {
+  const workspace = await temporaryWorkspace("resume-draft-schema-compat-");
+  try {
+    await mkdir(workspace.appDataRoot, { recursive: true });
+    const db = openDatabase(join(workspace.appDataRoot, "workspace.sqlite"));
+    try {
+      db.exec("CREATE TABLE schema_migrations (id TEXT PRIMARY KEY, applied_at TEXT NOT NULL);");
+      for (const migration of migrations.filter((migration) => migration.id < "0028_resume_draft_schema_compat")) db.prepare("INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)").run(migration.id, "2026-08-26T00:00:00.000Z");
+      db.exec("CREATE TABLE captured_opportunity_revisions (id TEXT PRIMARY KEY, opportunity_id TEXT NOT NULL, created_at TEXT NOT NULL);");
+      db.exec("CREATE TABLE material_drafts (id TEXT PRIMARY KEY, kind TEXT NOT NULL, profile_revision_id TEXT NOT NULL, profile_content_digest TEXT NOT NULL, template_source_id TEXT NOT NULL, template_content_digest TEXT NOT NULL, opportunity_id TEXT, opportunity_content_digest TEXT, request_text TEXT NOT NULL, request_digest TEXT NOT NULL, content_json TEXT NOT NULL, content_digest TEXT NOT NULL, provenance_digest TEXT NOT NULL, created_at TEXT NOT NULL);");
+      applyMigrations(db);
+      const columns = (db.prepare("PRAGMA table_info(material_drafts)").all() as Array<{ name: string }>).map((column) => column.name);
+      assert.ok(columns.includes("opportunity_id"));
+      assert.ok(columns.includes("opportunity_revision_id"));
+      assert.ok((db.prepare("SELECT id FROM schema_migrations WHERE id = '0028_resume_draft_schema_compat'").get()));
+    } finally { db.close(); }
+  } finally { await rm(workspace.root, { recursive: true, force: true }); }
+});
+
+test("material provenance accepts documented findings and refuses a symlinked template directory", async () => {
   const workspace = await temporaryWorkspace("resume-material-guards-");
   try {
     await mkdir(workspace.appDataRoot, { recursive: true });
@@ -303,8 +324,8 @@ test("0021 guards material provenance and refuses a symlinked template directory
       db.prepare("INSERT INTO evidence_records (id, created_at) VALUES (?, ?)").run("unapproved-evidence", "2026-08-25T00:00:00.000Z");
       db.prepare("INSERT INTO evidence_revisions (id, evidence_id, revision_number, origin, source_base_resume_id, source_document, source_section, factual_text, review_state, supersedes_revision_id, created_at, content_digest) VALUES (?, 'unapproved-evidence', 1, 'user_entered', NULL, 'manual', 'section', 'Unreviewed fact', 'unreviewed', NULL, ?, ?)").run(evidenceRevisionId, "2026-08-25T00:00:00.000Z", hash);
       db.prepare("INSERT INTO material_draft_claims (id, draft_id, ordinal, claim_text, created_at) VALUES (?, ?, 0, 'Claim', ?)").run(claimId, draftId, "2026-08-25T00:00:00.000Z");
-      assert.throws(() => db.prepare("INSERT INTO material_draft_evidence (draft_id, evidence_revision_id) VALUES (?, ?)").run(draftId, evidenceRevisionId), /must be approved/i);
-      assert.throws(() => db.prepare("INSERT INTO material_claim_support (claim_id, evidence_revision_id) VALUES (?, ?)").run(claimId, evidenceRevisionId), /must be approved/i);
+      assert.doesNotThrow(() => db.prepare("INSERT INTO material_draft_evidence (draft_id, evidence_revision_id) VALUES (?, ?)").run(draftId, evidenceRevisionId));
+      assert.doesNotThrow(() => db.prepare("INSERT INTO material_claim_support (claim_id, evidence_revision_id) VALUES (?, ?)").run(claimId, evidenceRevisionId));
       const draftColumns = (db.prepare("PRAGMA table_info(material_drafts)").all() as Array<{ name: string }>).map((column) => column.name);
       const versionColumns = (db.prepare("PRAGMA table_info(material_versions)").all() as Array<{ name: string }>).map((column) => column.name);
       assert.ok(draftColumns.includes("opportunity_revision_id"));

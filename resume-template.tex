@@ -1,0 +1,61 @@
+% Career Workbench generated-resume template
+%
+% This template reconstructs the approved Oboda v22 visual system: compact
+% US-Letter geometry, a centered header, ruled all-caps sections, aligned
+% entry rows, and concise hanging bullets. The app replaces only marked tokens
+% after escaping all user- and evidence-derived text.
+\documentclass[10pt,letterpaper]{article}
+
+\usepackage[letterpaper,left=54pt,right=44pt,top=34pt,bottom=38pt]{geometry}
+\usepackage{times}
+\usepackage[hidelinks]{hyperref}
+\usepackage{titlesec}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0pt}
+\pagenumbering{gobble}
+\titleformat{\section}{\normalfont\fontsize{12}{14}\selectfont\uppercase}{ }{0pt}{}[\vspace{-4pt}\titlerule]
+\titlespacing*{\section}{0pt}{10pt}{9pt}
+
+\newenvironment{tightitemize}{%
+  \begin{list}{\textbullet}{%
+    \setlength{\leftmargin}{28pt}%
+    \setlength{\labelsep}{5pt}%
+    \setlength{\labelwidth}{7pt}%
+    \setlength{\itemsep}{0pt}%
+    \setlength{\topsep}{0pt}%
+    \setlength{\partopsep}{0pt}%
+    \setlength{\parsep}{0pt}%
+    \setlength{\parskip}{0pt}%
+  }%
+}{%
+  \end{list}%
+}
+
+\newcommand{\resumeexperience}[3]{%
+  \noindent\hspace*{16pt}\textbf{#1}\hfill\textit{#2}\\[-1pt]
+  \hspace*{16pt}\textit{#3}\par\vspace{2pt}%
+}
+\newcommand{\resumeproject}[3]{%
+  \noindent\hspace*{16pt}\textbf{#1}\if\relax\detokenize{#2}\relax\else\ \textit{| #2}\fi\hfill\textit{#3}\par\vspace{2pt}%
+}
+\newcommand{\resumeeducation}[3]{%
+  \noindent\hspace*{16pt}\textbf{#1}\\[-1pt]
+  \hspace*{16pt}\textit{#2}\hfill\textit{#3}\par\vspace{2pt}%
+}
+\newcommand{\resumeskill}[2]{%
+  \noindent\hspace*{16pt}\textbf{#1:}\ #2\par
+}
+
+\begin{document}
+\fontsize{9.25}{11.6}\selectfont
+\begin{center}
+{{HEADER}}
+\end{center}
+\vspace{-2pt}
+{{EXPERIENCE_SECTION}}
+{{EDUCATION_SECTION}}
+{{PROJECTS_SECTION}}
+{{SKILLS_SECTION}}
+
+\end{document}
