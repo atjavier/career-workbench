@@ -515,3 +515,14 @@ button, input, textarea, select { font: inherit; }
   .experience-project-actions { align-items: stretch; flex-direction: column; }
   .experience-project-actions .affirmative-action, .generated-document-import button { width: 100%; }
 }
+
+/* Coach Resume streaming remains a one-column, source-order conversation. */
+.coach-transcript, .coach-composer { display: grid; gap: 0.75rem; min-width: 0; }
+.coach-transcript { list-style: none; margin: 1rem 0; padding: 0; }
+.coach-message, .candidate-message { border: 1px solid var(--border); border-radius: 0.6rem; max-width: 100%; overflow-wrap: anywhere; padding: 0.75rem; }
+.coach-message { background: var(--surface-base); }
+.candidate-message { background: var(--surface-raised); border-left: 0.35rem solid var(--accent); }
+.coach-message-unfinished { border-style: dashed; color: var(--muted-ink); }
+.coach-stream-actions { display: flex; flex-wrap: wrap; gap: 0.75rem; }
+.sr-only { height: 1px; margin: -1px; overflow: hidden; padding: 0; position: absolute; width: 1px; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+@media (max-width: 40rem) { .coach-stream-actions { display: grid; grid-template-columns: minmax(0, 1fr); } }

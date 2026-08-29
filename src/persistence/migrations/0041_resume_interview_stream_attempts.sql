@@ -1,0 +1,4 @@
+ALTER TABLE resume_interview_candidate_turns ADD COLUMN stream_request_id TEXT;
+ALTER TABLE resume_interview_turns ADD COLUMN stream_request_id TEXT;
+CREATE UNIQUE INDEX resume_interview_candidate_turns_stream_request_index ON resume_interview_candidate_turns(stream_request_id) WHERE stream_request_id IS NOT NULL;
+CREATE UNIQUE INDEX resume_interview_turns_stream_request_index ON resume_interview_turns(stream_request_id) WHERE stream_request_id IS NOT NULL;

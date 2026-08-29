@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const read = (path: string) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
+const read = (path: string) =>
+  readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
-test("Resume Edit presents a single onboarding card before a workspace exists and Coach after generation", async () => {
+test("Resume onboarding prepares evidence before the Coach interview", async () => {
   const [workspace, form, coach, styles] = await Promise.all([
     read("src/app/resume-workspace.tsx"),
     read("src/app/resume-onboarding.tsx"),
@@ -12,12 +13,29 @@ test("Resume Edit presents a single onboarding card before a workspace exists an
     read("src/app/globals.css"),
   ]);
 
-  for (const label of ["First name", "Middle name (optional)", "Last name", "Email", "Phone", "School", "Degree or program", "Expected or graduation year", "GWA (optional)", "Latin honors (optional)", "LinkedIn URL (optional)", "GitHub URL (optional)", "Projects and Experiences", "Create resume from my work folders"]) assert.ok(form.includes(label));
+  for (const label of [
+    "First name",
+    "Middle name (optional)",
+    "Last name",
+    "Email",
+    "Phone",
+    "School",
+    "Degree or program",
+    "Expected or graduation year",
+    "GWA (optional)",
+    "Latin honors (optional)",
+    "LinkedIn URL (optional)",
+    "GitHub URL (optional)",
+    "Projects and Experiences",
+    "Prepare evidence from my work folders",
+  ])
+    assert.ok(form.includes(label));
   assert.match(form, /Add every Project and Experience you want to start with/);
   assert.match(form, /localModelDisclosure/);
   assert.match(form, /Add another Project or Experience/);
   assert.match(form, /startTransition/);
   assert.match(form, /local-folder-input/);
+  assert.match(form, /\/resume\/interview/);
 
   assert.match(workspace, /Start your resume/);
   assert.match(workspace, /ResumeOnboarding/);
@@ -26,15 +44,27 @@ test("Resume Edit presents a single onboarding card before a workspace exists an
   assert.match(coach, /resume-coach-preview-layout/);
   assert.match(workspace, /href="\/evidence"/);
   assert.match(workspace, /readCandidateProfileState/);
-  assert.doesNotMatch(workspace, /CurrentBaseResume|BaseResumeImporter|listCurrentBaseResume|current-base-resume|Evidence and skills|Warnings|Approve Current Base Resume|iframe|api\/resume-template|Open or download Resume\.pdf/);
-  assert.doesNotMatch(form + workspace + coach, /iframe|material_draft|api\/current-base-resume/i);
+  assert.doesNotMatch(
+    workspace,
+    /CurrentBaseResume|BaseResumeImporter|listCurrentBaseResume|current-base-resume|Evidence and skills|Warnings|Approve Current Base Resume|iframe|api\/resume-template|Open or download Resume\.pdf/,
+  );
+  assert.doesNotMatch(
+    form + workspace + coach,
+    /iframe|material_draft|api\/current-base-resume/i,
+  );
 
   assert.match(styles, /\.resume-onboarding-fields/);
   assert.match(styles, /\.onboarding-work/);
   assert.match(styles, /\.resume-coach-preview-layout/);
-  assert.match(styles, /grid-template-columns: minmax\(18rem, \.82fr\) minmax\(22rem, 1\.18fr\)/);
+  assert.match(
+    styles,
+    /grid-template-columns: minmax\(18rem, \.82fr\) minmax\(22rem, 1\.18fr\)/,
+  );
   assert.match(styles, /@media \(max-width: 51\.25rem\)/);
-  assert.match(styles, /\.resume-coach-preview-layout \{ grid-template-columns: 1fr; \}/);
+  assert.match(
+    styles,
+    /\.resume-coach-preview-layout \{ grid-template-columns: 1fr; \}/,
+  );
 });
 
 test("Candidate Profile action remains a thin append-only server boundary", async () => {
@@ -46,5 +76,64 @@ test("Candidate Profile action remains a thin append-only server boundary", asyn
   assert.match(action, /expectedStateRevisionNumber/);
   assert.match(action, /revalidatePath\("\/resume"\)/);
   assert.match(action, /toSafeWorkspaceError/);
-  assert.doesNotMatch(action, /saveCandidateProfileAction[\s\S]{0,1600}(?:fetch\s*\(|LocalModelGateway|bootstrapBundledResumeTemplate|currentBaseResumeAction)/);
+  assert.doesNotMatch(
+    action,
+    /saveCandidateProfileAction[\s\S]{0,1600}(?:fetch\s*\(|LocalModelGateway|bootstrapBundledResumeTemplate|currentBaseResumeAction)/,
+  );
+});
+
+test("mandatory Coach Resume interview is chat-only and accessible", async () => {
+  const [page, interview, action, streamRoute] = await Promise.all([
+    read("src/app/resume/interview/page.tsx"),
+    read("src/app/resume-interview.tsx"),
+    read("src/app/actions.ts"),
+    read("src/app/api/resume-interview/stream/route.ts"),
+  ]);
+  assert.match(page, /ResumeInterview/);
+  assert.match(page, /ApplicationShell/);
+  assert.doesNotMatch(
+    page,
+    /ResumePdfPreview|iframe|resume-coach-preview-layout/,
+  );
+  assert.match(page, /shouldShowInterview/);
+  assert.match(page, /journey\?\.phase === "interview"/);
+  for (const label of [
+    "Clarify your experience",
+    "Use this message as my final answer",
+    "I don&apos;t know",
+    "aria-live",
+    "aria-busy",
+    "questions complete",
+    "Review needed: this answer may conflict with documented evidence",
+    "Stop generating",
+    "unfinished",
+    "Try again",
+    "1_500",
+  ])
+    assert.match(interview, new RegExp(label));
+  assert.match(streamRoute, /streamResumeInterviewCoach/);
+  assert.match(streamRoute, /beginResumeInterviewCoachStream/);
+  assert.match(streamRoute, /finalizeResumeInterviewCoachStream/);
+  assert.match(streamRoute, /text\/event-stream/);
+  assert.doesNotMatch(
+    streamRoute,
+    /127\.0\.0\.1|system_prompt|direct model URL/,
+  );
+  assert.doesNotMatch(interview, /import \{ interviewCategoryLabel/);
+  assert.doesNotMatch(
+    interview,
+    /ResumePdfPreview|iframe|generateBaseResumeAction|requestBaseResumeGeneration/,
+  );
+  assert.match(interview, /function discardUnfinished\(\)/);
+  assert.doesNotMatch(
+    interview,
+    /resumeInterviewCoachAction|Use non-streaming Coach/,
+  );
+  assert.match(
+    interview,
+    /<form action=\{answerAction\} aria-busy=\{answerPending\} onSubmit=\{discardUnfinished\}>/,
+  );
+  assert.match(action, /resumeClarificationAction/);
+  assert.match(action, /respondToResumeClarification/);
+  assert.match(action, /revalidatePath\("\/resume\/interview"\)/);
 });
