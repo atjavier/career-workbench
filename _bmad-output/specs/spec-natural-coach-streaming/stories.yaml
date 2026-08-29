@@ -1,0 +1,9 @@
+- id: "1"
+  title: Make Coach Resume a natural realtime messaging conversation
+  description: >-
+    Implement CAP-1 through CAP-4 in SPEC.md and the native LM Studio framing,
+    response validation, one-composer conversation, and explicit final-answer
+    behavior in streaming-contract.md.
+  spec_checkpoint: true
+  done_checkpoint: true
+  invoke_dev_with: ""

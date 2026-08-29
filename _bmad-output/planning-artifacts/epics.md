@@ -1,5 +1,7 @@
 ---
 stepsCompleted: [1, 2, 3, 4]
+lastUpdated: 2026-08-28
+approvedChange: evidence-informed-resume-intake-and-coach-interview
 inputDocuments:
   - _bmad-output/specs/spec-personal-job-discovery-and-application-materials-tool/SPEC.md
   - _bmad-output/specs/spec-personal-job-discovery-and-application-materials-tool/acceptance-criteria.md
@@ -1015,3 +1017,321 @@ so that I can document real local work folders without confusing their source ma
 - Resume > Experience & Projects uses the same Resume mini-tab visual grammar as Edit and presents separate Projects and Experiences collections with compact, expandable detail rows.
 - Each category has one explicit real-source-folder documentation handoff. The local `resume-evidence-documenter` skill safely and read-only inspects the selected working folder, then produces exactly the three proposed artifacts outside that folder; the application does not directly import or parse raw source files.
 - The user explicitly imports generated documentation artifacts and individually approves resulting evidence before claim use. A bounded summary comes only from `project-overview.md`; it never becomes evidence authority or invents content. `Resume.pdf` and legacy Base Resume extraction do not appear in the active collection.
+
+## Approved Change - 2026-08-28: Evidence-Informed Resume Intake and Coach Interview
+
+The active Resume journey is revised from automatic generation after onboarding to an interview-first flow. The shared root `Resume.pdf` remains the immutable, general visual template for final generated resumes; it is not an Oboda visual template. Oboda may guide editorial hierarchy only where useful. Initial submission captures the Candidate Profile and selected local Project/Experience folders, then documents and interprets their evidence without creating a resume draft or preview. Coach Resume identifies material gaps, creates grouped clarification tasks, interviews the user in a dedicated chat-only page, and creates the first resume only after required tasks are satisfied. User answers become attributable, reviewable evidence and never silently become unsupported claims.
+
+### FR Coverage Map - Approved Change
+
+- FR-1, FR-10, FR-11: Epic 9 - evidence interpretation, clarification, attributable user evidence, and grounded resume generation.
+- FR-2, FR-12: Epic 9 - final generated material uses the existing immutable `Resume.pdf` visual template only after the interview completion gate.
+
+### Epic 9 Status: Planned ✅
+- NFR-1 through NFR-5, NFR-7 through NFR-9: Epic 9 - local-only bounded model use, workspace ownership, evidence provenance, accessible mandatory interview, recoverable task state, and metadata-only audit history.
+
+### Epic 9: Evidence-Informed Resume Intake and Coach Interview ✅ Implemented
+
+Adrian completes a structured Coach Resume interview after evidence intake, so that the first generated resume reflects both documented work and his clarified context rather than repository-only assumptions.
+
+**FRs covered:** FR-1, FR-2, FR-10, FR-11, FR-12; NFR-1 through NFR-5, NFR-7 through NFR-9.
+
+### Story 9.1: Redefine Onboarding as Evidence Intake
+
+As Adrian,
+I want initial submission to save my profile and chosen Project/Experience folders without creating a resume,
+so that the system can first understand my documented work and identify meaningful gaps.
+
+**Acceptance Criteria:**
+
+**Given** valid initial profile details and one or more selected local folders,
+**When** I finalize onboarding,
+**Then** the system creates/selects the workspace, saves the profile, and begins only bounded folder-documentation and evidence-interpretation work.
+
+**Given** documentation completes,
+**When** the workspace has interpreted evidence,
+**Then** no material draft, PDF preview, or resume-generation job is created merely from onboarding completion.
+
+**Given** a deleted or switched workspace during documentation,
+**When** the background work finishes,
+**Then** it cannot add evidence, interpretation, tasks, or a draft to another workspace.
+
+**Given** an empty, failed, or incomplete folder interpretation,
+**When** onboarding finishes,
+**Then** Adrian receives an accessible recovery state rather than a generated fallback resume.
+
+**Given** the post-onboarding redirect,
+**When** it renders,
+**Then** it opens the dedicated Coach Resume interview route rather than the split preview workspace.
+
+### Story 9.2: Interpret Evidence and Plan Clarification Tasks
+
+As Adrian,
+I want the system to organize what each Project or Experience proves and identify only the missing details that matter for my resume,
+so that Coach Resume asks focused questions instead of guessing from repository files.
+
+**Acceptance Criteria:**
+
+**Given** documented Project or Experience evidence,
+**When** interpretation completes,
+**Then** the system stores a workspace-owned, reviewable record separating direct facts, supported professional capabilities, contextual purpose/workflow, and explicit unknowns or contradictions.
+
+**Given** a project or experience lacks evidence of purpose, ownership, users/workflow, outcomes, metrics, deployment, collaboration, dates, or role,
+**When** interpretation completes,
+**Then** the system creates clarification tasks only for material gaps.
+
+**Given** multiple gaps for one item,
+**When** tasks are created,
+**Then** they are grouped by the relevant Project or Experience and category, such as BioEvidence impact and user workflow.
+
+**Given** a detail is already directly evidenced,
+**When** task planning runs,
+**Then** no duplicate question is created for that detail.
+
+**Given** a potential claim is only plausible rather than evidenced,
+**When** tasks are created,
+**Then** it remains an explicit question or unknown and is never promoted to resume-ready evidence.
+
+**Given** a workspace is deleted,
+**When** cleanup runs,
+**Then** its interpretation records and clarification tasks are permanently removed with its other workspace-owned data, leaving only metadata-only deletion audit history.
+
+### Story 9.3: Persist Workspace-Specific Resume Journey State
+
+As Adrian,
+I want every resume workspace to retain its own evidence, Coach Resume interview progress, and generation state,
+so that I can switch among resumes without losing work or mixing their details.
+
+**Acceptance Criteria:**
+
+**Given** a resume workspace,
+**When** onboarding, folder documentation, evidence interpretation, clarification tasks, answers, generation readiness, or a generated draft changes,
+**Then** the system saves a workspace-owned journey record with a stable ID tied to that workspace.
+
+**Given** two resume workspaces,
+**When** I switch between them,
+**Then** each workspace restores only its own profile revision, folders, documented evidence, interpretations, tasks, answers, and latest eligible draft.
+
+**Given** one workspace is still onboarding, another is in Coach Resume interview, and another is ready for preview,
+**When** I view the workspace selector,
+**Then** each state is shown truthfully and selecting any workspace is allowed.
+
+**Given** I add a Project or Experience after completing onboarding or an earlier interview,
+**When** its documentation and interpretation finish,
+**Then** only that workspace re-enters clarification for the new or materially changed evidence and completed unrelated tasks stay complete.
+
+**Given** I leave during onboarding or an interview,
+**When** I return to that workspace,
+**Then** its exact progress and next required action are restored.
+
+**Given** a workspace is permanently deleted,
+**When** deletion completes,
+**Then** all workspace-owned intake details, folder references, interpretations, tasks, answers, drafts, and managed evidence folders are deleted while audit history keeps metadata only.
+
+**Given** background work finishes after I switch or delete a workspace,
+**When** it attempts persistence,
+**Then** it verifies the original workspace ID and cannot update another workspace.
+
+### Story 9.4: Run the Mandatory Coach Resume Interview
+
+As Adrian,
+I want a dedicated Coach Resume chat that asks focused clarification questions before resume creation,
+so that I can add context the repositories cannot know.
+
+**Acceptance Criteria:**
+
+**Given** a workspace has pending clarification tasks,
+**When** I open that workspace,
+**Then** I am taken to a dedicated interview page with the shared header and Coach Resume chat only, with no PDF preview or split workspace.
+
+**Given** pending tasks,
+**When** Coach Resume starts,
+**Then** it asks one concise question at a time and identifies the relevant Project or Experience and category in plain language.
+
+**Given** I answer a question,
+**When** Coach Resume receives the answer,
+**Then** it records the answer against that workspace and task, acknowledges it, and advances only when the task is sufficiently answered or explicitly skipped.
+
+**Given** I skip or say I do not know,
+**When** the response is recorded,
+**Then** the task completes as an explicit unknown and the system does not block indefinitely or invent an answer.
+
+**Given** I leave and return,
+**When** the interview reloads,
+**Then** completed, skipped, and remaining tasks resume in their persisted order.
+
+**Given** tasks remain,
+**When** I attempt to reach the final Resume preview route,
+**Then** the app returns me to the interview with a clear progress explanation.
+
+**Given** Coach Resume is unavailable,
+**When** the interview is shown,
+**Then** saved tasks and answers remain visible and recoverable, and no model retry or resume generation occurs automatically.
+
+**Given** a narrow screen, keyboard navigation, or screen reader,
+**When** I use the interview,
+**Then** chat messages, progress, answer controls, and recovery status remain understandable and operable.
+
+### Story 9.5: Preserve Clarified Resume Evidence
+
+As Adrian,
+I want my Coach Resume answers to become traceable evidence for the relevant Project or Experience,
+so that the final resume uses my clarified context without treating it as a model guess.
+
+**Acceptance Criteria:**
+
+**Given** I submit an interview answer,
+**When** it is accepted,
+**Then** the system stores the exact answer, task, category, workspace, relevant Project or Experience, timestamp, and provenance as workspace-owned local data.
+
+**Given** an answer clarifies purpose, workflow, ownership, contribution, collaboration, outcome, metric, deployment, or date,
+**When** it is used for resume generation,
+**Then** the resulting claim can cite both the original documented evidence and the relevant user clarification.
+
+**Given** an answer conflicts with existing evidence,
+**When** it is submitted,
+**Then** the conflict is surfaced for review and neither version silently replaces the other.
+
+**Given** an answer supplies a metric or outcome,
+**When** it is stored,
+**Then** the system preserves it as candidate-provided context and does not transform it into a stronger or calculated claim.
+
+**Given** a task is skipped,
+**When** the interview completes,
+**Then** its gap remains explicit and generation does not fabricate a substitute claim.
+
+**Given** I later add or change a Project or Experience,
+**When** new tasks are planned,
+**Then** prior answers remain attached to their original item and do not automatically support unrelated new evidence.
+
+**Given** I delete the workspace,
+**When** deletion completes,
+**Then** its answer records and evidence links are removed with the workspace, leaving only metadata-only audit history.
+
+### Story 9.6: Create Workspace-Scoped Resume Evidence Packets
+
+As Adrian,
+I want every resume workspace to have its own readable Project and Experience evidence packet,
+so that I can inspect documented and interview-provided context in one place without mixing resumes.
+
+**Acceptance Criteria:**
+
+**Given** a Project or Experience is documented for a workspace,
+**When** its managed evidence packet is persisted,
+**Then** all artifact paths are workspace-scoped and cannot collide with another resume workspace that has the same item name.
+
+**Given** candidate answers or skips are accepted,
+**When** their workspace packet is synchronized,
+**Then** a companion `resume-clarifications.md` records the relevant item, category, exact candidate-provided answer or explicit unknown, timestamp, provenance, and conflict-review state.
+
+**Given** repository-grounded documentation exists,
+**When** clarifications are written,
+**Then** `resume-evidence.md` remains unchanged and the companion file never presents candidate context as source-folder evidence.
+
+**Given** a clarification is updated, an item is added, a workspace is switched, or a workspace is deleted,
+**When** packet synchronization or cleanup runs,
+**Then** it is atomic, safe-path bounded, scoped to the original workspace, and cannot expose, overwrite, or retain another workspace's packet.
+
+**Given** the SQLite workspace is temporarily unavailable or a companion-file write fails,
+**When** the operation recovers,
+**Then** SQLite remains authoritative, no source folder is changed, no unrelated packet is touched, and the user receives a truthful local recovery state.
+
+### Story 9.7: Run the Local AI Coach Resume Conversation
+
+As Adrian,
+I want Coach Resume to conduct the required clarification interview as a local AI chat,
+so that the conversation feels natural while remaining grounded in saved evidence tasks.
+
+**Acceptance Criteria:**
+
+**Given** evidence documentation and task planning are still queued or running,
+**When** I open the interview route,
+**Then** I see only truthful processing status and no ready message, task, chat turn, resume generation, or preview.
+
+**Given** a workspace has pending saved clarification tasks and local AI is ready,
+**When** I explicitly begin or continue Coach Resume,
+**Then** LM Studio on this device receives only the current task, bounded workspace-owned documented/clarified context, and safe transcript needed to phrase the next question.
+
+**Given** Coach Resume replies,
+**When** the model is used,
+**Then** it introduces or asks the saved question conversationally and may request one bounded follow-up, but it cannot create tasks, claims, evidence, drafts, PDFs, filesystem reads, network calls, or tool actions.
+
+**Given** I answer or explicitly skip,
+**When** the input is accepted,
+**Then** the existing task/response/clarified-evidence transaction remains the authority and the next Coach turn is requested only through an explicit user action.
+
+**Given** local AI is unavailable, a response is invalid, or I leave and return,
+**When** the chat renders,
+**Then** saved questions, messages, answers, skips, progress, and the next safe action remain visible; no automatic retry or resume generation occurs.
+
+**Given** keyboard, screen reader, narrow-screen, or 400% zoom use,
+**When** I use Coach Resume,
+**Then** the chronological transcript, consent disclosure, input, pending/recovery status, and explicit actions remain accessible without horizontal overflow.
+
+### Story 9.8: Generate the Resume After Interview Completion
+
+As Adrian,
+I want the system to create my first resume only after Coach Resume has resolved the required clarification tasks,
+so that the generated content is based on both documented and clarified evidence.
+
+**Acceptance Criteria:**
+
+**Given** all required tasks for a workspace are answered, explicitly skipped, or otherwise resolved,
+**When** Coach Resume marks the interview complete,
+**Then** the system creates one explicit generation request for that workspace.
+
+**Given** any required task remains pending,
+**When** generation is requested,
+**Then** no draft or PDF is created and the interface identifies the next unanswered task.
+
+**Given** generation runs,
+**When** the local model is called,
+**Then** it receives only the saved profile, selected workspace-owned documented evidence, attributable clarification evidence, and bounded interpretation summaries, not raw folders, source trees, unrelated workspace data, or another workspace's readable evidence packet.
+
+**Given** a generated claim appears in Experience or Projects,
+**When** it is persisted,
+**Then** it has direct support from documented evidence, clarified user evidence, or both, and it never relies on an unresolved evidence-conflict record.
+
+**Given** the local model is unavailable or returns invalid output,
+**When** generation fails,
+**Then** the workspace remains interview-complete and recoverable and it does not create a low-quality deterministic fallback resume.
+
+**Given** the workspace changes, is switched, or is deleted while generation is in progress,
+**When** persistence is attempted,
+**Then** the original workspace and journey state are verified and the result cannot attach elsewhere.
+
+**Given** a resume has already been generated,
+**When** I merely revisit its workspace,
+**Then** generation does not run again unless I add material evidence or explicitly request a revision.
+
+### Story 9.9: Show the Final Coach and Resume Workspace
+
+As Adrian,
+I want a focused Coach Resume chat beside my generated resume after the interview is complete,
+so that I can review and improve the saved resume without losing its evidence context.
+
+**Acceptance Criteria:**
+
+**Given** a workspace has a valid generated draft,
+**When** I open it,
+**Then** the page presents a balanced desktop split with Coach Resume on the left and a read-only generated resume preview on the right.
+
+**Given** the preview renders,
+**When** its PDF is requested,
+**Then** it is compiled from the saved, evidence-backed draft through the local TeX pipeline using the shared root `Resume.pdf` visual template, and that shared template is never deleted with a workspace.
+
+**Given** I ask Coach Resume for feedback or a supported small revision,
+**When** it responds,
+**Then** it critiques the saved draft independently and proposes a reviewable change rather than rebuilding the resume merely because the page was opened.
+
+**Given** a generated draft is unavailable or rendering fails,
+**When** I view the workspace,
+**Then** Coach Resume and a clear local recovery state remain available without showing another workspace's draft.
+
+**Given** a narrow screen, keyboard navigation, or screen reader,
+**When** I use the final workspace,
+**Then** Coach, preview, progress/state, and recovery controls remain accessible and the layout stacks without hiding required controls.
+
+**Given** I switch workspaces,
+**When** the selected workspace changes,
+**Then** its own interview or draft state determines whether I see the interview page, final split view, or a recovery state.
