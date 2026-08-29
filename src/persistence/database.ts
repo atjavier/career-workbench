@@ -27,6 +27,13 @@ export function applyMigrations(database: DatabaseSync): void {
       if (migration.id === "0028_resume_draft_schema_compat") {
         const columns = database.prepare("PRAGMA table_info(material_drafts)").all() as Array<{ name?: string }>;
         if (!columns.some((column) => column.name === "opportunity_revision_id")) database.exec(migration.sql);
+      } else if (["0032_resume_evidence_interpretation_contradictions", "0033_resume_workspace_journeys", "0034_backfill_resume_workspace_journeys", "0035_resume_workspace_journey_fingerprint", "0036_resume_clarification_task_responses", "0037_resume_clarified_evidence"].includes(migration.id)) {
+        // The legacy 0028 compatibility fixture intentionally contains only
+        // its material-draft tables. It has no workspace schema to upgrade;
+        // avoid rebuilding a table whose foreign-key parent is absent.
+        const workspaceTable = database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'resume_workspaces'").get();
+        if (workspaceTable) database.exec(migration.sql);
+        else if (migration.id === "0037_resume_clarified_evidence") { database.exec("ROLLBACK;"); continue; }
       } else {
         database.exec(migration.sql);
       }

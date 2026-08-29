@@ -38,13 +38,13 @@ export function ResumeOnboarding({ localAiReady }: { localAiReady: boolean }) {
     startTransition(() => action(data));
   };
   useEffect(() => {
-    if (state.status === "success" && state.workspaceId) router.replace("/resume");
+    if (state.status === "success" && state.workspaceId) router.replace("/resume/interview");
   }, [router, state.status, state.workspaceId]);
   const addWork = () => setWork((items) => items.length < 12 ? [...items, { id: Math.max(...items.map((item) => item.id)) + 1, category: "project" }] : items);
   return <section className="resume-onboarding panel" aria-labelledby="resume-onboarding-heading">
-    <p className="eyebrow">Start a resume</p>
+    <p className="eyebrow">Prepare your resume evidence</p>
     <h2 id="resume-onboarding-heading">Your basic information and local work folders</h2>
-    <p>Add every Project and Experience you want to start with. The local evidence agent reads each chosen folder directly within its allowlist and safety limits. Folder paths and raw files are not retained.</p>
+    <p>Add every Project and Experience you want to start with. The local evidence agent reads each chosen folder directly within its allowlist and safety limits, then Coach Resume will ask about important context the folders cannot establish. Folder paths and raw files are not retained.</p>
     {!localAiReady ? <p className="status">Set up local AI before submitting folders. <Link className="resume-coach-setup-link" href="/settings">Set up local AI</Link></p> : null}
     <form onSubmit={submit}>
       <label htmlFor="resume-name">Resume name</label>
@@ -62,8 +62,8 @@ export function ResumeOnboarding({ localAiReady }: { localAiReady: boolean }) {
         </section>)}
       </fieldset>
       <button type="button" className="secondary-action" onClick={addWork}>Add another Project or Experience</button>
-      <label><input type="checkbox" name="localModelDisclosure" value="yes" required /> I consent to let my configured local AI inspect these folders and my saved profile to create my first resume draft.</label>
-      <button className="affirmative-action" type="submit" disabled={pending || !localAiReady}>{pending ? "Saving resume..." : "Create resume from my work folders"}</button>
+      <label><input type="checkbox" name="localModelDisclosure" value="yes" required /> I consent to let my configured local AI inspect these folders and my saved profile to prepare resume evidence and clarification questions.</label>
+      <button className="affirmative-action" type="submit" disabled={pending || !localAiReady}>{pending ? "Preparing evidence..." : "Prepare evidence from my work folders"}</button>
       <p role="status" className={selectionMessage || state.status === "error" ? "status status-error" : "status"}>{selectionMessage ?? state.summary}</p>
     </form>
   </section>;

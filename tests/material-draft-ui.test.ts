@@ -4,7 +4,7 @@ import test from "node:test";
 
 test("Resume Coach presents the generated PDF and does not regenerate on page visits", async () => {
   const [coach, actions] = await Promise.all([readFile(new URL("../src/app/resume-coach.tsx", import.meta.url), "utf8"), readFile(new URL("../src/app/actions.ts", import.meta.url), "utf8")]);
-  for (const token of ["Resume Coach independently reviews", "Review base resume", "Keep current", "Resume template is unchanged", "aria-busy", "aria-live=\"polite\"", "generated automatically during onboarding"]) assert.ok(coach.includes(token));
+  for (const token of ["Resume Coach independently reviews", "Review base resume", "Keep current", "Resume template is unchanged", "aria-busy", "aria-live=\"polite\""]) assert.ok(coach.includes(token));
   assert.ok(coach.indexOf("Resume template is unchanged") < coach.indexOf("Review base resume"));
   assert.doesNotMatch(coach, /Draft focus|Create a fresh resume draft|Optional local opportunity|opportunityRevisionId/);
   assert.match(actions, /handOffMaterialDraft/); assert.match(actions, /revalidatePath\("\/resume"\)/);

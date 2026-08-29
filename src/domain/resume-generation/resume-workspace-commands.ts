@@ -1,5 +1,5 @@
 import { createAuditEvent, createUuidV7 } from "@/audit/audit-event";
-import { rm } from "node:fs/promises";
+import { lstat, rm } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import { WorkspaceError } from "@/domain/workspace/types";
 import { evidenceLibraryRoot } from "@/files/evidence-library";
@@ -7,8 +7,10 @@ import { resolveAppDataPaths } from "@/files/app-data";
 import { applyMigrations, openDatabase } from "@/persistence/database";
 import { appendAuditEvent } from "@/persistence/workspace-repository";
 import { insertResumeWorkspace, listResumeWorkspaces, readActiveResumeWorkspace, setActiveResumeWorkspace, type ResumeWorkspace } from "@/persistence/resume-workspace-repository";
+import { insertResumeWorkspaceJourney, listResumeWorkspaceJourneys, type ResumeWorkspaceJourney } from "@/persistence/resume-workspace-journey-repository";
+import { reconcileResumeWorkspaceJourneyInDatabase } from "@/domain/resume-generation/resume-workspace-journey";
 
-type Options = { appDataRoot?: string };
+type Options = { appDataRoot?: string; workspaceRoot?: string };
 const restoreDeletionGuards = (db: ReturnType<typeof openDatabase>) => {
   db.exec("CREATE TRIGGER IF NOT EXISTS candidate_profiles_immutable_delete BEFORE DELETE ON candidate_profiles BEGIN SELECT RAISE(ABORT, 'candidate profiles are immutable'); END;");
   db.exec("CREATE TRIGGER IF NOT EXISTS candidate_profile_revisions_immutable_delete BEFORE DELETE ON candidate_profile_revisions BEGIN SELECT RAISE(ABORT, 'candidate profile revisions are immutable'); END;");
@@ -32,14 +34,15 @@ const nameOf = (value: string) => {
 function transaction<T>(root: string, work: (db: ReturnType<typeof openDatabase>) => T): T { const db = openDatabase(`${root}/workspace.sqlite`); try { applyMigrations(db); db.exec("BEGIN IMMEDIATE"); try { const value = work(db); db.exec("COMMIT"); return value; } catch (error) { db.exec("ROLLBACK"); throw error; } } finally { db.close(); } }
 function managedEvidenceDirectory(libraryPath: string): { category: "projects" | "experiences"; name: string } | undefined { const match = /^resume-evidence\/(projects|experiences)\/([A-Za-z0-9._-]+)\//.exec(libraryPath); return match ? { category: match[1] as "projects" | "experiences", name: match[2] } : undefined; }
 function inside(root: string, target: string): boolean { const path = relative(root, target); return Boolean(path) && path !== ".." && !path.startsWith(`..${sep}`) && !path.includes(`${sep}..${sep}`); }
+async function removeManagedDirectory(root: string, target: string): Promise<boolean> { if (!inside(root, target)) return false; const stat = await lstat(target).catch(() => undefined); if (!stat) return true; if (stat.isSymbolicLink() || !stat.isDirectory()) return false; await rm(target, { recursive: true, force: true }); return true; }
 
-export async function readResumeWorkspaceState(input: Options = {}): Promise<{ workspaces: ResumeWorkspace[]; activeWorkspace?: ResumeWorkspace; revisionNumber: number }> {
+export async function readResumeWorkspaceState(input: Options = {}): Promise<{ workspaces: Array<ResumeWorkspace & { journey?: ResumeWorkspaceJourney }>; activeWorkspace?: ResumeWorkspace & { journey?: ResumeWorkspaceJourney }; revisionNumber: number }> {
   const paths = await resolveAppDataPaths(input.appDataRoot);
-  return transaction(paths.root, (db) => { const active = readActiveResumeWorkspace(db); return { workspaces: listResumeWorkspaces(db), activeWorkspace: active.workspace, revisionNumber: active.revisionNumber }; });
+  return transaction(paths.root, (db) => { const active = readActiveResumeWorkspace(db); const baseWorkspaces = listResumeWorkspaces(db); for (const workspace of baseWorkspaces) reconcileResumeWorkspaceJourneyInDatabase(db, workspace.id); const journeys = new Map(listResumeWorkspaceJourneys(db).map((journey) => [journey.workspaceId, journey])); const workspaces = baseWorkspaces.map((workspace) => ({ ...workspace, journey: journeys.get(workspace.id) })); return { workspaces, activeWorkspace: active.workspace ? { ...active.workspace, journey: journeys.get(active.workspace.id) } : undefined, revisionNumber: active.revisionNumber }; });
 }
 export async function createResumeWorkspace(input: Options & { name: string; expectedRevisionNumber?: number }): Promise<{ workspace: ResumeWorkspace; revisionNumber: number }> {
   const name = nameOf(input.name); const paths = await resolveAppDataPaths(input.appDataRoot);
-  return transaction(paths.root, (db) => { const active = readActiveResumeWorkspace(db); if (input.expectedRevisionNumber !== undefined && input.expectedRevisionNumber !== active.revisionNumber) throw new WorkspaceError("RESUME_WORKSPACE_STALE", "Your resume workspace changed before it could be created.", "Refresh Resume and try again."); const now = new Date().toISOString(); const workspace = { id: createUuidV7(), name, createdAt: now, updatedAt: now }; insertResumeWorkspace(db, workspace); if (!setActiveResumeWorkspace(db, workspace.id, active.revisionNumber, now)) throw new WorkspaceError("RESUME_WORKSPACE_STALE", "Your resume workspace changed before it could be created.", "Refresh Resume and try again."); appendAuditEvent(db, createAuditEvent({ actor: "local-os-user", action: "resume.workspace_created", outcome: "success", entityId: workspace.id })); return { workspace, revisionNumber: active.revisionNumber + 1 }; });
+  return transaction(paths.root, (db) => { const active = readActiveResumeWorkspace(db); if (input.expectedRevisionNumber !== undefined && input.expectedRevisionNumber !== active.revisionNumber) throw new WorkspaceError("RESUME_WORKSPACE_STALE", "Your resume workspace changed before it could be created.", "Refresh Resume and try again."); const now = new Date().toISOString(); const workspace = { id: createUuidV7(), name, createdAt: now, updatedAt: now }; insertResumeWorkspace(db, workspace); insertResumeWorkspaceJourney(db, { id: createUuidV7(), workspaceId: workspace.id, phase: "onboarding", nextAction: "complete_profile", message: "Complete your basic profile to begin evidence intake.", stateFingerprint: "sha256:unreconciled", stateRevision: 1, createdAt: now, updatedAt: now }); if (!setActiveResumeWorkspace(db, workspace.id, active.revisionNumber, now)) throw new WorkspaceError("RESUME_WORKSPACE_STALE", "Your resume workspace changed before it could be created.", "Refresh Resume and try again."); appendAuditEvent(db, createAuditEvent({ actor: "local-os-user", action: "resume.workspace_created", outcome: "success", entityId: workspace.id })); return { workspace, revisionNumber: active.revisionNumber + 1 }; });
 }
 export async function selectResumeWorkspace(input: Options & { workspaceId: string; expectedRevisionNumber: number }): Promise<void> {
   const paths = await resolveAppDataPaths(input.appDataRoot); transaction(paths.root, (db) => { const now = new Date().toISOString(); if (!setActiveResumeWorkspace(db, input.workspaceId, input.expectedRevisionNumber, now)) throw new WorkspaceError("RESUME_WORKSPACE_STALE", "That resume workspace is no longer available.", "Refresh Resume and choose an available workspace."); appendAuditEvent(db, createAuditEvent({ actor: "local-os-user", action: "resume.workspace_selected", outcome: "success", entityId: input.workspaceId })); });
@@ -83,8 +86,10 @@ export async function permanentlyDeleteResumeWorkspace(input: Options & { worksp
     appendAuditEvent(db, createAuditEvent({ actor: "local-os-user", action: "resume.workspace_deleted", outcome: "success", entityId: input.workspaceId }));
     return directories;
   });
-  const libraryRoot = evidenceLibraryRoot(); let artifactCleanupIncomplete = false;
-  await Promise.all(managedDirectories.map(async (directory) => { try { const target = resolve(libraryRoot, directory); if (inside(libraryRoot, target)) await rm(target, { recursive: true, force: true }); } catch { artifactCleanupIncomplete = true; } }));
+  const libraryRoot = evidenceLibraryRoot(input.workspaceRoot); let artifactCleanupIncomplete = false;
+  const workspacePacketRoot = resolve(libraryRoot, "workspaces", input.workspaceId);
+  if (!(await removeManagedDirectory(libraryRoot, workspacePacketRoot).catch(() => false))) artifactCleanupIncomplete = true;
+  await Promise.all(managedDirectories.map(async (directory) => { try { if (!(await removeManagedDirectory(libraryRoot, resolve(libraryRoot, directory)))) artifactCleanupIncomplete = true; } catch { artifactCleanupIncomplete = true; } }));
   const db = openDatabase(databasePath); try { db.exec("VACUUM"); } finally { db.close(); }
   const after = await (await import("node:fs/promises")).stat(databasePath).then((item) => item.size).catch(() => 0); const reclaimedBytes = Math.max(0, await before - after); const auditDb = openDatabase(databasePath); try { auditDb.prepare("UPDATE resume_workspace_deletion_audit SET reclaimed_bytes = ? WHERE workspace_id = ? AND outcome = 'success'").run(reclaimedBytes, input.workspaceId); } finally { auditDb.close(); } return { reclaimedBytes, artifactCleanupIncomplete };
 }

@@ -87,12 +87,12 @@ async function readDocumentationArtifacts(directory: string, category: LibraryCa
   }
   return documents;
 }
-export async function copyDocumentedEvidenceArtifacts(input: { outputDirectory: string; name: string; category: LibraryCategory; workspaceRoot?: string }): Promise<DocumentedArtifactSet> {
-  const name = safeSegment(input.name); const source = resolve(input.outputDirectory); const root = evidenceLibraryRoot(input.workspaceRoot); const categoryRoot = input.category === "project" ? "projects" : "experiences"; const destination = join(root, categoryRoot, name);
+export async function copyDocumentedEvidenceArtifacts(input: { outputDirectory: string; name: string; category: LibraryCategory; workspaceId: string; workspaceRoot?: string }): Promise<DocumentedArtifactSet> {
+  const name = safeSegment(input.name); const workspaceId = safeSegment(input.workspaceId); const source = resolve(input.outputDirectory); const root = evidenceLibraryRoot(input.workspaceRoot); const categoryRoot = input.category === "project" ? "projects" : "experiences"; const destination = join(root, "workspaces", workspaceId, categoryRoot, name);
   if (source === root || inside(root, source)) throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "Generated documents must be outside the managed evidence library.", "Choose the separate output folder created by the documentation skill.");
   if (!inside(root, destination)) throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "The managed import location is unsafe.", "Choose a different item name and try again.");
-  const sourceDocuments = await readDocumentationArtifacts(source, input.category, `resume-evidence/${categoryRoot}/${name}`);
-  try { await mkdir(join(root, categoryRoot), { recursive: true }); await mkdir(destination); } catch (error) { if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new WorkspaceError("EVIDENCE_LIBRARY_DUPLICATE", "That documented item has already been imported.", "Choose a different item name or review the existing collection item."); throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "The generated documents could not be copied into the managed library.", "Check local folder access and try again."); }
+  const sourceDocuments = await readDocumentationArtifacts(source, input.category, `resume-evidence/workspaces/${workspaceId}/${categoryRoot}/${name}`);
+  try { await mkdir(join(root, "workspaces", workspaceId, categoryRoot), { recursive: true }); await mkdir(destination); } catch (error) { if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new WorkspaceError("EVIDENCE_LIBRARY_DUPLICATE", "That documented item has already been imported.", "Choose a different item name or review the existing collection item."); throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "The generated documents could not be copied into the managed library.", "Check local folder access and try again."); }
   try {
     const documents: MarkdownDocument[] = [];
     for (const item of sourceDocuments) { const target = join(destination, item.libraryPath.split("/").at(-1)!); await writeFile(target, item.bytes, { flag: "wx" }); documents.push({ ...item, absolutePath: target }); }
@@ -101,17 +101,21 @@ export async function copyDocumentedEvidenceArtifacts(input: { outputDirectory: 
 }
 export async function readManagedDocumentedArtifacts(workspaceRoot?: string): Promise<Array<{ name: string; category: LibraryCategory; documents: MarkdownDocument[] }>> {
   const root = evidenceLibraryRoot(workspaceRoot); const groups: Array<{ name: string; category: LibraryCategory; documents: MarkdownDocument[] }> = [];
-  for (const [category, directoryName] of [["project", "projects"], ["experience", "experiences"]] as const) {
-    const categoryDirectory = join(root, directoryName); const categoryInfo = await lstat(categoryDirectory).catch(() => undefined);
-    if (!categoryInfo) continue;
-    if (!categoryInfo.isDirectory() || categoryInfo.isSymbolicLink()) throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "A managed collection folder is unavailable or unsafe.", "Check the managed review documents and refresh the page.");
-    for (const entry of await readdir(categoryDirectory, { withFileTypes: true })) {
+  const workspaceDirectory = join(root, "workspaces"); const workspaceEntries = await readdir(workspaceDirectory, { withFileTypes: true }).catch(() => []);
+  for (const workspace of workspaceEntries) {
+    if (!workspace.isDirectory() || workspace.isSymbolicLink()) continue;
+    for (const [category, directoryName] of [["project", "projects"], ["experience", "experiences"]] as const) {
+      const categoryDirectory = join(workspaceDirectory, workspace.name, directoryName); const categoryInfo = await lstat(categoryDirectory).catch(() => undefined);
+      if (!categoryInfo) continue;
+      if (!categoryInfo.isDirectory() || categoryInfo.isSymbolicLink()) throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "A managed collection folder is unavailable or unsafe.", "Check the managed review documents and refresh the page.");
+      for (const entry of await readdir(categoryDirectory, { withFileTypes: true })) {
       const itemDirectory = join(categoryDirectory, entry.name); const itemInfo = await lstat(itemDirectory);
       if (itemInfo.isSymbolicLink()) throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "A managed collection item is unsafe.", "Check the managed review documents and refresh the page.");
       if (!itemInfo.isDirectory()) continue; // Historical Markdown imports are intentionally outside the active collection.
       const names = (await readdir(itemDirectory)).sort(); const hasArtifactName = hasRequiredArtifacts(category, names);
       if (!hasArtifactName) continue; // Historical Markdown imports are intentionally outside the active collection.
-      groups.push({ name: entry.name, category, documents: await readDocumentationArtifacts(itemDirectory, category, `resume-evidence/${directoryName}/${entry.name}`) });
+      groups.push({ name: entry.name, category, documents: await readDocumentationArtifacts(itemDirectory, category, `resume-evidence/workspaces/${workspace.name}/${directoryName}/${entry.name}`) });
+      }
     }
   }
   return groups.sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name));

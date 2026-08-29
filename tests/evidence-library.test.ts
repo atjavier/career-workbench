@@ -16,8 +16,8 @@ async function fixture() {
   await writeFile(join(output, "resume-evidence.md"), "# Resume Evidence (Proposed / Unreviewed)\n\n> Explicit import and individual approval are required.\n\n## Evidence Items\n\n### E-001\n\n- Fact: Built a local accessibility report for review.\n- Provenance: [README.md, Overview, line 3]\n- Explicit unknowns: " + unknowns + "\n- Status: Proposed / unreviewed\n", "utf8");
   await writeFile(join(output, "resume-bullet-candidates.md"), "# Resume Bullet Candidates (Proposed / Unreviewed)\n\n> Explicit import and individual approval are required.\n\n## Candidate Bullets\n\n### B-001\n\n- Candidate: Built a local accessibility report for review.\n- Supporting evidence: E-001\n- Explicit unknowns: " + unknowns + "\n- Status: Proposed / unreviewed; not claim-eligible\n", "utf8");
   const appDataRoot = join(root, "private");
-  await createResumeWorkspace({ appDataRoot, name: "Test resume" });
-  return { root, output, appDataRoot, workspaceRoot: join(root, "workspace") };
+  const workspace = await createResumeWorkspace({ appDataRoot, name: "Test resume" });
+  return { root, output, appDataRoot, workspaceRoot: join(root, "workspace"), workspaceId: workspace.workspace.id };
 }
 
 test("imports the generated documentation set, leaves its output unchanged, and keeps evidence unreviewed", async () => {
@@ -27,7 +27,7 @@ test("imports the generated documentation set, leaves its output unchanged, and 
     const result = await importDocumentedEvidenceArtifacts({ ...value, outputDirectory: value.output, name: "Accessibility Report", category: "project", sourceSnapshot });
     assert.equal(result.documentsAdded, 3); assert.equal(result.candidatesAdded, 1);
     assert.deepEqual(await readFile(join(value.output, "resume-evidence.md")), before);
-    assert.equal((await lstat(join(value.workspaceRoot, "resume-evidence", "projects", "Accessibility-Report", "project-overview.md"))).isFile(), true);
+    assert.equal((await lstat(join(value.workspaceRoot, "resume-evidence", "workspaces", value.workspaceId, "projects", "Accessibility-Report", "project-overview.md"))).isFile(), true);
     const collection = await listExperienceProjectCollection(value); assert.equal(collection.length, 1); assert.equal(collection[0].category, "project"); assert.equal(collection[0].artifactNames.length, 3); assert.equal(collection[0].summary, "Built a local accessibility report for review."); assert.equal(collection[0].evidence[0].reviewState, "unreviewed");
     assert.equal((await listClaimEligibleEvidence({ appDataRoot: value.appDataRoot })).length, 0);
     const review = await resolveCollectionReviewHandle(collection[0].evidence[0].reviewHandle, value); await approveEvidence({ appDataRoot: value.appDataRoot, ...review });
@@ -38,7 +38,7 @@ test("imports the generated documentation set, leaves its output unchanged, and 
 test("permanently deleting documented work removes its workspace records and managed folder", async () => {
   const value = await fixture(); try {
     await importDocumentedEvidenceArtifacts({ ...value, outputDirectory: value.output, name: "Accessibility Report", category: "project" });
-    const managedDirectory = join(value.workspaceRoot, "resume-evidence", "projects", "Accessibility-Report");
+    const managedDirectory = join(value.workspaceRoot, "resume-evidence", "workspaces", value.workspaceId, "projects", "Accessibility-Report");
     assert.equal((await lstat(managedDirectory)).isDirectory(), true);
     const deleted = await permanentlyDeleteDocumentedEvidenceItem({ ...value, category: "project", name: "Accessibility-Report", confirmation: "DELETE" });
     assert.equal(deleted.artifactCleanupIncomplete, false);
@@ -50,7 +50,7 @@ test("permanently deleting documented work removes its workspace records and man
 
 test("reclaims an unregistered managed folder before importing the same documented project", async () => {
   const value = await fixture(); try {
-    const orphan = join(value.workspaceRoot, "resume-evidence", "projects", "Accessibility-Report");
+    const orphan = join(value.workspaceRoot, "resume-evidence", "workspaces", value.workspaceId, "projects", "Accessibility-Report");
     await mkdir(orphan, { recursive: true });
     await writeFile(join(orphan, "resume-evidence.md"), "orphaned generated content", "utf8");
     const result = await importDocumentedEvidenceArtifacts({ ...value, outputDirectory: value.output, name: "Accessibility-Report", category: "project" });

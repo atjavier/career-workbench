@@ -24,9 +24,10 @@ export function isLatestWorkspaceMaterialDraftCurrent(db: DatabaseSync, input: {
   try {
     const parsed = JSON.parse(draft.contentJson) as { sections?: Array<{ heading?: unknown }> };
     const headings = new Set((parsed.sections ?? []).map((section) => typeof section?.heading === "string" ? section.heading.trim().toLocaleLowerCase() : ""));
-    // Project-only candidates intentionally omit Experience. A current draft
-    // therefore needs Projects, not both work-section headings.
-    if (!headings.has("projects") && !headings.has("project")) return false;
+    // Project-only and experience-only candidates intentionally omit the
+    // other work section. A current draft therefore needs at least one of the
+    // standard work headings, not specifically Projects.
+    if (!headings.has("projects") && !headings.has("project") && !headings.has("experience")) return false;
     // Drafts produced by the earlier documentation pass could contain source
     // paths, markdown code spans, or route snippets inside the resume text.
     // Keep the record for provenance, but force the active Resume page to

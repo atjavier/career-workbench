@@ -7,6 +7,7 @@ import { applyMigrations, openDatabase } from "@/persistence/database";
 import { findCandidateProfile, findCandidateProfileRevision, insertCandidateProfile, insertCandidateProfileRevision, latestCandidateProfileRevision, readResumeGenerationState, selectActiveProfileRevision, type CandidateProfile, type CandidateProfileRevision, type CandidateProfileValues, type ResumeGenerationState } from "@/persistence/candidate-profile-repository";
 import { appendAuditEvent } from "@/persistence/workspace-repository";
 import { attachProfileToWorkspace, readActiveResumeWorkspace } from "@/persistence/resume-workspace-repository";
+import { reconcileResumeWorkspaceJourney } from "@/domain/resume-generation/resume-workspace-journey";
 
 type Options = { appDataRoot?: string };
 export type CandidateProfileInput = { firstName: string; middleName?: string; lastName: string; email: string; phone: string; school: string; program: string; graduationYear: string | number; gwa?: string; latinHonors?: string; linkedInUrl?: string; githubUrl?: string };
@@ -59,9 +60,11 @@ function canonicalContent(values: CandidateProfileValues): string { return JSON.
 export async function saveCandidateProfile(input: SaveCandidateProfileInput): Promise<{ profile: CandidateProfile; revision: CandidateProfileRevision; stateRevisionNumber: number }> {
   const values = normalize(input.values);
   const paths = await resolveAppDataPaths(input.appDataRoot);
-  return transaction(paths.root, (db) => {
+  let savedWorkspaceId: string | undefined;
+  const saved = transaction(paths.root, (db) => {
     const workspaceState = readActiveResumeWorkspace(db); const workspace = workspaceState.workspace;
     if (!workspace) throw new WorkspaceError("RESUME_WORKSPACE_NOT_FOUND", "Create a resume workspace before saving profile details.", "Name your first resume workspace to begin.");
+    savedWorkspaceId = workspace.id;
     const expectedStateRevisionNumber = input.expectedStateRevisionNumber ?? (workspace.activeProfileRevisionId ? Number.NaN : workspaceState.revisionNumber);
     if (!Number.isSafeInteger(expectedStateRevisionNumber) || expectedStateRevisionNumber !== workspaceState.revisionNumber) throw new WorkspaceError("CANDIDATE_PROFILE_STALE", "Your profile changed before it could be saved.", "Refresh your profile details and try again.");
     const activeRevision = workspace.activeProfileRevisionId ? findCandidateProfileRevision(db, workspace.activeProfileRevisionId) : undefined;
@@ -79,6 +82,8 @@ export async function saveCandidateProfile(input: SaveCandidateProfileInput): Pr
     appendAuditEvent(db, createAuditEvent({ actor: "local-os-user", action: "resume.profile_saved", outcome: "success", entityId: revision.id, contentHash: revision.contentDigest }));
     return { profile, revision, stateRevisionNumber: workspaceState.revisionNumber + 1 };
   });
+  if (savedWorkspaceId) await reconcileResumeWorkspaceJourney(savedWorkspaceId, input);
+  return saved;
 }
 
 export async function readCandidateProfileState(input: Options = {}): Promise<CandidateProfileState> {

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { ResumeCoach } from "@/app/resume-coach";
 import { ResumeWorkspacePicker } from "@/app/resume-workspace-picker";
 import { ResumeOnboarding } from "@/app/resume-onboarding";
@@ -12,6 +13,7 @@ import { listCurrentEvidence } from "@/persistence/evidence-repository";
 import { findLatestWorkspaceMaterialDraftId, isLatestWorkspaceMaterialDraftCurrent } from "@/persistence/material-draft-repository";
 import { listWorkspaceDocumentedEvidenceIds } from "@/persistence/resume-workspace-repository";
 import { readLatestResumeGenerationJob } from "@/domain/resume-generation/resume-generation-jobs";
+import { readLatestResumeEvidenceIntake } from "@/domain/resume-generation/resume-evidence-intake";
 
 const safeError = (error: unknown) => error instanceof Error && "summary" in error ? String(error.summary) : "Your saved profile details are unavailable right now.";
 export async function ResumeWorkspace() {
@@ -21,6 +23,8 @@ export async function ResumeWorkspace() {
   const materials = await (async () => { if (!workspaceState.activeWorkspace) return []; const paths = await resolveAppDataPaths(); const db = openDatabase(paths.databasePath); try { applyMigrations(db); const allowed = new Set(listWorkspaceDocumentedEvidenceIds(db, workspaceState.activeWorkspace.id)); return listCurrentEvidence(db).filter((item) => allowed.has(item.id)).map((item) => ({ id: item.id, label: `${item.sourceDocument} — ${item.sourceSection}` })); } finally { db.close(); } })().catch(() => []);
   const draftState = await (async () => { if (!workspaceState.activeWorkspace || "error" in profile || !profile.revision) return { draft: undefined, current: false }; const paths = await resolveAppDataPaths(); const db = openDatabase(paths.databasePath); let draftId: string | undefined; let current = false; try { applyMigrations(db); draftId = findLatestWorkspaceMaterialDraftId(db, workspaceState.activeWorkspace.id); current = isLatestWorkspaceMaterialDraftCurrent(db, { workspaceId: workspaceState.activeWorkspace.id, profileRevisionId: profile.revision.id, evidenceRevisionIds: materials.map((item) => item.id) }); } finally { db.close(); } return { draft: draftId ? await readMaterialDraft({ draftId }) : undefined, current }; })().catch(() => ({ draft: undefined, current: false }));
   const generationJob = workspaceState.activeWorkspace ? await readLatestResumeGenerationJob(workspaceState.activeWorkspace.id).catch(() => undefined) : undefined;
+  const intake = workspaceState.activeWorkspace ? await readLatestResumeEvidenceIntake(workspaceState.activeWorkspace.id).catch(() => undefined) : undefined;
+  if (["documenting", "interview", "recovery"].includes(workspaceState.activeWorkspace?.journey?.phase ?? "")) redirect("/resume/interview");
   const missing = !workspaceState.activeWorkspace ? "Create your first resume workspace, then save your basic profile." : "error" in profile ? profile.error : !profile.revision ? "Your saved basic information is unavailable. Open a different resume or create a new one." : !materials.length ? "Open Experience & Projects and document at least one project or experience before creating a resume draft." : !localModel.ready ? "Local AI is not set up on this computer." : undefined;
   const aiMissing = Boolean(workspaceState.activeWorkspace && !localModel.ready && !("error" in profile) && profile.revision && materials.length);
   if (!workspaceState.activeWorkspace && workspaceState.workspaces.length === 0) return <div className="workspace-shell resume-workspace"><header className="resume-page-head"><div><p className="eyebrow">Resume</p><h1>Start your resume</h1><p>Save your basic information and choose one local work folder to document.</p></div></header><ResumeOnboarding localAiReady={localModel.ready} /></div>;

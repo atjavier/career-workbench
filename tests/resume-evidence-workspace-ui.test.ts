@@ -48,9 +48,9 @@ test("the registered workflow separates folder documentation from base-resume ge
   assert.doesNotMatch(coach, /startTransition\(\(\) => generationAction/);
   assert.doesNotMatch(coach, /name="evidenceId"|name="consent"/);
   assert.match(actions, /const selectedIds = evidence\.map/);
-  assert.match(actions, /Resume generation is starting in the background/);
+  assert.match(actions, /Evidence interpretation is starting in the background/);
   assert.match(actions, /expectedWorkspaceId: expectedWorkspaceId!?/);
-  assert.match(actions, /readResumeWorkspaceState\(\)/);
+  assert.match(actions, /beginResumeEvidenceIntake/);
 });
 
 test("resume and evidence routes stay explicit, local-first, and safe", async () => {
@@ -59,7 +59,7 @@ test("resume and evidence routes stay explicit, local-first, and safe", async ()
   assert.match(source, /safeNextAction/);
 });
 
-test("Resume uses its initial onboarding only once, then keeps Coach and preview in the active page", async () => {
+test("existing generated resumes retain their Coach and preview workspace", async () => {
   const [resume, form, coach, current, styles] = await Promise.all([
     readFile(new URL("../src/app/resume-workspace.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/app/resume-profile-form.tsx", import.meta.url), "utf8"),
@@ -67,7 +67,7 @@ test("Resume uses its initial onboarding only once, then keeps Coach and preview
     readFile(new URL("../src/app/current-base-resume.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/app/globals.css", import.meta.url), "utf8"),
   ]);
-  for (const text of ["Profile details", "Save details", "Resume Coach", "Reviewable preview", "generated automatically during onboarding"]) assert.match(resume + form + coach, new RegExp(text));
+  for (const text of ["Profile details", "Save details", "Resume Coach", "Reviewable preview"]) assert.match(resume + form + coach, new RegExp(text));
   assert.doesNotMatch(resume, /ResumeProfileForm|resume-profile-layout/);
   assert.doesNotMatch(resume, /CurrentBaseResume|BaseResumeImporter|Warnings|Evidence and skills|Approve Current Base Resume|textarea|iframe|Resume\.pdf|api\/resume-template/);
   assert.match(current, /revisionNumber/);
