@@ -22,3 +22,4 @@ tools/tectonic/
 .bmad-loop/cache/
 .bmad-loop/policy.toml
 _bmad/render/
+.visual-qa/

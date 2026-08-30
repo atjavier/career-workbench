@@ -1,0 +1,5 @@
+[allowlist]
+description = "BMAD file manifests contain SHA-256 digests, not credentials."
+paths = [
+  '''^_bmad/_config/files-manifest\.csv$''',
+]
