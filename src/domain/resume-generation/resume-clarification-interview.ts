@@ -52,6 +52,12 @@ const uuid = (value: unknown) =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
     value,
   );
+const requestUuid = (value: unknown) =>
+  typeof value === "string" &&
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[47][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value,
+  );
+const transcriptContent = (value: string) => value.replace(/\s+/g, " ").trim();
 const labels: Record<string, string> = {
   purpose: "purpose",
   ownership: "your contribution",
@@ -86,7 +92,7 @@ function view(
   const turns = (
     db
       .prepare(
-        "SELECT id, task_id AS taskId, role, content, created_at AS createdAt FROM (SELECT id, task_id, 'coach' AS role, content, created_at FROM resume_interview_turns WHERE workspace_id = ? UNION ALL SELECT id, task_id, 'candidate' AS role, content, created_at FROM resume_interview_candidate_turns WHERE workspace_id = ? UNION ALL SELECT r.id, r.task_id, 'candidate' AS role, CASE r.disposition WHEN 'skipped' THEN 'Marked unknown' ELSE r.answer_text END AS content, r.created_at FROM resume_clarification_task_responses r WHERE r.workspace_id = ?) ORDER BY created_at DESC, CASE role WHEN 'coach' THEN 1 ELSE 0 END DESC, id DESC LIMIT 80",
+        "SELECT id, task_id AS taskId, role, content, created_at AS createdAt FROM (SELECT id, task_id, 'coach' AS role, content, created_at FROM resume_interview_turns WHERE workspace_id = ? UNION ALL SELECT id, task_id, 'candidate' AS role, content, created_at FROM resume_interview_candidate_turns WHERE workspace_id = ? UNION ALL SELECT r.id, r.task_id, 'candidate' AS role, CASE r.disposition WHEN 'skipped' THEN 'Marked unknown' ELSE r.answer_text END AS content, r.created_at FROM resume_clarification_task_responses r WHERE r.workspace_id = ? AND NOT EXISTS (SELECT 1 FROM resume_interview_candidate_turns c WHERE c.workspace_id = r.workspace_id AND c.task_id = r.task_id AND c.content = CASE r.disposition WHEN 'skipped' THEN 'Marked unknown' ELSE r.answer_text END)) ORDER BY created_at DESC, CASE role WHEN 'coach' THEN 1 ELSE 0 END DESC, id DESC LIMIT 80",
       )
       .all(workspaceId, workspaceId, workspaceId) as InterviewTurn[]
   )
@@ -202,7 +208,7 @@ export async function readBoundedResumeInterviewTranscript(
       .reverse()
       .map(
         (turn) =>
-          `${turn.role === "coach" ? "Coach" : "Candidate"}: ${turn.content}`,
+          `${turn.role === "coach" ? "Coach" : "Candidate"}: ${transcriptContent(turn.content)}`,
       );
   } finally {
     db.close();
@@ -274,12 +280,19 @@ export async function beginResumeInterviewCoachStream(
   input: Options & {
     workspaceId: string;
     taskId: string;
-    candidateContent: string;
+    candidateContent?: string;
+    opening?: boolean;
     streamRequestId: string;
   },
 ): Promise<ResumeInterviewStreamStart> {
-  const candidateContent = input.candidateContent.trim();
-  if (!uuid(input.workspaceId) || !plain(input.taskId, 80) || !uuid(input.streamRequestId) || !plain(candidateContent, 1_200))
+  const opening = input.opening === true;
+  const candidateContent = (input.candidateContent ?? "").trim();
+  if (
+    !uuid(input.workspaceId) ||
+    !plain(input.taskId, 80) ||
+    !requestUuid(input.streamRequestId) ||
+    (opening ? candidateContent !== "" : !plain(candidateContent, 1_200))
+  )
     throw new WorkspaceError(
       "RESUME_COACH_INVALID",
       "Write a concise message before explicitly sending it to local Coach Resume.",
@@ -338,7 +351,7 @@ export async function beginResumeInterviewCoachStream(
       db.prepare(
         "INSERT INTO resume_interview_stream_reservations (stream_request_id, workspace_id, task_id, status, created_at) VALUES (?, ?, ?, 'started', ?)",
       ).run(input.streamRequestId, input.workspaceId, input.taskId, now);
-      if (!existing)
+      if (!opening && !existing)
         db.prepare(
           "INSERT INTO resume_interview_candidate_turns (id, workspace_id, task_id, content, created_at, stream_request_id) VALUES (?, ?, ?, ?, ?, ?)",
         ).run(
@@ -369,13 +382,23 @@ export async function beginResumeInterviewCoachStream(
           .prepare(
             "SELECT role, content FROM (SELECT 'coach' AS role, content, created_at, id FROM resume_interview_turns WHERE workspace_id = ? AND task_id = ? UNION ALL SELECT 'candidate' AS role, content, created_at, id FROM resume_interview_candidate_turns WHERE workspace_id = ? AND task_id = ? UNION ALL SELECT 'candidate' AS role, CASE disposition WHEN 'skipped' THEN 'Marked unknown' ELSE answer_text END AS content, created_at, id FROM resume_clarification_task_responses WHERE workspace_id = ? AND task_id = ?) ORDER BY created_at DESC, CASE role WHEN 'coach' THEN 1 ELSE 0 END DESC, id DESC LIMIT 20",
           )
-          .all(input.workspaceId, input.taskId, input.workspaceId, input.taskId, input.workspaceId, input.taskId) as Array<{
+          .all(
+            input.workspaceId,
+            input.taskId,
+            input.workspaceId,
+            input.taskId,
+            input.workspaceId,
+            input.taskId,
+          ) as Array<{
           role: "coach" | "candidate";
           content: string;
         }>
       )
         .reverse()
-        .map((turn) => `${turn.role === "coach" ? "Coach" : "Candidate"}: ${turn.content}`);
+        .map(
+          (turn) =>
+            `${turn.role === "coach" ? "Coach" : "Candidate"}: ${transcriptContent(turn.content)}`,
+        );
       db.exec("COMMIT");
       return { question: task.question, context, transcript };
     } catch (error) {
@@ -393,12 +416,19 @@ export async function finalizeResumeInterviewCoachStream(
     taskId: string;
     streamRequestId: string;
     coachContent: string;
+    opening?: boolean;
     signal?: AbortSignal;
   },
 ): Promise<void> {
   if (input.signal?.aborted) return;
   const coachContent = input.coachContent.trim();
-  if (!uuid(input.workspaceId) || !plain(input.taskId, 80) || !uuid(input.streamRequestId) || !coachContent || coachContent.length > 1_800)
+  if (
+    !uuid(input.workspaceId) ||
+    !plain(input.taskId, 80) ||
+    !requestUuid(input.streamRequestId) ||
+    !coachContent ||
+    coachContent.length > 1_800
+  )
     throw new WorkspaceError(
       "RESUME_COACH_INVALID",
       "The local Coach Resume reply is unavailable.",
@@ -411,6 +441,11 @@ export async function finalizeResumeInterviewCoachStream(
     applyMigrations(db);
     db.exec("BEGIN IMMEDIATE");
     try {
+      const candidateTurn = db
+        .prepare(
+          "SELECT 1 FROM resume_interview_candidate_turns WHERE stream_request_id = ? AND workspace_id = ? AND task_id = ?",
+        )
+        .get(input.streamRequestId, input.workspaceId, input.taskId);
       if (
         readActiveResumeWorkspace(db).workspace?.id !== input.workspaceId ||
         !db
@@ -418,11 +453,7 @@ export async function finalizeResumeInterviewCoachStream(
             "SELECT 1 FROM resume_clarification_tasks WHERE id = ? AND workspace_id = ? AND status = 'pending'",
           )
           .get(input.taskId, input.workspaceId) ||
-        !db
-          .prepare(
-            "SELECT 1 FROM resume_interview_candidate_turns WHERE stream_request_id = ? AND workspace_id = ? AND task_id = ?",
-          )
-          .get(input.streamRequestId, input.workspaceId, input.taskId) ||
+        (input.opening === true ? candidateTurn : !candidateTurn) ||
         !db
           .prepare(
             "SELECT 1 FROM resume_interview_stream_reservations WHERE stream_request_id = ? AND workspace_id = ? AND task_id = ?",
@@ -456,6 +487,32 @@ export async function finalizeResumeInterviewCoachStream(
       db.exec("ROLLBACK");
       throw error;
     }
+  } finally {
+    db.close();
+  }
+}
+
+export async function readPriorResumeInterviewCandidateContent(
+  input: Options & {
+    workspaceId: string;
+    taskId: string;
+    streamRequestId: string;
+  },
+): Promise<string | undefined> {
+  const paths = await resolveAppDataPaths(input.appDataRoot);
+  const db = openDatabase(paths.databasePath);
+  try {
+    applyMigrations(db);
+    if (readActiveResumeWorkspace(db).workspace?.id !== input.workspaceId)
+      return undefined;
+    const candidate = db
+      .prepare(
+        "SELECT content FROM resume_interview_candidate_turns WHERE workspace_id = ? AND task_id = ? AND stream_request_id IS NOT ? ORDER BY created_at DESC, id DESC LIMIT 1",
+      )
+      .get(input.workspaceId, input.taskId, input.streamRequestId) as
+      | { content: string }
+      | undefined;
+    return candidate?.content;
   } finally {
     db.close();
   }

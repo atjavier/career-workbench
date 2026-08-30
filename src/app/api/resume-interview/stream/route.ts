@@ -9,6 +9,8 @@ import { readLocalModelGatewayConfiguration } from "@/domain/resume-generation/l
 import {
   beginResumeInterviewCoachStream,
   finalizeResumeInterviewCoachStream,
+  readPriorResumeInterviewCandidateContent,
+  respondToResumeClarification,
 } from "@/domain/resume-generation/resume-clarification-interview";
 
 export const runtime = "nodejs";
@@ -17,6 +19,11 @@ export const dynamic = "force-dynamic";
 const uuid = (value: unknown) =>
   typeof value === "string" &&
   /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value,
+  );
+const requestUuid = (value: unknown) =>
+  typeof value === "string" &&
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[47][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
     value,
   );
 const plain = (value: unknown, maximum: number) =>
@@ -35,6 +42,7 @@ type StreamRequest = {
   workspaceId: string;
   taskId: string;
   message: string;
+  opening: boolean;
   consentNonce: string;
   streamRequestId: string;
 };
@@ -44,6 +52,9 @@ type StreamDependencies = {
   finalize: typeof finalizeResumeInterviewCoachStream;
   configuration: typeof readLocalModelGatewayConfiguration;
   stream: typeof streamResumeInterviewCoach;
+  readPriorCandidate: typeof readPriorResumeInterviewCandidateContent;
+  respond: typeof respondToResumeClarification;
+  revalidate: typeof revalidatePath;
 };
 
 const streamDependencies: StreamDependencies = {
@@ -51,10 +62,17 @@ const streamDependencies: StreamDependencies = {
   finalize: finalizeResumeInterviewCoachStream,
   configuration: readLocalModelGatewayConfiguration,
   stream: streamResumeInterviewCoach,
+  readPriorCandidate: readPriorResumeInterviewCandidateContent,
+  respond: respondToResumeClarification,
+  revalidate: revalidatePath,
 };
 
 async function inputFor(request: Request): Promise<StreamRequest> {
-  if (!/^application\/json(?:;|$)/i.test(request.headers.get("content-type") ?? ""))
+  if (
+    !/^application\/json(?:;|$)/i.test(
+      request.headers.get("content-type") ?? "",
+    )
+  )
     throw new WorkspaceError(
       "RESUME_COACH_INVALID",
       "Coach Resume needs a valid local conversation request.",
@@ -68,16 +86,25 @@ async function inputFor(request: Request): Promise<StreamRequest> {
       "Refresh the interview and explicitly send your message again.",
     );
   const data = value as Record<string, unknown>;
+  const opening = data.opening === true;
   if (
-    Object.keys(data).length !== 5 ||
-    !["workspaceId", "taskId", "message", "consentNonce", "streamRequestId"].every(
-      (key) => key in data,
-    ) ||
+    Object.keys(data).length !== 6 ||
+    ![
+      "workspaceId",
+      "taskId",
+      "message",
+      "opening",
+      "consentNonce",
+      "streamRequestId",
+    ].every((key) => key in data) ||
     !uuid(data.workspaceId) ||
     !plain(data.taskId, 80) ||
-    !plain(data.message, 1_200) ||
-    !uuid(data.consentNonce) ||
-    !uuid(data.streamRequestId)
+    typeof data.opening !== "boolean" ||
+    typeof data.message !== "string" ||
+    data.message.length > 1_200 ||
+    (opening ? data.message !== "" : !plain(data.message, 1_200)) ||
+    !requestUuid(data.consentNonce) ||
+    !requestUuid(data.streamRequestId)
   )
     throw new WorkspaceError(
       "RESUME_COACH_INVALID",
@@ -88,12 +115,34 @@ async function inputFor(request: Request): Promise<StreamRequest> {
     workspaceId: String(data.workspaceId),
     taskId: String(data.taskId),
     message: String(data.message),
+    opening,
     consentNonce: String(data.consentNonce),
     streamRequestId: String(data.streamRequestId),
   };
 }
 
-const event = (value: Record<string, unknown>) => `data: ${JSON.stringify(value)}\n\n`;
+const event = (value: Record<string, unknown>) =>
+  `data: ${JSON.stringify(value)}\n\n`;
+
+function coachAskedForMore(transcript: string[]): boolean {
+  const latestCoach = [...transcript]
+    .reverse()
+    .find((turn) => turn.startsWith("Coach: "))
+    ?.slice("Coach: ".length);
+  return /\b(?:add|clarify)\b.*\b(?:anything|more|else)\b/i.test(
+    latestCoach ?? "",
+  );
+}
+
+function candidateIsReadyToContinue(message: string): boolean {
+  const value = message.trim().toLocaleLowerCase();
+  return /^(?:no(?: more)?\b|nope\b|nothing (?:more|else)|that(?:'s| is) all|i(?:'m| am) done|i (?:won't|wont|will not) add|go on|next)/.test(
+    value,
+  );
+}
+
+const transitionReply =
+  "Thanks, that completes this clarification. I will move us to the next question.";
 
 export async function createResumeInterviewStreamResponse(
   request: Request,
@@ -117,7 +166,8 @@ export async function createResumeInterviewStreamResponse(
     abandoned = true;
     upstream.abort();
   };
-  const interrupted = () => abandoned || request.signal.aborted || upstream.signal.aborted;
+  const interrupted = () =>
+    abandoned || request.signal.aborted || upstream.signal.aborted;
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       request.signal.addEventListener("abort", abandon, { once: true });
@@ -127,54 +177,90 @@ export async function createResumeInterviewStreamResponse(
           workspaceId: input.workspaceId,
           taskId: input.taskId,
           candidateContent: input.message,
+          opening: input.opening,
           streamRequestId: input.streamRequestId,
         });
         if (interrupted()) return;
-        const configuration = await dependencies.configuration();
-        if (interrupted()) return;
-        const connection = {
-          configurationRevisionId: configuration.id,
-          configurationDigest: configuration.configurationDigest,
-          modelIdentifier: configuration.modelIdentifier,
-        };
-        const coachInput = {
-          connection,
-          workspaceId: input.workspaceId,
-          taskId: input.taskId,
-          question: started.question,
-          context: started.context,
-          transcript: started.transcript,
-          consentNonce: input.consentNonce,
-        };
-        const coach = dependencies.stream(
-          {
-            ...coachInput,
-            consentFingerprint: resumeInterviewCoachConsentFingerprint(coachInput),
-          },
-          upstream.signal,
-        );
         let coachContent = "";
-        for await (const delta of coach) {
+        if (
+          !input.opening &&
+          coachAskedForMore(started.transcript) &&
+          candidateIsReadyToContinue(input.message)
+        ) {
+          coachContent = transitionReply;
+          controller.enqueue(
+            encoder.encode(event({ type: "delta", text: coachContent })),
+          );
+        } else {
+          const configuration = await dependencies.configuration();
           if (interrupted()) return;
-          coachContent += delta;
-          controller.enqueue(encoder.encode(event({ type: "delta", text: delta })));
+          const connection = {
+            configurationRevisionId: configuration.id,
+            configurationDigest: configuration.configurationDigest,
+            modelIdentifier: configuration.modelIdentifier,
+          };
+          const coachInput = {
+            connection,
+            workspaceId: input.workspaceId,
+            taskId: input.taskId,
+            question: started.question,
+            context: started.context,
+            transcript: started.transcript,
+            opening: input.opening,
+            consentNonce: input.consentNonce,
+          };
+          const coach = dependencies.stream(
+            {
+              ...coachInput,
+              consentFingerprint:
+                resumeInterviewCoachConsentFingerprint(coachInput),
+            },
+            upstream.signal,
+          );
+          for await (const delta of coach) {
+            if (interrupted()) return;
+            coachContent += delta;
+            controller.enqueue(
+              encoder.encode(event({ type: "delta", text: delta })),
+            );
+          }
+          if (interrupted()) return;
         }
-        if (interrupted()) return;
         await dependencies.finalize({
           workspaceId: input.workspaceId,
           taskId: input.taskId,
           streamRequestId: input.streamRequestId,
           coachContent,
+          opening: input.opening,
           signal: upstream.signal,
         });
         if (interrupted()) return;
-        revalidatePath("/resume/interview");
-        revalidatePath("/resume");
+        if (
+          !input.opening &&
+          coachContent.trim().endsWith("I will move us to the next question.")
+        ) {
+          const answer = await dependencies.readPriorCandidate({
+            workspaceId: input.workspaceId,
+            taskId: input.taskId,
+            streamRequestId: input.streamRequestId,
+          });
+          if (answer)
+            await dependencies.respond({
+              workspaceId: input.workspaceId,
+              taskId: input.taskId,
+              answer,
+            });
+        }
+        if (interrupted()) return;
+        dependencies.revalidate("/resume/interview");
+        dependencies.revalidate("/resume");
         controller.enqueue(encoder.encode(event({ type: "complete" })));
       } catch (error) {
         if (!interrupted()) {
           const safe = toSafeWorkspaceError(error);
-          controller.enqueue(encoder.encode(event({ type: "error", summary: safe.summary })));
+          controller.enqueue(
+            encoder.encode(event({ type: "error", summary: safe.summary })),
+          );
         }
       } finally {
         request.signal.removeEventListener("abort", abandon);
