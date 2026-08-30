@@ -474,6 +474,7 @@ export type ResumeInterviewCoachRequest = {
   question: string;
   context: string[];
   transcript: string[];
+  opening?: boolean;
   consentNonce: string;
   consentFingerprint: string;
 };
@@ -484,8 +485,7 @@ export type ResumeInterviewCoachResponse = {
   selectionEcho: string;
 };
 export type ResumeInterviewCoachStreamResponse = {
-  question: string;
-  followUp?: string;
+  content: string;
 };
 // Compatibility export: base-resume generation used to be incorrectly named
 // "Resume Coach". The active generator now has its own persona and contract.
@@ -498,7 +498,7 @@ export function localModelCapabilityVersion(capability: string): string {
   if (capability === "resume-coach" || capability === "resume-generator")
     return "resume-coach-v6";
   if (capability === "resume-interview-coach")
-    return "resume-interview-coach-v1";
+    return "resume-interview-coach-v2";
   if (capability === "opportunity-assessment")
     return "opportunity-assessment-v1";
   if (
@@ -579,6 +579,7 @@ export function resumeInterviewCoachConsentFingerprint(
         question: input.question,
         context: input.context,
         transcript: input.transcript,
+        opening: input.opening === true,
         consentNonce: input.consentNonce,
       }),
     )
@@ -989,37 +990,73 @@ function validResumeInterviewCoachRequest(
     request.context.some((item) => !plain(item, 1_200)) ||
     request.transcript.length > 20 ||
     request.transcript.some((item) => !plain(item, 1_200)) ||
+    (request.opening !== undefined && typeof request.opening !== "boolean") ||
     request.consentFingerprint !==
       resumeInterviewCoachConsentFingerprint(request)
   )
     invalid("The selected interview context cannot be sent safely.");
 }
 
-function streamPresentation(content: string, question: string): string {
-  if (!question.startsWith(content.slice(0, question.length)))
-    invalid("The local model returned unsupported interview guidance.");
-  if (content.length <= question.length) return content;
-  if (!content.startsWith(question))
-    invalid("The local model returned unsupported interview guidance.");
-  const followUp = content.slice(question.length);
-  if (
-    !followUp.startsWith("\n") ||
-    !plain(followUp.slice(1), 500) ||
-    /[\r\n]/.test(followUp.slice(1))
-  )
-    invalid("The local model returned unsupported interview guidance.");
-  return content;
-}
-
 function streamedInterviewResponse(
   content: string,
-  question: string,
 ): ResumeInterviewCoachStreamResponse {
-  const presentation = streamPresentation(content, question);
-  if (presentation === question) return { question };
-  if (!presentation.startsWith(`${question}\n`))
-    invalid("The local model ended before its Coach response was complete.");
-  return { question, followUp: presentation.slice(question.length + 1) };
+  if (!boundedText(content, 1_800))
+    invalid("The local model returned unsupported interview guidance.");
+  return { content };
+}
+
+function normalizedInterviewText(value: string): string {
+  return value.trim().toLocaleLowerCase().replace(/\s+/g, " ");
+}
+
+function asksForInterviewScope(value: string | undefined): boolean {
+  const message = normalizedInterviewText(value ?? "");
+  return (
+    /^(?:hi|hello|hey)[!,. ]*$/.test(message) ||
+    /\bwhat (?:are|is) (?:we|this)\b/.test(message) ||
+    /\bwhat (?:do|can) you\b/.test(message)
+  );
+}
+
+function scopedInterviewFallback(request: ResumeInterviewCoachRequest): string {
+  return request.opening
+    ? `I will help clarify documented experience for an accurate resume without inventing claims. To start: ${request.question}`
+    : `We are clarifying your documented experience for your resume. The current question is: ${request.question} Please answer from your experience, or tell me what you would like to clarify.`;
+}
+
+function coachInvitedAdditionalContext(transcript: string[]): boolean {
+  const latestCoachMessage = [...transcript]
+    .reverse()
+    .find((turn) => turn.startsWith("Coach: "))
+    ?.slice("Coach: ".length);
+  return /\b(?:add|clarify)\b.*\b(?:anything|more|else)\b/i.test(
+    latestCoachMessage ?? "",
+  );
+}
+
+function verifiedInterviewContent(
+  request: ResumeInterviewCoachRequest,
+  latestCandidateMessage: string | undefined,
+  content: string,
+): string {
+  const shouldInviteMore =
+    content.trim().endsWith("I will move us to the next question.") &&
+    !coachInvitedAdditionalContext(request.transcript);
+  const reply = shouldInviteMore
+    ? `${content
+        .trim()
+        .slice(
+          0,
+          -"I will move us to the next question.".length,
+        )}Would you like to add or clarify anything else?`
+    : content;
+  if (!request.opening && !asksForInterviewScope(latestCandidateMessage))
+    return reply;
+  return normalizedInterviewText(reply).includes(
+    normalizedInterviewText(request.question),
+  )
+    ? reply
+    : scopedInterviewFallback(request);
 }
 
 /**
@@ -1039,17 +1076,35 @@ export async function* streamResumeInterviewCoach(
   const timeout = setTimeout(() => controller.abort(), 90_000);
   let response: Response;
   try {
+    const opening = request.opening === true;
+    const latestCandidateMessage = [...request.transcript]
+      .reverse()
+      .find((turn) => turn.startsWith("Candidate: "))
+      ?.slice("Candidate: ".length)
+      .trim();
+    if (!opening && !latestCandidateMessage)
+      invalid("The selected interview context cannot be sent safely.");
     const body = JSON.stringify({
       model: request.connection.modelIdentifier,
       input: JSON.stringify({
         savedQuestion: request.question,
         context: request.context,
         transcript: request.transcript,
-        responseShape:
-          "Stream the exact saved question, optionally followed by one newline and one short follow-up. Do not emit JSON, labels, tools, or other events.",
+        opening,
+        latestCandidateMessage: latestCandidateMessage ?? null,
+        responseShape: opening
+          ? "Initiate the conversation yourself. In two or three concise sentences, briefly explain that you will clarify documented experience for an accurate resume without inventing claims, introduce the exact saved question, and invite a natural answer. Reply with no JSON, labels, tools, or actions."
+          : "Respond directly to latestCandidateMessage. Use the saved question only as background. Treat transcript entries as prior conversation. Do not repeat, restate, or paraphrase a prior Coach message. After a substantive answer, acknowledge it and ask exactly: Would you like to add or clarify anything else? Do not use the transition sentence in that reply. Only if the prior Coach message already asked that question and the newest candidate reply clearly means they are ready to continue may you end your natural reply with this exact sentence: I will move us to the next question. Otherwise do not use that sentence. Reply with no JSON, labels, tools, or actions.",
       }),
-      system_prompt:
-        "Stream only the exact saved clarification question followed by zero or one short follow-up on a new line. Never create tasks, claims, evidence, drafts, PDFs, tools, filesystem, or network actions.",
+      system_prompt: [
+        "You are Coach Resume in a live, evidence-grounded resume clarification conversation.",
+        `The only task is this exact saved resume question: ${request.question}`,
+        "Never act as a general-purpose assistant or discuss another project. Do not mention an application, framework, API, database, file, technology, or plan unless it is supplied in the saved question, documented context, or the candidate's own message.",
+        "Use supplied evidence only as context; do not invent claims. Never create tasks, claims, evidence, drafts, PDFs, tools, filesystem, or network actions.",
+        opening
+          ? "Begin by briefly explaining this resume-only scope, state the exact saved question, and invite a natural answer."
+          : "Respond to the newest candidate message, not to an earlier Coach reply. If the candidate greets you or asks what you are doing, state the exact saved question before inviting their answer.",
+      ].join("\n"),
       stream: true,
       store: false,
       reasoning: "off",
@@ -1083,17 +1138,16 @@ export async function* streamResumeInterviewCoach(
     const decoder = new TextDecoder();
     let buffered = "";
     let content = "";
-    let visibleLength = 0;
     let terminal = false;
     const processFrame = (
       frame: string,
     ): { delta?: string; complete?: true } => {
       const lines = frame.replaceAll("\r\n", "\n").split("\n");
-      let eventName = lines
+      const eventName = lines
         .find((line) => line.startsWith("event: "))
         ?.slice(7);
       const data = lines.filter((line) => line.startsWith("data: "));
-      if (data.length !== 1)
+      if (!eventName || data.length !== 1)
         invalid("The local model returned malformed streaming guidance.");
       let event: unknown;
       try {
@@ -1104,7 +1158,6 @@ export async function* streamResumeInterviewCoach(
       if (!event || typeof event !== "object" || Array.isArray(event))
         invalid("The local model returned malformed streaming guidance.");
       const value = event as Record<string, unknown>;
-      if (!eventName && typeof value.type === "string") eventName = value.type;
       if (value.type !== eventName)
         invalid("The local model returned malformed streaming guidance.");
       if (eventName === "message.delta") {
@@ -1119,20 +1172,7 @@ export async function* streamResumeInterviewCoach(
         content += value.content;
         if (content.length > 1_800)
           invalid("The local model response is too large to review safely.");
-        const presentation = streamPresentation(content, request.question);
-        const delta = presentation.slice(visibleLength);
-        visibleLength = presentation.length;
-        return { delta };
-      }
-      if (eventName === "message.completed") {
-        if (
-          terminal ||
-          typeof value.content !== "string" ||
-          value.content !== content
-        )
-          invalid("The local model returned malformed streaming guidance.");
-        terminal = true;
-        return { complete: true };
+        return { delta: value.content };
       }
       if (eventName === "chat.end") {
         const result = value.result;
@@ -1173,8 +1213,7 @@ export async function* streamResumeInterviewCoach(
         const frame = buffered.slice(0, boundary.index);
         buffered = buffered.slice(boundary.index + boundary[0].length);
         if (!frame) continue;
-        const event = processFrame(frame);
-        if (event.delta) yield event.delta;
+        processFrame(frame);
       }
       if (buffered.length > maxStreamFrame)
         invalid("The local model returned malformed streaming guidance.");
@@ -1182,7 +1221,13 @@ export async function* streamResumeInterviewCoach(
     }
     if (buffered || !terminal)
       invalid("The local model ended before its Coach response was complete.");
-    return streamedInterviewResponse(content, request.question);
+    const verifiedContent = verifiedInterviewContent(
+      request,
+      latestCandidateMessage,
+      content,
+    );
+    yield verifiedContent;
+    return streamedInterviewResponse(verifiedContent);
   } catch (error) {
     if (error instanceof WorkspaceError) throw error;
     throw new WorkspaceError(

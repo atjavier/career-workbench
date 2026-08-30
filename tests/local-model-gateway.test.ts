@@ -107,7 +107,7 @@ test("Resume Interview Coach sends one bounded, stateless local request and reje
   );
 });
 
-test("Resume Interview Coach streaming relays only a bounded saved question and follow-up", async () => {
+test("Resume Interview Coach streams a bounded natural reply through native LM Studio SSE", async () => {
   const base = {
     connection,
     workspaceId: "00000000-0000-7000-8000-000000000099",
@@ -121,24 +121,60 @@ test("Resume Interview Coach streaming relays only a bounded saved question and 
     ...base,
     consentFingerprint: resumeInterviewCoachConsentFingerprint(base),
   };
+  const content =
+    "That sounds like a useful contribution. What part did you own?";
   const frames = [
-    { type: "message.delta", content: "What was your " },
-    { type: "message.delta", content: "contribution?\nWhich part did you own?" },
-    { type: "message.completed", content: "What was your contribution?\nWhich part did you own?" },
+    {
+      name: "chat.start",
+      data: {
+        type: "chat.start",
+        model_instance_id: connection.modelIdentifier,
+      },
+    },
+    {
+      name: "message.delta",
+      data: { type: "message.delta", content: "That sounds like a useful " },
+    },
+    {
+      name: "message.delta",
+      data: {
+        type: "message.delta",
+        content: "contribution. What part did you own?",
+      },
+    },
+    {
+      name: "chat.end",
+      data: {
+        type: "chat.end",
+        result: { output: [{ type: "message", content }] },
+      },
+    },
   ]
-    .map((event) => `data: ${JSON.stringify(event)}\n\n`)
+    .map(
+      (event) =>
+        `event: ${event.name}\ndata: ${JSON.stringify(event.data)}\n\n`,
+    )
     .join("");
   const response = await (async () => {
-    const stream = streamResumeInterviewCoach(value, undefined, async (url, init) => {
-      assert.equal(url, "http://127.0.0.1:1234/api/v1/chat");
-      assert.match(String(init.body), /"stream":true/);
-      assert.match(String(init.body), /"store":false/);
-      assert.equal(new Headers(init.headers).get("authorization"), null);
-      return new Response(frames, {
-        status: 200,
-        headers: { "content-type": "text/event-stream" },
-      });
-    });
+    const stream = streamResumeInterviewCoach(
+      value,
+      undefined,
+      async (url, init) => {
+        assert.equal(url, "http://127.0.0.1:1234/api/v1/chat");
+        assert.match(String(init.body), /"stream":true/);
+        assert.match(String(init.body), /"store":false/);
+        const payload = JSON.parse(String(init.body)) as { input: string };
+        assert.equal(
+          JSON.parse(payload.input).latestCandidateMessage,
+          "Can you explain this?",
+        );
+        assert.equal(new Headers(init.headers).get("authorization"), null);
+        return new Response(frames, {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        });
+      },
+    );
     const deltas: string[] = [];
     while (true) {
       const next = await stream.next();
@@ -146,21 +182,184 @@ test("Resume Interview Coach streaming relays only a bounded saved question and 
       deltas.push(next.value);
     }
   })();
-  assert.equal(response.deltas.join(""), "What was your contribution?\nWhich part did you own?");
-  assert.deepEqual(response.complete, {
-    question: value.question,
-    followUp: "Which part did you own?",
-  });
+  assert.equal(response.deltas.join(""), content);
+  assert.deepEqual(response.complete, { content });
   const malformed = streamResumeInterviewCoach(
     value,
     undefined,
     async () =>
-      new Response('data: {"type":"message.completed","content":""}\n\n', {
-        status: 200,
-        headers: { "content-type": "text/event-stream" },
-      }),
+      new Response(
+        'event: chat.end\ndata: {"type":"chat.end","result":{"output":[]}}\n\n',
+        {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        },
+      ),
   );
   await assert.rejects(malformed.next(), { code: "RESUME_COACH_INVALID" });
+});
+
+test("Resume Interview Coach starts an empty conversation with a brief Coach opening", async () => {
+  const base = {
+    connection,
+    workspaceId: "00000000-0000-7000-8000-000000000099",
+    taskId: "task-opening",
+    question: "What was your contribution?",
+    context: ["Built the documented workflow."],
+    transcript: [],
+    opening: true,
+    consentNonce: "opening-consent",
+  };
+  const value = {
+    ...base,
+    consentFingerprint: resumeInterviewCoachConsentFingerprint(base),
+  };
+  const content =
+    "I will help clarify your documented experience without inventing claims. What was your contribution?";
+  const stream = streamResumeInterviewCoach(
+    value,
+    undefined,
+    async (_url, init) => {
+      const payload = JSON.parse(String(init.body)) as { input: string };
+      assert.deepEqual(JSON.parse(payload.input), {
+        savedQuestion: value.question,
+        context: value.context,
+        transcript: [],
+        opening: true,
+        latestCandidateMessage: null,
+        responseShape:
+          "Initiate the conversation yourself. In two or three concise sentences, briefly explain that you will clarify documented experience for an accurate resume without inventing claims, introduce the exact saved question, and invite a natural answer. Reply with no JSON, labels, tools, or actions.",
+      });
+      return new Response(
+        [
+          { name: "message.delta", data: { type: "message.delta", content } },
+          {
+            name: "chat.end",
+            data: {
+              type: "chat.end",
+              result: { output: [{ type: "message", content }] },
+            },
+          },
+        ]
+          .map(
+            (event) =>
+              `event: ${event.name}\ndata: ${JSON.stringify(event.data)}\n\n`,
+          )
+          .join(""),
+        { status: 200, headers: { "content-type": "text/event-stream" } },
+      );
+    },
+  );
+  assert.equal((await stream.next()).value, content);
+  assert.deepEqual((await stream.next()).value, { content });
+});
+
+test("Resume Interview Coach replaces an ungrounded scope reply with the saved question", async () => {
+  const base = {
+    connection,
+    workspaceId: "00000000-0000-7000-8000-000000000099",
+    taskId: "task-scope",
+    question: "What problem or need was BioEvidence intended to address?",
+    context: ["BioEvidence is a documented project."],
+    transcript: ["Candidate: what are we doing"],
+    consentNonce: "scope-consent",
+  };
+  const value = {
+    ...base,
+    consentFingerprint: resumeInterviewCoachConsentFingerprint(base),
+  };
+  const ungrounded =
+    "We are building a Flask application to manage bioinformatics analysis runs.";
+  const expected =
+    "We are clarifying your documented experience for your resume. The current question is: What problem or need was BioEvidence intended to address? Please answer from your experience, or tell me what you would like to clarify.";
+  const stream = streamResumeInterviewCoach(
+    value,
+    undefined,
+    async (_url, init) => {
+      const payload = JSON.parse(String(init.body)) as {
+        system_prompt: string;
+      };
+      assert.match(payload.system_prompt, /BioEvidence intended to address/);
+      assert.match(
+        payload.system_prompt,
+        /Never act as a general-purpose assistant/,
+      );
+      return new Response(
+        [
+          {
+            name: "message.delta",
+            data: { type: "message.delta", content: ungrounded },
+          },
+          {
+            name: "chat.end",
+            data: {
+              type: "chat.end",
+              result: { output: [{ type: "message", content: ungrounded }] },
+            },
+          },
+        ]
+          .map(
+            (event) =>
+              `event: ${event.name}\ndata: ${JSON.stringify(event.data)}\n\n`,
+          )
+          .join(""),
+        { status: 200, headers: { "content-type": "text/event-stream" } },
+      );
+    },
+  );
+  assert.equal((await stream.next()).value, expected);
+  assert.deepEqual((await stream.next()).value, { content: expected });
+});
+
+test("Resume Interview Coach asks for additions before permitting a question transition", async () => {
+  const base = {
+    connection,
+    workspaceId: "00000000-0000-7000-8000-000000000099",
+    taskId: "task-transition",
+    question: "What was your contribution?",
+    context: ["Built the documented workflow."],
+    transcript: [
+      "Coach: What was your contribution?",
+      "Candidate: I built the documented workflow.",
+    ],
+    consentNonce: "transition-consent",
+  };
+  const value = {
+    ...base,
+    consentFingerprint: resumeInterviewCoachConsentFingerprint(base),
+  };
+  const premature =
+    "That is a clear contribution. I will move us to the next question.";
+  const expected =
+    "That is a clear contribution. Would you like to add or clarify anything else?";
+  const stream = streamResumeInterviewCoach(
+    value,
+    undefined,
+    async () =>
+      new Response(
+        [
+          {
+            name: "message.delta",
+            data: { type: "message.delta", content: premature },
+          },
+          {
+            name: "chat.end",
+            data: {
+              type: "chat.end",
+              result: { output: [{ type: "message", content: premature }] },
+            },
+          },
+        ]
+          .map(
+            (event) =>
+              `event: ${event.name}\ndata: ${JSON.stringify(event.data)}\n\n`,
+          )
+          .join(""),
+        { status: 200, headers: { "content-type": "text/event-stream" } },
+      ),
+  );
+  assert.equal((await stream.next()).value, expected);
+  assert.deepEqual((await stream.next()).value, { content: expected });
 });
 
 test("Resume Interview Coach accepts CRLF frames and rejects duplicate terminals or oversized unfinished frames", async () => {
@@ -177,26 +376,31 @@ test("Resume Interview Coach accepts CRLF frames and rejects duplicate terminals
     ...base,
     consentFingerprint: resumeInterviewCoachConsentFingerprint(base),
   };
-  const content = `${value.question}\nWhich part did you own?`;
+  const content =
+    "I can help you describe the work clearly. What did you personally deliver?";
+  const end = {
+    type: "chat.end",
+    result: { output: [{ type: "message", content }] },
+  };
   const crlf = streamResumeInterviewCoach(
     value,
     undefined,
     async () =>
       new Response(
         [
-          { type: "message.delta", content },
-          { type: "message.completed", content },
+          { name: "message.delta", data: { type: "message.delta", content } },
+          { name: "chat.end", data: end },
         ]
-          .map((event) => `data: ${JSON.stringify(event)}\r\n\r\n`)
+          .map(
+            (event) =>
+              `event: ${event.name}\r\ndata: ${JSON.stringify(event.data)}\r\n\r\n`,
+          )
           .join(""),
         { status: 200, headers: { "content-type": "text/event-stream" } },
       ),
   );
   assert.equal((await crlf.next()).value, content);
-  assert.deepEqual((await crlf.next()).value, {
-    question: value.question,
-    followUp: "Which part did you own?",
-  });
+  assert.deepEqual((await crlf.next()).value, { content });
 
   const duplicateTerminal = streamResumeInterviewCoach(
     value,
@@ -204,23 +408,27 @@ test("Resume Interview Coach accepts CRLF frames and rejects duplicate terminals
     async () =>
       new Response(
         [
-          { type: "message.delta", content },
-          { type: "message.completed", content },
-          { type: "message.completed", content },
+          { name: "message.delta", data: { type: "message.delta", content } },
+          { name: "chat.end", data: end },
+          { name: "chat.end", data: end },
         ]
-          .map((event) => `data: ${JSON.stringify(event)}\n\n`)
+          .map(
+            (event) =>
+              `event: ${event.name}\ndata: ${JSON.stringify(event.data)}\n\n`,
+          )
           .join(""),
         { status: 200, headers: { "content-type": "text/event-stream" } },
       ),
   );
-  await duplicateTerminal.next();
-  await assert.rejects(duplicateTerminal.next(), { code: "RESUME_COACH_INVALID" });
+  await assert.rejects(duplicateTerminal.next(), {
+    code: "RESUME_COACH_INVALID",
+  });
 
   const unterminated = streamResumeInterviewCoach(
     value,
     undefined,
     async () =>
-      new Response(`data: ${"x".repeat(8_193)}`, {
+      new Response(`event: message.delta\ndata: ${"x".repeat(8_193)}`, {
         status: 200,
         headers: { "content-type": "text/event-stream" },
       }),
