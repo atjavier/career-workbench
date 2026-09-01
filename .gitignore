@@ -18,8 +18,8 @@ resume.out
 resume.synctex.gz
 resume.tex
 tools/tectonic/
-.bmad-loop/runs/
-.bmad-loop/cache/
-.bmad-loop/policy.toml
-_bmad/render/
+.bmad-loop/
+_bmad/
+_bmad-output/
+stitch-export/
 .visual-qa/
