@@ -6,6 +6,7 @@ coverage/
 
 # Unrelated local portfolios, agent tooling, scratch data, and generated resume artifacts.
 .agents/
+.codex/
 AgriMart/
 ARTEMIS/
 BioEvidence/
