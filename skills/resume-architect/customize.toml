@@ -1,7 +1,0 @@
-[agent]
-code = "resume-architect"
-name = "Resume Architect"
-title = "Internal Resume Drafting Contract"
-icon = "🧭"
-description = "Evidence-backed base-resume drafting contract for the local application."
-agent_type = "stateless"

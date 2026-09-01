@@ -1,7 +1,0 @@
-[agent]
-code = "resume-coach"
-name = "Resume Coach"
-title = "Internal Resume Review Contract"
-icon = "🔎"
-description = "Evidence-backed saved-resume review contract for the local application."
-agent_type = "stateless"
