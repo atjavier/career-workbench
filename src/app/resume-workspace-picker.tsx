@@ -1,18 +1,254 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useState, useRef, useEffect } from "react";
 import { resumeWorkspaceAction, type WorkspaceActionState } from "@/app/actions";
 
-type Workspace = { id: string; name: string; journey?: { phase: string; message: string } };
-const journeyLabel = (workspace: Workspace) => ({ onboarding: "Needs profile", documenting: "Preparing evidence", interview: "Coach questions", ready_to_generate: "Ready to generate", ready_for_preview: "Resume ready", recovery: "Needs attention" }[workspace.journey?.phase ?? "onboarding"] ?? "Needs attention");
-const initial: WorkspaceActionState = { status: "idle", summary: "Choose or create a separate resume workspace." };
-export function ResumeWorkspacePicker({ workspaces, activeWorkspaceId, revisionNumber }: { workspaces: Workspace[]; activeWorkspaceId?: string; revisionNumber: number }) {
-  const [state, action, pending] = useActionState(resumeWorkspaceAction, initial); const [deleting, setDeleting] = useState(false);
-  const freshSession = !activeWorkspaceId && workspaces.length > 0;
-  return <section className="resume-workspace-picker panel" aria-labelledby="resume-workspace-heading"><div><p className="eyebrow">Resume workspace</p><h2 id="resume-workspace-heading">{workspaces.find((item) => item.id === activeWorkspaceId)?.name ?? (freshSession ? "Choose a resume" : "Start a resume")}</h2>{!workspaces.length ? <p>Start with your basic information. You will then add one local project or evidence folder for review.</p> : null}</div>
-    {workspaces.length ? <form action={action}><input type="hidden" name="workspaceCommand" value="select" /><input type="hidden" name="expectedRevisionNumber" value={revisionNumber} /><label htmlFor="resume-workspace-select">{freshSession ? "Choose a saved resume" : "Switch resume"}</label><select id="resume-workspace-select" name="workspaceId" defaultValue={activeWorkspaceId ?? workspaces[0]?.id}>{workspaces.map((item) => <option value={item.id} key={item.id}>{item.name} — {journeyLabel(item)}</option>)}</select><button type="submit" disabled={pending}>{freshSession ? "Open resume" : "Switch"}</button></form> : null}
-    <form action={action}><input type="hidden" name="workspaceCommand" value="create" /><input type="hidden" name="expectedRevisionNumber" value={revisionNumber} /><label htmlFor="resume-workspace-name">{workspaces.length ? "New resume name" : "Resume name"}</label><input id="resume-workspace-name" name="name" required maxLength={120} /><button className="affirmative-action" type="submit" disabled={pending}>{workspaces.length ? "Add a new resume" : "Continue with basic information"}</button></form>
-    {activeWorkspaceId ? <div><button type="button" className="danger-action" onClick={() => setDeleting((value) => !value)}>Permanently delete this resume</button>{deleting ? <form action={action}><input type="hidden" name="workspaceCommand" value="delete" /><input type="hidden" name="workspaceId" value={activeWorkspaceId} /><input type="hidden" name="expectedRevisionNumber" value={revisionNumber} /><label htmlFor="delete-resume-confirmation">Type DELETE to permanently remove this resume and its private workspace data.</label><input id="delete-resume-confirmation" name="confirmation" required /><button className="danger-action" type="submit" disabled={pending}>Confirm permanent deletion</button></form> : null}</div> : null}
-    <p role="status" aria-live="polite" className={state.status === "error" ? "status status-error" : "status"}>{state.summary}{state.safeNextAction ? ` ${state.safeNextAction}` : ""}</p>
-  </section>;
+type Workspace = {
+  id: string;
+  name: string;
+  journey?: { phase: string; message: string };
+};
+
+const journeyLabel = (workspace: Workspace) =>
+  ({
+    onboarding: "Needs profile",
+    documenting: "Preparing evidence",
+    interview: "Coach questions",
+    ready_to_generate: "Ready to generate",
+    ready_for_preview: "Resume ready",
+    recovery: "Needs attention",
+  }[workspace.journey?.phase ?? "onboarding"] ?? "Needs attention");
+
+const initial: WorkspaceActionState = {
+  status: "idle",
+  summary: "",
+};
+
+export function ResumeWorkspacePicker({
+  workspaces,
+  activeWorkspaceId,
+  revisionNumber,
+}: {
+  workspaces: Workspace[];
+  activeWorkspaceId?: string;
+  revisionNumber: number;
+}) {
+  const [state, action, pending] = useActionState(resumeWorkspaceAction, initial);
+  const [isOpen, setIsOpen] = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
+  const [showDelete, setShowDelete] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  const activeWorkspace = workspaces.find((item) => item.id === activeWorkspaceId);
+  const hasWorkspaces = workspaces.length > 0;
+
+  // Close menu when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+        setShowCreate(false);
+        setShowDelete(false);
+      }
+    }
+    if (isOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [isOpen]);
+
+  return (
+    <div className="resume-compact-picker" ref={menuRef}>
+      <button
+        type="button"
+        className="resume-picker-trigger"
+        onClick={() => setIsOpen((prev) => !prev)}
+        aria-expanded={isOpen}
+        aria-haspopup="true"
+        title="Switch or create resume workspace"
+      >
+        <span className="trigger-icon" aria-hidden="true">
+          🗂
+        </span>
+        <div className="trigger-text-group">
+          <span className="trigger-active-name">
+            {activeWorkspace?.name ??
+              (hasWorkspaces ? "Select Resume" : "New Resume")}
+          </span>
+          {activeWorkspace ? (
+            <span className="trigger-badge">
+              {journeyLabel(activeWorkspace)}
+            </span>
+          ) : null}
+        </div>
+        <span className="trigger-chevron" aria-hidden="true">
+          {isOpen ? "▲" : "▼"}
+        </span>
+      </button>
+
+      {isOpen ? (
+        <div
+          className="resume-picker-popover"
+          role="dialog"
+          aria-label="Resume Workspaces"
+        >
+          <div className="popover-section-head">
+            <span className="popover-title">Saved Resumes</span>
+            <button
+              type="button"
+              className="popover-btn-new"
+              onClick={() => {
+                setShowCreate((v) => !v);
+                setShowDelete(false);
+              }}
+            >
+              {showCreate ? "Cancel" : "+ New"}
+            </button>
+          </div>
+
+          {showCreate || !hasWorkspaces ? (
+            <form action={action} className="popover-create-form">
+              <input type="hidden" name="workspaceCommand" value="create" />
+              <input
+                type="hidden"
+                name="expectedRevisionNumber"
+                value={revisionNumber}
+              />
+              <div className="popover-create-row">
+                <input
+                  name="name"
+                  required
+                  maxLength={120}
+                  placeholder="New resume name..."
+                  className="popover-input"
+                  disabled={pending}
+                  autoFocus
+                />
+                <button
+                  type="submit"
+                  className="popover-btn-submit"
+                  disabled={pending}
+                >
+                  {pending ? "..." : "Create"}
+                </button>
+              </div>
+            </form>
+          ) : null}
+
+          {hasWorkspaces ? (
+            <ul className="popover-workspace-list" role="listbox">
+              {workspaces.map((workspace) => {
+                const isActive = workspace.id === activeWorkspaceId;
+                return (
+                  <li
+                    key={workspace.id}
+                    className={`popover-list-item ${isActive ? "active" : ""}`}
+                  >
+                    <form action={action} className="popover-select-form">
+                      <input
+                        type="hidden"
+                        name="workspaceCommand"
+                        value="select"
+                      />
+                      <input
+                        type="hidden"
+                        name="workspaceId"
+                        value={workspace.id}
+                      />
+                      <input
+                        type="hidden"
+                        name="expectedRevisionNumber"
+                        value={revisionNumber}
+                      />
+                      <button
+                        type={isActive ? "button" : "submit"}
+                        className="popover-item-btn"
+                        disabled={pending}
+                        aria-current={isActive ? "true" : undefined}
+                        onClick={() => {
+                          if (isActive) setIsOpen(false);
+                        }}
+                      >
+                        <div className="item-info">
+                          <span className="item-name">{workspace.name}</span>
+                          <span className="item-phase">
+                            {journeyLabel(workspace)}
+                          </span>
+                        </div>
+                        {isActive ? (
+                          <span className="item-check" aria-hidden="true">
+                            ✓
+                          </span>
+                        ) : null}
+                      </button>
+                    </form>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : null}
+
+          {activeWorkspaceId && !showCreate ? (
+            <div className="popover-footer">
+              {!showDelete ? (
+                <button
+                  type="button"
+                  className="popover-delete-toggle"
+                  onClick={() => setShowDelete(true)}
+                >
+                  Delete this resume
+                </button>
+              ) : (
+                <form action={action} className="popover-delete-form">
+                  <input type="hidden" name="workspaceCommand" value="delete" />
+                  <input
+                    type="hidden"
+                    name="workspaceId"
+                    value={activeWorkspaceId}
+                  />
+                  <input
+                    type="hidden"
+                    name="expectedRevisionNumber"
+                    value={revisionNumber}
+                  />
+                  <p className="popover-delete-warning">
+                    Type DELETE to confirm removal:
+                  </p>
+                  <div className="popover-delete-row">
+                    <input
+                      name="confirmation"
+                      required
+                      placeholder="DELETE"
+                      className="popover-input popover-input-delete"
+                      disabled={pending}
+                    />
+                    <button
+                      type="submit"
+                      className="popover-btn-delete-confirm"
+                      disabled={pending}
+                    >
+                      Delete
+                    </button>
+                    <button
+                      type="button"
+                      className="popover-btn-cancel-del"
+                      onClick={() => setShowDelete(false)}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+          ) : null}
+
+          {state.status === "error" ? (
+            <p className="popover-error-msg" role="status">
+              {state.summary}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
 }

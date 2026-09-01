@@ -121,6 +121,7 @@ import {
 import {
   createResumeWorkspace,
   permanentlyDeleteResumeWorkspace,
+  readResumeWorkspaceState,
   selectResumeWorkspace,
 } from "@/domain/resume-generation/resume-workspace-commands";
 import { chooseLocalEvidenceFolder } from "@/files/local-folder-picker";
@@ -128,6 +129,7 @@ import { readManagedDocumentedArtifacts } from "@/files/evidence-library";
 import { getResumeAgentSkill } from "@/domain/resume-agent/skill-registry";
 import {
   beginResumeEvidenceIntake,
+  readLatestResumeEvidenceIntake,
   runResumeEvidenceIntake,
 } from "@/domain/resume-generation/resume-evidence-intake";
 import { reconcileResumeWorkspaceJourney } from "@/domain/resume-generation/resume-workspace-journey";
@@ -1601,6 +1603,35 @@ export async function resumeClarificationAction(
     };
   }
 }
+
+export async function readResumeEvidenceIntakeStatusAction(workspaceId: string): Promise<{
+  status: "queued" | "running" | "ready" | "failed" | "idle";
+  message: string;
+  isComplete: boolean;
+  failed: boolean;
+}> {
+  try {
+    const intake = await readLatestResumeEvidenceIntake(workspaceId);
+    const workspaceState = await readResumeWorkspaceState().catch(() => undefined);
+    const phase = workspaceState?.activeWorkspace?.journey?.phase;
+    const isReady = intake?.status === "ready" || phase === "interview" || phase === "ready_to_generate" || phase === "ready_for_preview";
+    const isFailed = intake?.status === "failed";
+    return {
+      status: intake?.status ?? (isReady ? "ready" : "running"),
+      message: intake?.message ?? (isReady ? "Your evidence is documented and ready." : "Reading your selected local folders and documenting resume evidence."),
+      isComplete: Boolean(isReady),
+      failed: Boolean(isFailed),
+    };
+  } catch {
+    return {
+      status: "running",
+      message: "Reading your selected local folders and documenting resume evidence.",
+      isComplete: false,
+      failed: false,
+    };
+  }
+}
+
 export async function resumeInterviewCoachAction(
   _: ResumeInterviewActionState,
   formData: FormData,

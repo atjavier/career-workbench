@@ -5,6 +5,7 @@ import { readResumeWorkspaceState } from "@/domain/resume-generation/resume-work
 import { readLatestResumeEvidenceIntake } from "@/domain/resume-generation/resume-evidence-intake";
 import { readResumeClarificationInterview } from "@/domain/resume-generation/resume-clarification-interview";
 import { ResumeInterview } from "@/app/resume-interview";
+import { ResumeIntakeStatus } from "@/app/resume-intake-status";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +16,34 @@ export default async function ResumeInterviewPage() {
   const hasReviewConflict = Boolean(interview?.completed.some((task) => task.needsReview));
   const shouldShowInterview = Boolean(state.activeWorkspace && interview && (state.activeWorkspace.journey?.phase === "interview" || hasReviewConflict));
   if (state.activeWorkspace?.journey && !["documenting", "interview", "recovery"].includes(state.activeWorkspace.journey.phase) && !hasReviewConflict) redirect("/resume");
-  const message = state.activeWorkspace?.journey?.message ?? intake?.message ?? "Your saved evidence will be prepared before Coach Resume begins its interview.";
-  return <ApplicationShell active="Resume"><main className="workspace-shell resume-workspace"><header className="resume-page-head"><div><p className="eyebrow">Resume Coach</p><h1>Prepare your resume evidence</h1><p>Answer only what your documented work could not establish.</p></div></header><ResumeWorkspacePicker workspaces={state.workspaces} activeWorkspaceId={state.activeWorkspace?.id} revisionNumber={state.revisionNumber} />{shouldShowInterview && state.activeWorkspace && interview ? <ResumeInterview workspaceId={state.activeWorkspace.id} interview={interview}/> : <section className="panel"><p role="status" aria-live="polite">{message}</p>{intake?.status === "failed" ? <p>Your saved work is recoverable. Return to this resume when you can restart evidence intake.</p> : null}</section>}</main></ApplicationShell>;
+  const message = state.activeWorkspace?.journey?.message ?? intake?.message ?? "Reading your selected local folders and documenting resume evidence.";
+  return (
+    <ApplicationShell active="Coach Q&A">
+      <div className="workspace-shell resume-workspace">
+        <header className="resume-page-head">
+          <div className="resume-head-copy">
+            <p className="eyebrow">Resume Coach</p>
+            <h1>Prepare your resume evidence</h1>
+            <p>
+              Your local AI coach analyzes your documented work and identifies a few targeted clarification questions. Answer the questions below to establish your verified achievements and metrics before generating your base resume.
+            </p>
+          </div>
+          <ResumeWorkspacePicker
+            workspaces={state.workspaces}
+            activeWorkspaceId={state.activeWorkspace?.id}
+            revisionNumber={state.revisionNumber}
+          />
+        </header>
+        {shouldShowInterview && state.activeWorkspace && interview ? (
+          <ResumeInterview workspaceId={state.activeWorkspace.id} interview={interview} />
+        ) : (
+          <ResumeIntakeStatus
+            workspaceId={state.activeWorkspace?.id ?? ""}
+            initialMessage={message}
+            initialStatus={intake?.status}
+          />
+        )}
+      </div>
+    </ApplicationShell>
+  );
 }

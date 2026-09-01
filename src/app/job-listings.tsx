@@ -41,15 +41,20 @@ export function JobListings({ opportunities, materials = [], assessments = {}, e
   return (
     <section id="job-listings" aria-labelledby="job-listings-heading" className="jobs-workspace">
       <header className="jobs-workspace-header">
-        <div className="jobs-header-copy">
+        <div>
           <p className="eyebrow">Jobs</p>
           <h1 id="job-listings-heading">Your opportunities</h1>
-          <p className="jobs-header-subtitle">Keep the roles you choose to capture in one calm, private workspace. You decide what to save and when to open the original page.</p>
+          <p>Keep the roles you choose to capture in one calm, private workspace. You decide what to save and when to open the original page.</p>
         </div>
         <div className="jobs-header-controls">
           {opportunities.length > 0 && jobsView === "all" && !error ? (
             <div className="jobs-search-box">
-              <span className="search-icon" aria-hidden="true">🔍</span>
+              <span className="search-icon" aria-hidden="true">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="11" cy="11" r="8" />
+                  <path d="m21 21-4.3-4.3" />
+                </svg>
+              </span>
               <label htmlFor="opportunity-search" className="sr-only">Search opportunities</label>
               <input ref={searchInputRef} id="opportunity-search" type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search opportunities (title, company)..." />
               {query ? <button type="button" className="secondary-action search-clear-btn" onClick={handleClearSearch}>Clear search</button> : null}
@@ -70,7 +75,12 @@ export function JobListings({ opportunities, materials = [], assessments = {}, e
       <OpportunityCapture open={captureOpen} onClose={closeCapture} onReturnToAllOpportunities={() => { setJobsView("all"); setQuery(""); closeCapture(); }} />
       {jobsView === "applied" ? (
         <section className="jobs-empty-state" aria-labelledby="applied-heading">
-          <div className="empty-state-badge" aria-hidden="true">📋</div>
+          <div className="empty-state-badge" aria-hidden="true">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+              <rect width="8" height="4" x="8" y="2" rx="1" ry="1" />
+              <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+            </svg>
+          </div>
           <h3 id="applied-heading">Applied opportunities are not available yet</h3>
           <p>Application tracking is a later local workflow. Your captured opportunities remain available in All opportunities.</p>
           <button type="button" className="secondary-action" onClick={() => setJobsView("all")}>Return to all opportunities</button>
@@ -87,7 +97,12 @@ export function JobListings({ opportunities, materials = [], assessments = {}, e
           ) : null}
           {opportunities.length === 0 ? (
             <section className="jobs-empty-state jobs-library-empty">
-              <div className="empty-state-badge" aria-hidden="true">💼</div>
+              <div className="empty-state-badge" aria-hidden="true">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                  <rect width="20" height="14" x="2" y="7" rx="2" />
+                  <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" />
+                </svg>
+              </div>
               <h4>No captured opportunities saved yet</h4>
               <p>Captured opportunities appear here after you review and confirm copied role details. You stay in control of the URL and text you provide.</p>
               <button className="affirmative-action add-opportunity-action" type="button" onClick={openCapture}>
@@ -128,7 +143,10 @@ function OpportunityCard({ opportunity, index, materials, assessment, latestDeci
         <header className="job-listing-header">
           <div className="job-listing-identity">
             <div className="company-logo-badge" aria-hidden="true">
-              <span className="logo-icon">💼</span>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect width="20" height="14" x="2" y="7" rx="2" />
+                <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" />
+              </svg>
             </div>
             <div className="job-listing-title-block">
               <p className="job-company">{opportunity.company}</p>
