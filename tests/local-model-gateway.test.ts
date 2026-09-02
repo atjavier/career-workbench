@@ -58,6 +58,13 @@ function native(content: unknown, extra: Record<string, unknown> = {}) {
   );
 }
 
+function interviewDecisionContent(
+  content: string,
+  decision: Record<string, unknown>,
+): string {
+  return `${content}<resume-interview-decision>${JSON.stringify(decision)}</resume-interview-decision>`;
+}
+
 test("Resume Interview Coach sends one bounded, stateless local request and rejects non-exact saved questions", async () => {
   const base = {
     connection,
@@ -123,6 +130,12 @@ test("Resume Interview Coach streams a bounded natural reply through native LM S
   };
   const content =
     "That sounds like a useful contribution. What part did you own?";
+  const rawContent = interviewDecisionContent(content, {
+    schemaVersion: 1,
+    selectionEcho: value.consentFingerprint,
+    disposition: "clarify",
+    missingDetail: "What part did you own",
+  });
   const frames = [
     {
       name: "chat.start",
@@ -133,20 +146,20 @@ test("Resume Interview Coach streams a bounded natural reply through native LM S
     },
     {
       name: "message.delta",
-      data: { type: "message.delta", content: "That sounds like a useful " },
+      data: { type: "message.delta", content: rawContent.slice(0, 30) },
     },
     {
       name: "message.delta",
       data: {
         type: "message.delta",
-        content: "contribution. What part did you own?",
+        content: rawContent.slice(30),
       },
     },
     {
       name: "chat.end",
       data: {
         type: "chat.end",
-        result: { output: [{ type: "message", content }] },
+        result: { output: [{ type: "message", content: rawContent }] },
       },
     },
   ]
@@ -183,7 +196,13 @@ test("Resume Interview Coach streams a bounded natural reply through native LM S
     }
   })();
   assert.equal(response.deltas.join(""), content);
-  assert.deepEqual(response.complete, { content });
+  assert.deepEqual(response.complete, {
+    content,
+    decision: {
+      disposition: "clarify",
+      missingDetail: "What part did you own",
+    },
+  });
   const malformed = streamResumeInterviewCoach(
     value,
     undefined,
@@ -227,6 +246,7 @@ test("Resume Interview Coach starts an empty conversation with a brief Coach ope
         transcript: [],
         opening: true,
         latestCandidateMessage: null,
+        clarificationUsed: false,
         responseShape:
           "Initiate the conversation yourself. In two or three concise sentences, briefly explain that you will clarify documented experience for an accurate resume without inventing claims, introduce the exact saved question, and invite a natural answer. Reply with no JSON, labels, tools, or actions.",
       });
@@ -254,7 +274,7 @@ test("Resume Interview Coach starts an empty conversation with a brief Coach ope
   assert.deepEqual((await stream.next()).value, { content });
 });
 
-test("Resume Interview Coach replaces an ungrounded scope reply with the saved question", async () => {
+test("Resume Interview Coach fails closed when a candidate turn has no validated decision", async () => {
   const base = {
     connection,
     workspaceId: "00000000-0000-7000-8000-000000000099",
@@ -270,8 +290,6 @@ test("Resume Interview Coach replaces an ungrounded scope reply with the saved q
   };
   const ungrounded =
     "We are building a Flask application to manage bioinformatics analysis runs.";
-  const expected =
-    "We are clarifying your documented experience for your resume. The current question is: What problem or need was BioEvidence intended to address? Please answer from your experience, or tell me what you would like to clarify.";
   const stream = streamResumeInterviewCoach(
     value,
     undefined,
@@ -307,11 +325,10 @@ test("Resume Interview Coach replaces an ungrounded scope reply with the saved q
       );
     },
   );
-  assert.equal((await stream.next()).value, expected);
-  assert.deepEqual((await stream.next()).value, { content: expected });
+  await assert.rejects(stream.next(), { code: "RESUME_COACH_INVALID" });
 });
 
-test("Resume Interview Coach asks for additions before permitting a question transition", async () => {
+test("Resume Interview Coach accepts a complete decision without a generic additional-details prompt", async () => {
   const base = {
     connection,
     workspaceId: "00000000-0000-7000-8000-000000000099",
@@ -328,10 +345,13 @@ test("Resume Interview Coach asks for additions before permitting a question tra
     ...base,
     consentFingerprint: resumeInterviewCoachConsentFingerprint(base),
   };
-  const premature =
-    "That is a clear contribution. I will move us to the next question.";
-  const expected =
-    "That is a clear contribution. Would you like to add or clarify anything else?";
+  const visible = "That is a clear contribution. Thank you.";
+  const content = interviewDecisionContent(visible, {
+    schemaVersion: 1,
+    selectionEcho: value.consentFingerprint,
+    disposition: "complete",
+    answerSource: "latest",
+  });
   const stream = streamResumeInterviewCoach(
     value,
     undefined,
@@ -340,13 +360,13 @@ test("Resume Interview Coach asks for additions before permitting a question tra
         [
           {
             name: "message.delta",
-            data: { type: "message.delta", content: premature },
+            data: { type: "message.delta", content },
           },
           {
             name: "chat.end",
             data: {
               type: "chat.end",
-              result: { output: [{ type: "message", content: premature }] },
+              result: { output: [{ type: "message", content }] },
             },
           },
         ]
@@ -358,8 +378,117 @@ test("Resume Interview Coach asks for additions before permitting a question tra
         { status: 200, headers: { "content-type": "text/event-stream" } },
       ),
   );
-  assert.equal((await stream.next()).value, expected);
-  assert.deepEqual((await stream.next()).value, { content: expected });
+  assert.equal((await stream.next()).value, visible);
+  assert.deepEqual((await stream.next()).value, {
+    content: visible,
+    decision: { disposition: "complete", answerSource: "latest" },
+  });
+  assert.doesNotMatch(visible, /add or clarify anything else/i);
+});
+
+test("Resume Interview Coach accepts native SSE complete/prior and unknown decisions, including a 2,400-character delta", async () => {
+  const base = {
+    connection,
+    workspaceId: "00000000-0000-7000-8000-000000000099",
+    taskId: "task-native-decisions",
+    question: "What was your contribution?",
+    context: ["Built the documented workflow."],
+    transcript: [
+      "Candidate: I owned the documented workflow.",
+      "Candidate: No need.",
+    ],
+    consentNonce: "native-decisions-consent",
+  };
+  const value = {
+    ...base,
+    consentFingerprint: resumeInterviewCoachConsentFingerprint(base),
+  };
+  for (const [content, decision] of [
+    [
+      "Thanks, I will use the answer you already gave.",
+      { disposition: "complete", answerSource: "prior" },
+    ],
+    ["It is okay to leave that unknown.", { disposition: "unknown" }],
+  ] as const) {
+    const rawContent = interviewDecisionContent(content, {
+      schemaVersion: 1,
+      selectionEcho: value.consentFingerprint,
+      ...decision,
+    });
+    const stream = streamResumeInterviewCoach(
+      value,
+      undefined,
+      async () =>
+        new Response(
+          `event: message.delta\ndata: ${JSON.stringify({ type: "message.delta", content: rawContent })}\n\nevent: chat.end\ndata: ${JSON.stringify({ type: "chat.end", result: { output: [{ type: "message", content: rawContent }] } })}\n\n`,
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        ),
+    );
+    assert.equal((await stream.next()).value, content);
+    assert.deepEqual((await stream.next()).value, { content, decision });
+  }
+
+  const visible = "a".repeat(1_800);
+  const decision = {
+    schemaVersion: 1,
+    selectionEcho: value.consentFingerprint,
+    disposition: "complete",
+    answerSource: "latest",
+  } as const;
+  const encodedDecision = JSON.stringify(decision);
+  const rawWithoutPadding = interviewDecisionContent(visible, decision);
+  const rawContent = `${visible}<resume-interview-decision>${encodedDecision.slice(0, -1)}${" ".repeat(2_400 - rawWithoutPadding.length)}}</resume-interview-decision>`;
+  assert.equal(rawContent.length, 2_400);
+  const boundary = streamResumeInterviewCoach(
+    value,
+    undefined,
+    async () =>
+      new Response(
+        `event: message.delta\ndata: ${JSON.stringify({ type: "message.delta", content: rawContent })}\n\nevent: chat.end\ndata: ${JSON.stringify({ type: "chat.end", result: { output: [{ type: "message", content: rawContent }] } })}\n\n`,
+        { status: 200, headers: { "content-type": "text/event-stream" } },
+      ),
+  );
+  assert.equal((await boundary.next()).value, visible);
+  assert.deepEqual((await boundary.next()).value, {
+    content: visible,
+    decision: { disposition: "complete", answerSource: "latest" },
+  });
+});
+
+test("Resume Interview Coach rejects a second clarification decision", async () => {
+  const base = {
+    connection,
+    workspaceId: "00000000-0000-7000-8000-000000000099",
+    taskId: "task-second-clarification",
+    question: "What was your contribution?",
+    context: ["Built the documented workflow."],
+    transcript: ["Candidate: I helped."],
+    clarificationUsed: true,
+    consentNonce: "second-clarification-consent",
+  };
+  const value = {
+    ...base,
+    consentFingerprint: resumeInterviewCoachConsentFingerprint(base),
+  };
+  const content = interviewDecisionContent(
+    "Which deployment step did you own?",
+    {
+      schemaVersion: 1,
+      selectionEcho: value.consentFingerprint,
+      disposition: "clarify",
+      missingDetail: "deployment step",
+    },
+  );
+  const stream = streamResumeInterviewCoach(
+    value,
+    undefined,
+    async () =>
+      new Response(
+        `event: message.delta\ndata: ${JSON.stringify({ type: "message.delta", content })}\n\nevent: chat.end\ndata: ${JSON.stringify({ type: "chat.end", result: { output: [{ type: "message", content }] } })}\n\n`,
+        { status: 200, headers: { "content-type": "text/event-stream" } },
+      ),
+  );
+  await assert.rejects(stream.next(), { code: "RESUME_COACH_INVALID" });
 });
 
 test("Resume Interview Coach accepts CRLF frames and rejects duplicate terminals or oversized unfinished frames", async () => {
@@ -376,8 +505,14 @@ test("Resume Interview Coach accepts CRLF frames and rejects duplicate terminals
     ...base,
     consentFingerprint: resumeInterviewCoachConsentFingerprint(base),
   };
-  const content =
+  const visible =
     "I can help you describe the work clearly. What did you personally deliver?";
+  const content = interviewDecisionContent(visible, {
+    schemaVersion: 1,
+    selectionEcho: value.consentFingerprint,
+    disposition: "clarify",
+    missingDetail: "What did you personally deliver",
+  });
   const end = {
     type: "chat.end",
     result: { output: [{ type: "message", content }] },
@@ -399,8 +534,14 @@ test("Resume Interview Coach accepts CRLF frames and rejects duplicate terminals
         { status: 200, headers: { "content-type": "text/event-stream" } },
       ),
   );
-  assert.equal((await crlf.next()).value, content);
-  assert.deepEqual((await crlf.next()).value, { content });
+  assert.equal((await crlf.next()).value, visible);
+  assert.deepEqual((await crlf.next()).value, {
+    content: visible,
+    decision: {
+      disposition: "clarify",
+      missingDetail: "What did you personally deliver",
+    },
+  });
 
   const duplicateTerminal = streamResumeInterviewCoach(
     value,

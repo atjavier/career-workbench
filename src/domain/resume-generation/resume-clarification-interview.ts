@@ -41,6 +41,7 @@ export type ResumeInterviewStreamStart = {
   question: string;
   context: string[];
   transcript: string[];
+  clarificationUsed: boolean;
 };
 const plain = (value: unknown, maximum: number) =>
   typeof value === "string" &&
@@ -399,8 +400,17 @@ export async function beginResumeInterviewCoachStream(
           (turn) =>
             `${turn.role === "coach" ? "Coach" : "Candidate"}: ${transcriptContent(turn.content)}`,
         );
+      const clarificationUsed = Boolean(
+        (
+          db
+            .prepare(
+              "SELECT 1 FROM resume_interview_stream_reservations completed JOIN resume_interview_candidate_turns candidate ON candidate.stream_request_id = completed.stream_request_id JOIN resume_interview_turns coach ON coach.stream_request_id = completed.stream_request_id WHERE completed.workspace_id = ? AND completed.task_id = ? AND completed.status = 'completed' LIMIT 1",
+            )
+            .get(input.workspaceId, input.taskId) as { 1: number } | undefined
+        ),
+      );
       db.exec("COMMIT");
-      return { question: task.question, context, transcript };
+      return { question: task.question, context, transcript, clarificationUsed };
     } catch (error) {
       db.exec("ROLLBACK");
       throw error;
@@ -465,6 +475,19 @@ export async function finalizeResumeInterviewCoachStream(
           "That resume workspace changed before the Coach reply could be saved.",
           "Return to the intended interview and continue its current question.",
         );
+      if (
+        input.opening !== true &&
+        db
+          .prepare(
+            "SELECT 1 FROM resume_interview_stream_reservations completed JOIN resume_interview_candidate_turns candidate ON candidate.stream_request_id = completed.stream_request_id JOIN resume_interview_turns coach ON coach.stream_request_id = completed.stream_request_id WHERE completed.workspace_id = ? AND completed.task_id = ? AND completed.status = 'completed' AND completed.stream_request_id <> ? LIMIT 1",
+          )
+          .get(input.workspaceId, input.taskId, input.streamRequestId)
+      )
+        throw new WorkspaceError(
+          "RESUME_COACH_INVALID",
+          "That clarification already has its one allowed follow-up.",
+          "Continue with the saved answer or move to the current question.",
+        );
       const completion = db
         .prepare(
           "UPDATE resume_interview_stream_reservations SET status = 'completed' WHERE stream_request_id = ? AND workspace_id = ? AND task_id = ? AND status = 'started'",
@@ -524,8 +547,28 @@ export async function respondToResumeClarification(
     taskId: string;
     answer?: string;
     skip?: boolean;
+    coachContent?: string;
+    streamRequestId?: string;
+    signal?: AbortSignal;
   },
 ): Promise<InterviewView> {
+  const terminalStream =
+    input.coachContent !== undefined || input.streamRequestId !== undefined;
+  const streamRequestId = input.streamRequestId ?? "";
+  const coachContent = input.coachContent?.trim();
+  if (
+    (terminalStream &&
+      (!requestUuid(input.streamRequestId) ||
+        !coachContent ||
+        coachContent.length > 1_800 ||
+        /[\u0000\u007f-\u009f]/.test(coachContent))) ||
+    input.signal?.aborted
+  )
+    throw new WorkspaceError(
+      "RESUME_COACH_INVALID",
+      "The local Coach Resume reply is unavailable.",
+      "Try the saved clarification question again.",
+    );
   const paths = await resolveAppDataPaths(input.appDataRoot);
   const db = openDatabase(paths.databasePath);
   let itemKey = "";
@@ -541,6 +584,12 @@ export async function respondToResumeClarification(
       );
     db.exec("BEGIN IMMEDIATE");
     try {
+      if (input.signal?.aborted)
+        throw new WorkspaceError(
+          "RESUME_COACH_INVALID",
+          "The local Coach Resume reply is unavailable.",
+          "Try the saved clarification question again.",
+        );
       if (readActiveResumeWorkspace(db).workspace?.id !== input.workspaceId)
         throw new WorkspaceError(
           "RESUME_WORKSPACE_STALE",
@@ -559,6 +608,30 @@ export async function respondToResumeClarification(
           "RESUME_COACH_INVALID",
           "That clarification question is no longer awaiting an answer.",
           "Refresh Coach Resume and continue with its current question.",
+        );
+      if (
+        terminalStream &&
+        (!db
+          .prepare(
+            "SELECT 1 FROM resume_interview_stream_reservations WHERE stream_request_id = ? AND workspace_id = ? AND task_id = ? AND status = 'started'",
+          )
+          .get(streamRequestId, input.workspaceId, input.taskId) ||
+          !db
+            .prepare(
+              "SELECT 1 FROM resume_interview_candidate_turns WHERE stream_request_id = ? AND workspace_id = ? AND task_id = ?",
+            )
+            .get(streamRequestId, input.workspaceId, input.taskId) ||
+          (!input.skip &&
+            !db
+              .prepare(
+                "SELECT 1 FROM resume_interview_candidate_turns WHERE workspace_id = ? AND task_id = ? AND content = ?",
+              )
+              .get(input.workspaceId, input.taskId, answer?.trim() ?? "")))
+      )
+        throw new WorkspaceError(
+          "RESUME_WORKSPACE_STALE",
+          "That resume workspace changed before the Coach reply could be saved.",
+          "Return to the intended interview and continue its current question.",
         );
       itemKey = task.itemKey;
       const now = new Date().toISOString();
@@ -585,6 +658,29 @@ export async function respondToResumeClarification(
           candidateText: answer,
           now,
         });
+      if (terminalStream) {
+        const completion = db
+          .prepare(
+            "UPDATE resume_interview_stream_reservations SET status = 'completed' WHERE stream_request_id = ? AND workspace_id = ? AND task_id = ? AND status = 'started'",
+          )
+          .run(streamRequestId, input.workspaceId, input.taskId);
+        if (completion.changes !== 1)
+          throw new WorkspaceError(
+            "RESUME_WORKSPACE_STALE",
+            "That Coach Resume request is no longer available.",
+            "Return to the intended interview and continue its current question.",
+          );
+        db.prepare(
+          "INSERT INTO resume_interview_turns (id, workspace_id, task_id, role, content, created_at, stream_request_id) VALUES (?, ?, ?, 'coach', ?, ?, ?)",
+        ).run(
+          createUuidV7(),
+          input.workspaceId,
+          input.taskId,
+          coachContent ?? "",
+          now,
+          streamRequestId,
+        );
+      }
       reconcileResumeWorkspaceJourneyInDatabase(db, input.workspaceId, now);
       result = view(db, input.workspaceId);
       db.exec("COMMIT");

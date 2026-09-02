@@ -124,26 +124,6 @@ async function inputFor(request: Request): Promise<StreamRequest> {
 const event = (value: Record<string, unknown>) =>
   `data: ${JSON.stringify(value)}\n\n`;
 
-function coachAskedForMore(transcript: string[]): boolean {
-  const latestCoach = [...transcript]
-    .reverse()
-    .find((turn) => turn.startsWith("Coach: "))
-    ?.slice("Coach: ".length);
-  return /\b(?:add|clarify)\b.*\b(?:anything|more|else)\b/i.test(
-    latestCoach ?? "",
-  );
-}
-
-function candidateIsReadyToContinue(message: string): boolean {
-  const value = message.trim().toLocaleLowerCase();
-  return /^(?:no(?: more)?\b|nope\b|nothing (?:more|else)|that(?:'s| is) all|i(?:'m| am) done|i (?:won't|wont|will not) add|go on|next)/.test(
-    value,
-  );
-}
-
-const transitionReply =
-  "Thanks, that completes this clarification. I will move us to the next question.";
-
 export async function createResumeInterviewStreamResponse(
   request: Request,
   overrides: Partial<StreamDependencies> = {},
@@ -181,75 +161,101 @@ export async function createResumeInterviewStreamResponse(
           streamRequestId: input.streamRequestId,
         });
         if (interrupted()) return;
-        let coachContent = "";
-        if (
-          !input.opening &&
-          coachAskedForMore(started.transcript) &&
-          candidateIsReadyToContinue(input.message)
-        ) {
-          coachContent = transitionReply;
-          controller.enqueue(
-            encoder.encode(event({ type: "delta", text: coachContent })),
-          );
-        } else {
-          const configuration = await dependencies.configuration();
-          if (interrupted()) return;
-          const connection = {
-            configurationRevisionId: configuration.id,
-            configurationDigest: configuration.configurationDigest,
-            modelIdentifier: configuration.modelIdentifier,
-          };
-          const coachInput = {
-            connection,
-            workspaceId: input.workspaceId,
-            taskId: input.taskId,
-            question: started.question,
-            context: started.context,
-            transcript: started.transcript,
-            opening: input.opening,
-            consentNonce: input.consentNonce,
-          };
-          const coach = dependencies.stream(
-            {
-              ...coachInput,
-              consentFingerprint:
-                resumeInterviewCoachConsentFingerprint(coachInput),
-            },
-            upstream.signal,
-          );
-          for await (const delta of coach) {
-            if (interrupted()) return;
-            coachContent += delta;
-            controller.enqueue(
-              encoder.encode(event({ type: "delta", text: delta })),
-            );
-          }
-          if (interrupted()) return;
-        }
-        await dependencies.finalize({
+        const configuration = await dependencies.configuration();
+        if (interrupted()) return;
+        const connection = {
+          configurationRevisionId: configuration.id,
+          configurationDigest: configuration.configurationDigest,
+          modelIdentifier: configuration.modelIdentifier,
+        };
+        const coachInput = {
+          connection,
           workspaceId: input.workspaceId,
           taskId: input.taskId,
-          streamRequestId: input.streamRequestId,
-          coachContent,
+          question: started.question,
+          context: started.context,
+          transcript: started.transcript,
           opening: input.opening,
-          signal: upstream.signal,
-        });
-        if (interrupted()) return;
+          clarificationUsed: started.clarificationUsed,
+          consentNonce: input.consentNonce,
+        };
+        const coach = dependencies.stream(
+          {
+            ...coachInput,
+            consentFingerprint:
+              resumeInterviewCoachConsentFingerprint(coachInput),
+          },
+          upstream.signal,
+        );
+        let coachContent = "";
+        let coachResult: Awaited<ReturnType<typeof coach.next>>["value"];
+        while (true) {
+          const next = await coach.next();
+          if (next.done) {
+            coachResult = next.value;
+            break;
+          }
+          if (interrupted()) return;
+          coachContent += next.value;
+          controller.enqueue(
+            encoder.encode(event({ type: "delta", text: next.value })),
+          );
+        }
         if (
-          !input.opening &&
-          coachContent.trim().endsWith("I will move us to the next question.")
-        ) {
-          const answer = await dependencies.readPriorCandidate({
+          interrupted() ||
+          !coachResult ||
+          coachResult.content !== coachContent
+        )
+          return;
+        if (input.opening) {
+          await dependencies.finalize({
             workspaceId: input.workspaceId,
             taskId: input.taskId,
             streamRequestId: input.streamRequestId,
+            coachContent,
+            opening: true,
+            signal: upstream.signal,
           });
-          if (answer)
-            await dependencies.respond({
-              workspaceId: input.workspaceId,
-              taskId: input.taskId,
-              answer,
-            });
+        } else if (!coachResult.decision) {
+          throw new WorkspaceError(
+            "RESUME_COACH_INVALID",
+            "The local Coach Resume reply could not be used safely.",
+            "Try your message again.",
+          );
+        } else if (coachResult.decision.disposition === "clarify") {
+          await dependencies.finalize({
+            workspaceId: input.workspaceId,
+            taskId: input.taskId,
+            streamRequestId: input.streamRequestId,
+            coachContent,
+            signal: upstream.signal,
+          });
+        } else {
+          const answer =
+            coachResult.decision.disposition === "complete"
+              ? coachResult.decision.answerSource === "latest"
+                ? input.message.trim()
+                : await dependencies.readPriorCandidate({
+                    workspaceId: input.workspaceId,
+                    taskId: input.taskId,
+                    streamRequestId: input.streamRequestId,
+                  })
+              : undefined;
+          if (coachResult.decision.disposition === "complete" && !answer)
+            throw new WorkspaceError(
+              "RESUME_COACH_INVALID",
+              "The local Coach Resume reply could not identify a saved answer.",
+              "Try your message again.",
+            );
+          await dependencies.respond({
+            workspaceId: input.workspaceId,
+            taskId: input.taskId,
+            answer,
+            skip: coachResult.decision.disposition === "unknown",
+            coachContent,
+            streamRequestId: input.streamRequestId,
+            signal: upstream.signal,
+          });
         }
         if (interrupted()) return;
         dependencies.revalidate("/resume/interview");

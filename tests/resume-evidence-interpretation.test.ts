@@ -540,6 +540,315 @@ test("streaming Coach messages persist the candidate once and the Coach only aft
       result?.turns.map((turn) => turn.role),
       ["candidate", "candidate", "coach"],
     );
+    const next = await beginResumeInterviewCoachStream({
+      appDataRoot,
+      workspaceId: workspace.workspace.id,
+      taskId,
+      candidateContent: "I have one more detail.",
+      streamRequestId: "00000000-0000-7000-8000-000000000084",
+    });
+    assert.equal(next.clarificationUsed, true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("only one independently finalized clarification persists per pending task", async () => {
+  const root = await mkdtemp(join(tmpdir(), "resume-coach-clarification-limit-"));
+  const appDataRoot = join(root, "private");
+  try {
+    const workspace = await createResumeWorkspace({
+      appDataRoot,
+      name: "Clarification limit",
+    });
+    const taskId = "task-clarification-limit";
+    const requestIds = [
+      "00000000-0000-7000-8000-000000000085",
+      "00000000-0000-7000-8000-000000000086",
+    ];
+    const db = openDatabase(join(appDataRoot, "workspace.sqlite"));
+    try {
+      db.prepare(
+        "INSERT INTO resume_clarification_tasks (id, workspace_id, item_key, item_name, item_category, category, question, created_at) VALUES (?, ?, 'project:limit', 'Limit', 'project', 'ownership', 'What did you own?', ?)",
+      ).run(taskId, workspace.workspace.id, new Date().toISOString());
+    } finally {
+      db.close();
+    }
+    for (const [index, streamRequestId] of requestIds.entries())
+      await beginResumeInterviewCoachStream({
+        appDataRoot,
+        workspaceId: workspace.workspace.id,
+        taskId,
+        candidateContent: `Clarification ${index + 1}.`,
+        streamRequestId,
+      });
+    const finalizations = await Promise.allSettled(
+      requestIds.map((streamRequestId) =>
+        finalizeResumeInterviewCoachStream({
+          appDataRoot,
+          workspaceId: workspace.workspace.id,
+          taskId,
+          streamRequestId,
+          coachContent: "Which part did you own?",
+        }),
+      ),
+    );
+    assert.equal(
+      finalizations.filter((result) => result.status === "fulfilled").length,
+      1,
+    );
+    assert.equal(
+      finalizations.filter((result) => result.status === "rejected").length,
+      1,
+    );
+    assert.equal(
+      (finalizations.find((result) => result.status === "rejected") as PromiseRejectedResult)
+        .reason.code,
+      "RESUME_COACH_INVALID",
+    );
+    const verify = openDatabase(join(appDataRoot, "workspace.sqlite"));
+    try {
+      assert.equal(
+        Number(
+          verify
+            .prepare(
+              "SELECT count(*) AS value FROM resume_interview_turns WHERE workspace_id = ? AND task_id = ?",
+            )
+            .get(workspace.workspace.id, taskId).value,
+        ),
+        1,
+      );
+      assert.deepEqual(
+        verify
+          .prepare(
+            "SELECT status FROM resume_interview_stream_reservations WHERE workspace_id = ? AND task_id = ? ORDER BY stream_request_id",
+          )
+          .all(workspace.workspace.id, taskId)
+          .map((row) => row.status),
+        ["completed", "started"],
+      );
+    } finally {
+      verify.close();
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("terminal Coach decisions atomically persist their reply with an answer or explicit unknown", async () => {
+  const root = await mkdtemp(join(tmpdir(), "resume-coach-terminal-"));
+  const appDataRoot = join(root, "private");
+  try {
+    const workspace = await createResumeWorkspace({
+      appDataRoot,
+      name: "Terminal",
+    });
+    const taskId = "task-terminal";
+    const requestId = "00000000-0000-4000-8000-000000000089";
+    const skippedTaskId = "task-terminal-skip";
+    const skippedRequestId = "00000000-0000-4000-8000-000000000091";
+    const db = openDatabase(join(appDataRoot, "workspace.sqlite"));
+    try {
+      const insert = db.prepare(
+        "INSERT INTO resume_clarification_tasks (id, workspace_id, item_key, item_name, item_category, category, question, created_at) VALUES (?, ?, 'project:terminal', 'Terminal', 'project', ?, ?, ?)",
+      );
+      const now = new Date().toISOString();
+      insert.run(
+        taskId,
+        workspace.workspace.id,
+        "ownership",
+        "What did you own?",
+        now,
+      );
+      insert.run(
+        skippedTaskId,
+        workspace.workspace.id,
+        "metrics",
+        "What result did it achieve?",
+        now,
+      );
+    } finally {
+      db.close();
+    }
+    await beginResumeInterviewCoachStream({
+      appDataRoot,
+      workspaceId: workspace.workspace.id,
+      taskId,
+      candidateContent: "I designed the validation workflow.",
+      streamRequestId: requestId,
+    });
+    await respondToResumeClarification({
+      appDataRoot,
+      workspaceId: workspace.workspace.id,
+      taskId,
+      answer: "I designed the validation workflow.",
+      coachContent: "Thanks, that is clear.",
+      streamRequestId: requestId,
+    });
+    await beginResumeInterviewCoachStream({
+      appDataRoot,
+      workspaceId: workspace.workspace.id,
+      taskId: skippedTaskId,
+      candidateContent: "I do not know the result.",
+      streamRequestId: skippedRequestId,
+    });
+    await respondToResumeClarification({
+      appDataRoot,
+      workspaceId: workspace.workspace.id,
+      taskId: skippedTaskId,
+      skip: true,
+      coachContent: "It is okay to leave that unknown.",
+      streamRequestId: skippedRequestId,
+    });
+    const completed = await readResumeClarificationInterview(
+      workspace.workspace.id,
+      { appDataRoot },
+    );
+    assert.equal(
+      completed?.completed.find((task) => task.id === taskId)?.answer,
+      "I designed the validation workflow.",
+    );
+    assert.equal(
+      completed?.completed.find((task) => task.id === skippedTaskId)?.status,
+      "skipped",
+    );
+    assert.equal(
+      completed?.turns.at(-1)?.content,
+      "It is okay to leave that unknown.",
+    );
+
+    const verify = openDatabase(join(appDataRoot, "workspace.sqlite"));
+    try {
+      assert.deepEqual(
+        verify
+          .prepare(
+            "SELECT disposition FROM resume_clarification_task_responses WHERE workspace_id = ? AND task_id = ?",
+          )
+          .all(workspace.workspace.id, skippedTaskId)
+          .map((row) => row.disposition),
+        ["skipped"],
+      );
+      assert.equal(
+        verify
+          .prepare(
+            "SELECT content FROM resume_interview_turns WHERE stream_request_id = ?",
+          )
+          .get(skippedRequestId).content,
+        "It is okay to leave that unknown.",
+      );
+      assert.equal(
+        verify
+          .prepare(
+            "SELECT status FROM resume_interview_stream_reservations WHERE stream_request_id = ?",
+          )
+          .get(skippedRequestId).status,
+        "completed",
+      );
+    } finally {
+      verify.close();
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("a failed terminal Coach persistence leaves the task and transcript unchanged", async () => {
+  const root = await mkdtemp(join(tmpdir(), "resume-coach-terminal-failure-"));
+  const appDataRoot = join(root, "private");
+  try {
+    const workspace = await createResumeWorkspace({
+      appDataRoot,
+      name: "Terminal failure",
+    });
+    const taskId = "task-terminal-failure";
+    const requestId = "00000000-0000-4000-8000-000000000090";
+    const db = openDatabase(join(appDataRoot, "workspace.sqlite"));
+    try {
+      db.prepare(
+        "INSERT INTO resume_clarification_tasks (id, workspace_id, item_key, item_name, item_category, category, question, created_at) VALUES (?, ?, 'project:failure', 'Failure', 'project', 'ownership', 'What did you own?', ?)",
+      ).run(taskId, workspace.workspace.id, new Date().toISOString());
+    } finally {
+      db.close();
+    }
+    await beginResumeInterviewCoachStream({
+      appDataRoot,
+      workspaceId: workspace.workspace.id,
+      taskId,
+      candidateContent: "I owned it.",
+      streamRequestId: requestId,
+    });
+    const fail = openDatabase(join(appDataRoot, "workspace.sqlite"));
+    try {
+      fail.exec(`CREATE TRIGGER fail_terminal_coach_insert
+        BEFORE INSERT ON resume_interview_turns
+        WHEN NEW.stream_request_id = '00000000-0000-4000-8000-000000000090'
+        BEGIN
+          SELECT RAISE(FAIL, 'forced terminal failure');
+        END;`);
+    } finally {
+      fail.close();
+    }
+    await assert.rejects(
+      respondToResumeClarification({
+        appDataRoot,
+        workspaceId: workspace.workspace.id,
+        taskId,
+        answer: "I owned it.",
+        coachContent: "Thanks.",
+        streamRequestId: requestId,
+      }),
+      /forced terminal failure/,
+    );
+    const unchanged = await readResumeClarificationInterview(
+      workspace.workspace.id,
+      { appDataRoot },
+    );
+    assert.equal(unchanged?.current?.id, taskId);
+    assert.deepEqual(
+      unchanged?.turns.map((turn) => turn.role),
+      ["candidate"],
+    );
+    const verify = openDatabase(join(appDataRoot, "workspace.sqlite"));
+    try {
+      assert.equal(
+        Number(
+          verify
+            .prepare(
+              "SELECT count(*) AS value FROM resume_clarification_task_responses WHERE workspace_id = ? AND task_id = ?",
+            )
+            .get(workspace.workspace.id, taskId).value,
+        ),
+        0,
+      );
+      assert.equal(
+        Number(
+          verify
+            .prepare(
+              "SELECT count(*) AS value FROM resume_interview_turns WHERE workspace_id = ? AND task_id = ?",
+            )
+            .get(workspace.workspace.id, taskId).value,
+        ),
+        0,
+      );
+      assert.equal(
+        verify
+          .prepare(
+            "SELECT status FROM resume_clarification_tasks WHERE workspace_id = ? AND id = ?",
+          )
+          .get(workspace.workspace.id, taskId).status,
+        "pending",
+      );
+      assert.equal(
+        verify
+          .prepare(
+            "SELECT status FROM resume_interview_stream_reservations WHERE stream_request_id = ?",
+          )
+          .get(requestId).status,
+        "started",
+      );
+    } finally {
+      verify.close();
+    }
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -590,21 +899,6 @@ test("completed chat answers appear once while the next task becomes current", a
       streamRequestId: "00000000-0000-7000-8000-000000000082",
       coachContent: "Would you like to add or clarify anything else?",
     });
-    await beginResumeInterviewCoachStream({
-      appDataRoot,
-      workspaceId: workspace.workspace.id,
-      taskId: "task-complete",
-      candidateContent: "No more.",
-      streamRequestId: "00000000-0000-7000-8000-000000000083",
-    });
-    await finalizeResumeInterviewCoachStream({
-      appDataRoot,
-      workspaceId: workspace.workspace.id,
-      taskId: "task-complete",
-      streamRequestId: "00000000-0000-7000-8000-000000000083",
-      coachContent:
-        "Thanks, that completes this clarification. I will move us to the next question.",
-    });
     await respondToResumeClarification({
       appDataRoot,
       workspaceId: workspace.workspace.id,
@@ -622,7 +916,10 @@ test("completed chat answers appear once while the next task becomes current", a
       ).length,
       1,
     );
-    assert.equal(interview?.turns.at(-1)?.content, "Thanks, that completes this clarification. I will move us to the next question.");
+    assert.equal(
+      interview?.turns.at(-1)?.content,
+      "Would you like to add or clarify anything else?",
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }

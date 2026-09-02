@@ -475,9 +475,14 @@ export type ResumeInterviewCoachRequest = {
   context: string[];
   transcript: string[];
   opening?: boolean;
+  clarificationUsed?: boolean;
   consentNonce: string;
   consentFingerprint: string;
 };
+export type ResumeInterviewTurnDecision =
+  | { disposition: "complete"; answerSource: "latest" | "prior" }
+  | { disposition: "unknown" }
+  | { disposition: "clarify"; missingDetail: string };
 export type ResumeInterviewCoachResponse = {
   schemaVersion: 1;
   question: string;
@@ -486,6 +491,7 @@ export type ResumeInterviewCoachResponse = {
 };
 export type ResumeInterviewCoachStreamResponse = {
   content: string;
+  decision?: ResumeInterviewTurnDecision;
 };
 // Compatibility export: base-resume generation used to be incorrectly named
 // "Resume Coach". The active generator now has its own persona and contract.
@@ -498,7 +504,7 @@ export function localModelCapabilityVersion(capability: string): string {
   if (capability === "resume-coach" || capability === "resume-generator")
     return "resume-coach-v6";
   if (capability === "resume-interview-coach")
-    return "resume-interview-coach-v2";
+    return "resume-interview-coach-v3";
   if (capability === "opportunity-assessment")
     return "opportunity-assessment-v1";
   if (
@@ -580,6 +586,7 @@ export function resumeInterviewCoachConsentFingerprint(
         context: input.context,
         transcript: input.transcript,
         opening: input.opening === true,
+        clarificationUsed: input.clarificationUsed === true,
         consentNonce: input.consentNonce,
       }),
     )
@@ -991,78 +998,110 @@ function validResumeInterviewCoachRequest(
     request.transcript.length > 20 ||
     request.transcript.some((item) => !plain(item, 1_200)) ||
     (request.opening !== undefined && typeof request.opening !== "boolean") ||
+    (request.clarificationUsed !== undefined &&
+      typeof request.clarificationUsed !== "boolean") ||
     request.consentFingerprint !==
       resumeInterviewCoachConsentFingerprint(request)
   )
     invalid("The selected interview context cannot be sent safely.");
 }
 
-function streamedInterviewResponse(
+const interviewDecisionStart = "<resume-interview-decision>";
+const interviewDecisionEnd = "</resume-interview-decision>";
+const maxInterviewRawResponse = 2_400;
+
+function interviewDecision(
+  value: unknown,
+  fingerprint: string,
   content: string,
+): ResumeInterviewTurnDecision {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    invalid("The local model returned an unsupported interview decision.");
+  const decision = value as Record<string, unknown>;
+  if (
+    decision.schemaVersion !== 1 ||
+    decision.selectionEcho !== fingerprint ||
+    typeof decision.disposition !== "string"
+  )
+    invalid("The local model returned an unsupported interview decision.");
+  if (
+    decision.disposition === "complete" &&
+    exactKeys(decision, [
+      "schemaVersion",
+      "selectionEcho",
+      "disposition",
+      "answerSource",
+    ]) &&
+    (decision.answerSource === "latest" || decision.answerSource === "prior")
+  )
+    return { disposition: "complete", answerSource: decision.answerSource };
+  if (
+    decision.disposition === "unknown" &&
+    exactKeys(decision, ["schemaVersion", "selectionEcho", "disposition"])
+  )
+    return { disposition: "unknown" };
+  const missingDetail = decision.missingDetail;
+  if (
+    decision.disposition === "clarify" &&
+    exactKeys(decision, [
+      "schemaVersion",
+      "selectionEcho",
+      "disposition",
+      "missingDetail",
+    ]) &&
+    typeof missingDetail === "string" &&
+    plain(missingDetail, 240) &&
+    content.toLocaleLowerCase().includes(missingDetail.toLocaleLowerCase())
+  )
+    return { disposition: "clarify", missingDetail };
+  invalid("The local model returned an unsupported interview decision.");
+}
+
+function streamedInterviewResponse(
+  request: ResumeInterviewCoachRequest,
+  rawContent: string,
 ): ResumeInterviewCoachStreamResponse {
+  if (request.opening) {
+    if (!boundedText(rawContent, 1_800))
+      invalid("The local model returned unsupported interview guidance.");
+    return { content: rawContent };
+  }
+  const start = rawContent.indexOf(interviewDecisionStart);
+  const end = rawContent.indexOf(interviewDecisionEnd);
+  if (
+    start <= 0 ||
+    end < start ||
+    rawContent.indexOf(interviewDecisionStart, start + 1) !== -1 ||
+    rawContent.indexOf(interviewDecisionEnd, end + 1) !== -1 ||
+    end + interviewDecisionEnd.length !== rawContent.length
+  )
+    invalid("The local model returned an unsupported interview decision.");
+  const content = rawContent.slice(0, start).trim();
   if (!boundedText(content, 1_800))
     invalid("The local model returned unsupported interview guidance.");
-  return { content };
-}
-
-function normalizedInterviewText(value: string): string {
-  return value.trim().toLocaleLowerCase().replace(/\s+/g, " ");
-}
-
-function asksForInterviewScope(value: string | undefined): boolean {
-  const message = normalizedInterviewText(value ?? "");
-  return (
-    /^(?:hi|hello|hey)[!,. ]*$/.test(message) ||
-    /\bwhat (?:are|is) (?:we|this)\b/.test(message) ||
-    /\bwhat (?:do|can) you\b/.test(message)
+  let decisionValue: unknown;
+  try {
+    decisionValue = JSON.parse(
+      rawContent.slice(start + interviewDecisionStart.length, end),
+    );
+  } catch {
+    invalid("The local model returned an unsupported interview decision.");
+  }
+  const decision = interviewDecision(
+    decisionValue,
+    request.consentFingerprint,
+    content,
   );
-}
-
-function scopedInterviewFallback(request: ResumeInterviewCoachRequest): string {
-  return request.opening
-    ? `I will help clarify documented experience for an accurate resume without inventing claims. To start: ${request.question}`
-    : `We are clarifying your documented experience for your resume. The current question is: ${request.question} Please answer from your experience, or tell me what you would like to clarify.`;
-}
-
-function coachInvitedAdditionalContext(transcript: string[]): boolean {
-  const latestCoachMessage = [...transcript]
-    .reverse()
-    .find((turn) => turn.startsWith("Coach: "))
-    ?.slice("Coach: ".length);
-  return /\b(?:add|clarify)\b.*\b(?:anything|more|else)\b/i.test(
-    latestCoachMessage ?? "",
-  );
-}
-
-function verifiedInterviewContent(
-  request: ResumeInterviewCoachRequest,
-  latestCandidateMessage: string | undefined,
-  content: string,
-): string {
-  const shouldInviteMore =
-    content.trim().endsWith("I will move us to the next question.") &&
-    !coachInvitedAdditionalContext(request.transcript);
-  const reply = shouldInviteMore
-    ? `${content
-        .trim()
-        .slice(
-          0,
-          -"I will move us to the next question.".length,
-        )}Would you like to add or clarify anything else?`
-    : content;
-  if (!request.opening && !asksForInterviewScope(latestCandidateMessage))
-    return reply;
-  return normalizedInterviewText(reply).includes(
-    normalizedInterviewText(request.question),
-  )
-    ? reply
-    : scopedInterviewFallback(request);
+  if (decision.disposition === "clarify" && request.clarificationUsed)
+    invalid(
+      "The local model requested more clarification than this question allows.",
+    );
+  return { content, decision };
 }
 
 /**
- * Streams the narrow LM Studio `message.delta` / `message.completed` SSE
- * protocol. Only the exact saved question and one bounded follow-up can leave
- * this adapter; model framing and configuration remain server-owned.
+ * Streams native LM Studio `message.delta` / `chat.end` SSE. Candidate-turn
+ * decisions are validated server-side and never exposed to the browser.
  */
 export async function* streamResumeInterviewCoach(
   request: ResumeInterviewCoachRequest,
@@ -1092,9 +1131,10 @@ export async function* streamResumeInterviewCoach(
         transcript: request.transcript,
         opening,
         latestCandidateMessage: latestCandidateMessage ?? null,
+        clarificationUsed: request.clarificationUsed === true,
         responseShape: opening
           ? "Initiate the conversation yourself. In two or three concise sentences, briefly explain that you will clarify documented experience for an accurate resume without inventing claims, introduce the exact saved question, and invite a natural answer. Reply with no JSON, labels, tools, or actions."
-          : "Respond directly to latestCandidateMessage. Use the saved question only as background. Treat transcript entries as prior conversation. Do not repeat, restate, or paraphrase a prior Coach message. After a substantive answer, acknowledge it and ask exactly: Would you like to add or clarify anything else? Do not use the transition sentence in that reply. Only if the prior Coach message already asked that question and the newest candidate reply clearly means they are ready to continue may you end your natural reply with this exact sentence: I will move us to the next question. Otherwise do not use that sentence. Reply with no JSON, labels, tools, or actions.",
+          : `Respond naturally to latestCandidateMessage, then append exactly one machine-only decision with no text after it: ${interviewDecisionStart}{"schemaVersion":1,"selectionEcho":"${request.consentFingerprint}","disposition":"complete","answerSource":"latest"}${interviewDecisionEnd}. The visible reply comes before the tag and must not mention the tag or decision. Choose complete/latest for an adequate answer. Choose complete/prior only when the newest message directly declines after a prior substantive candidate answer. Choose unknown when the candidate cannot provide the requested information. Choose clarify only for one necessary, specific missing detail; include that exact missingDetail phrase in the visible targeted question. ${request.clarificationUsed ? "A clarification has already been used, so do not choose clarify." : ""} Never ask a generic question about anything else.`,
       }),
       system_prompt: [
         "You are Coach Resume in a live, evidence-grounded resume clarification conversation.",
@@ -1103,7 +1143,7 @@ export async function* streamResumeInterviewCoach(
         "Use supplied evidence only as context; do not invent claims. Never create tasks, claims, evidence, drafts, PDFs, tools, filesystem, or network actions.",
         opening
           ? "Begin by briefly explaining this resume-only scope, state the exact saved question, and invite a natural answer."
-          : "Respond to the newest candidate message, not to an earlier Coach reply. If the candidate greets you or asks what you are doing, state the exact saved question before inviting their answer.",
+          : "Make only the bounded complete, unknown, or clarify decision requested in the response shape. Do not infer facts from a candidate message; the host alone decides how an accepted answer is persisted.",
       ].join("\n"),
       stream: true,
       store: false,
@@ -1165,12 +1205,12 @@ export async function* streamResumeInterviewCoach(
           terminal ||
           typeof value.content !== "string" ||
           !value.content ||
-          value.content.length > 1_800 ||
+          value.content.length > maxInterviewRawResponse ||
           /[\u0000\u007f-\u009f]/.test(value.content)
         )
           invalid("The local model returned malformed streaming guidance.");
         content += value.content;
-        if (content.length > 1_800)
+        if (content.length > maxInterviewRawResponse)
           invalid("The local model response is too large to review safely.");
         return { delta: value.content };
       }
@@ -1221,13 +1261,9 @@ export async function* streamResumeInterviewCoach(
     }
     if (buffered || !terminal)
       invalid("The local model ended before its Coach response was complete.");
-    const verifiedContent = verifiedInterviewContent(
-      request,
-      latestCandidateMessage,
-      content,
-    );
-    yield verifiedContent;
-    return streamedInterviewResponse(verifiedContent);
+    const completed = streamedInterviewResponse(request, content);
+    yield completed.content;
+    return completed;
   } catch (error) {
     if (error instanceof WorkspaceError) throw error;
     throw new WorkspaceError(

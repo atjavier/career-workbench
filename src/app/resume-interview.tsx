@@ -328,8 +328,9 @@ export function ResumeInterview({
                     </button>
                   </div>
                   <p className="coach-composer-note">
-                    Local Coach Resume only. It will move to the next goal when it
-                    understands you are ready.
+                    Local Coach Resume only. It completes a goal when it has an
+                    adequate answer, an explicit unknown, or one needed detail
+                    to clarify.
                   </p>
                 </form>
                 {streamState.kind === "error" ? (
@@ -348,7 +349,7 @@ export function ResumeInterview({
                         setStreamState({ kind: "idle" });
                       }}
                     >
-                      Try again
+                      Try again with this message
                     </button>
                   </div>
                 ) : null}
