@@ -67,22 +67,33 @@ const requiredDocumentationArtifacts = {
   experience: ["experience-overview.md", "resume-evidence.md", "resume-bullet-candidates.md"],
 } as const satisfies Record<LibraryCategory, readonly string[]>;
 const supportingDocumentationArtifacts = ["index.md", "resume-summary.md", "architecture.md", "source-tree-analysis.md", "technology-stack.md", "api-contracts.md", "data-models.md", "component-inventory.md", "development-guide.md", "deployment-guide.md", "integration-architecture.md", "project-parts.md", "contribution-guide.md", "experience-context.md", "work-deliverables.md", "collaboration-and-process.md"] as const;
+const managedClarificationPacket = "resume-clarifications.md";
+const temporaryManagedClarificationPacket = /^\.clarifications-[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.tmp$/;
+type DocumentationArtifactReadContext = "external-output" | "managed-item";
+function isCandidateProvidedClarificationPacket(text: string): boolean { return /^# Resume Clarifications \(Candidate-Provided\)\r?(?:\n|$)/.test(text); }
 function requiredArtifactsFor(category: LibraryCategory): readonly string[] { return requiredDocumentationArtifacts[category]; }
 function allowedArtifactsFor(category: LibraryCategory): Set<string> { return new Set([...requiredArtifactsFor(category), ...supportingDocumentationArtifacts, ...(category === "experience" ? ["project-overview.md"] : [])]); }
 function hasRequiredArtifacts(category: LibraryCategory, names: readonly string[]): boolean { const overviewPresent = category === "experience" ? names.includes("experience-overview.md") || names.includes("project-overview.md") : names.includes("project-overview.md"); return overviewPresent && requiredArtifactsFor(category).filter((name) => !name.endsWith("-overview.md")).every((name) => names.includes(name)); }
 const generatedFileName = (name: string) => /(?:^|[._-])(?:generated|autogen|auto-generated)(?:[._-]|$)|\.min\.(?:js|css)$/i.test(name);
-async function readDocumentationArtifacts(directory: string, category: LibraryCategory, libraryPrefix: string): Promise<MarkdownDocument[]> {
+async function readDocumentationArtifacts(directory: string, category: LibraryCategory, libraryPrefix: string, context: DocumentationArtifactReadContext = "external-output"): Promise<MarkdownDocument[]> {
   await requireDirectory(directory, "Choose an accessible generated-document folder without links and try again.");
   let entries;
   try { entries = await readdir(directory, { withFileTypes: true }); } catch { throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "The generated-document folder is unavailable or unsafe.", "Choose the completed documentation output folder and try again."); }
   const names = entries.map((entry) => entry.name).sort();
   const allowed = allowedArtifactsFor(category);
-  if (!hasRequiredArtifacts(category, names) || names.some((name) => !allowed.has(name))) throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", `The generated ${category} documentation folder is missing a required review document or contains an unsupported file.`, `Choose the output folder containing the ${category} review documents and supported documentation set.`);
+  const isTemporaryPacket = (name: string) => context === "managed-item" && temporaryManagedClarificationPacket.test(name);
+  if (context === "managed-item") allowed.add(managedClarificationPacket);
+  if (!hasRequiredArtifacts(category, names) || names.some((name) => !allowed.has(name) && !isTemporaryPacket(name))) throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", `The generated ${category} documentation folder is missing a required review document or contains an unsupported file.`, `Choose the output folder containing the ${category} review documents and supported documentation set.`);
   const documents: MarkdownDocument[] = [];
   for (const name of names) {
     const path = join(directory, name); const metadata = await lstat(path).catch(() => undefined);
     if (!metadata?.isFile() || metadata.isSymbolicLink()) throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "A generated review document is unavailable or unsafe.", "Run the documentation skill again into a new empty output folder.");
+    if (isTemporaryPacket(name)) continue;
     const captured = await bytesAndText(path, metadata.size, metadata);
+    if (name === managedClarificationPacket) {
+      if (!isCandidateProvidedClarificationPacket(captured.text)) throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "The managed clarification packet is malformed.", "Refresh the intended resume workspace and try again.");
+      continue;
+    }
     documents.push({ absolutePath: path, libraryPath: `${libraryPrefix}/${name}`, ...captured, contentDigest: digest(captured.bytes), category });
   }
   return documents;
@@ -114,7 +125,7 @@ export async function readManagedDocumentedArtifacts(workspaceRoot?: string): Pr
       if (!itemInfo.isDirectory()) continue; // Historical Markdown imports are intentionally outside the active collection.
       const names = (await readdir(itemDirectory)).sort(); const hasArtifactName = hasRequiredArtifacts(category, names);
       if (!hasArtifactName) continue; // Historical Markdown imports are intentionally outside the active collection.
-      groups.push({ name: entry.name, category, documents: await readDocumentationArtifacts(itemDirectory, category, `resume-evidence/workspaces/${workspace.name}/${directoryName}/${entry.name}`) });
+      groups.push({ name: entry.name, category, documents: await readDocumentationArtifacts(itemDirectory, category, `resume-evidence/workspaces/${workspace.name}/${directoryName}/${entry.name}`, "managed-item") });
       }
     }
   }

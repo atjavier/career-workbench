@@ -35,6 +35,64 @@ test("imports the generated documentation set, leaves its output unchanged, and 
   } finally { await rm(value.root, { recursive: true, force: true }); }
 });
 
+test("reloads managed clarification packets without exposing them as review artifacts or evidence", async () => {
+  const value = await fixture(); try {
+    await importDocumentedEvidenceArtifacts({ ...value, outputDirectory: value.output, name: "Packet Project", category: "project" });
+    const packet = join(value.workspaceRoot, "resume-evidence", "workspaces", value.workspaceId, "projects", "Packet-Project", "resume-clarifications.md");
+    await writeFile(packet, "# Resume Clarifications (Candidate-Provided)\n\n- Candidate-provided answer: I designed the workflow.\n", "utf8");
+    const collection = await listExperienceProjectCollection(value);
+    assert.equal(collection.length, 1);
+    assert.deepEqual(collection[0]?.artifactNames, ["project-overview.md", "resume-bullet-candidates.md", "resume-evidence.md"]);
+    assert.equal(collection[0]?.evidence.length, 1);
+    assert.equal(collection[0]?.evidence.some((item) => item.factualText.includes("I designed the workflow")), false);
+  } finally { await rm(value.root, { recursive: true, force: true }); }
+});
+
+test("reloads managed items while the host writer's temporary clarification packet exists", async () => {
+  const value = await fixture(); try {
+    await importDocumentedEvidenceArtifacts({ ...value, outputDirectory: value.output, name: "Temporary Packet", category: "project" });
+    const temporary = join(value.workspaceRoot, "resume-evidence", "workspaces", value.workspaceId, "projects", "Temporary-Packet", ".clarifications-018f4d08-4f04-7000-8000-000000000000.tmp");
+    await writeFile(temporary, "", "utf8");
+    const collection = await listExperienceProjectCollection(value);
+    assert.equal(collection.length, 1);
+    assert.deepEqual(collection[0]?.artifactNames, ["project-overview.md", "resume-bullet-candidates.md", "resume-evidence.md"]);
+  } finally { await rm(value.root, { recursive: true, force: true }); }
+});
+
+test("refuses clarification packets in externally selected output folders without creating a managed copy", async () => {
+  const value = await fixture(); try {
+    await writeFile(join(value.output, "resume-clarifications.md"), "# Resume Clarifications (Candidate-Provided)\n", "utf8");
+    await assert.rejects(importDocumentedEvidenceArtifacts({ ...value, outputDirectory: value.output, name: "External Packet", category: "project" }), { code: "EVIDENCE_LIBRARY_INVALID" });
+    await assert.rejects(lstat(join(value.workspaceRoot, "resume-evidence", "workspaces", value.workspaceId, "projects", "External-Packet")), { code: "ENOENT" });
+  } finally { await rm(value.root, { recursive: true, force: true }); }
+});
+
+test("rejects managed final clarification packets without the candidate-provided heading", async () => {
+  const value = await fixture(); try {
+    await importDocumentedEvidenceArtifacts({ ...value, outputDirectory: value.output, name: "Malformed Packet", category: "project" });
+    const packet = join(value.workspaceRoot, "resume-evidence", "workspaces", value.workspaceId, "projects", "Malformed-Packet", "resume-clarifications.md");
+    await writeFile(packet, "# Resume Clarifications (System-Generated)\n", "utf8");
+    await assert.rejects(listExperienceProjectCollection(value), { code: "EVIDENCE_LIBRARY_INVALID" });
+  } finally { await rm(value.root, { recursive: true, force: true }); }
+});
+
+test("fails closed for unrecognized or unsafe files in managed documented folders", async () => {
+  const value = await fixture(); try {
+    await importDocumentedEvidenceArtifacts({ ...value, outputDirectory: value.output, name: "Managed Safety", category: "project" });
+    const managed = join(value.workspaceRoot, "resume-evidence", "workspaces", value.workspaceId, "projects", "Managed-Safety");
+    await writeFile(join(managed, "unrecognized.md"), "unexpected", "utf8");
+    await assert.rejects(listExperienceProjectCollection(value), { code: "EVIDENCE_LIBRARY_INVALID" });
+    await rm(join(managed, "unrecognized.md"));
+    const packet = join(managed, "resume-clarifications.md");
+    try { await symlink(join(managed, "resume-evidence.md"), packet); await assert.rejects(listExperienceProjectCollection(value), { code: "EVIDENCE_LIBRARY_INVALID" }); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "EPERM") throw error; }
+    await rm(packet, { force: true });
+    await writeFile(packet, new Uint8Array([0xc3, 0x28]));
+    await assert.rejects(listExperienceProjectCollection(value), { code: "EVIDENCE_LIBRARY_INVALID" });
+    await writeFile(packet, new Uint8Array(2 * 1024 * 1024 + 1));
+    await assert.rejects(listExperienceProjectCollection(value), { code: "EVIDENCE_LIBRARY_INVALID" });
+  } finally { await rm(value.root, { recursive: true, force: true }); }
+});
+
 test("permanently deleting documented work removes its workspace records and managed folder", async () => {
   const value = await fixture(); try {
     await importDocumentedEvidenceArtifacts({ ...value, outputDirectory: value.output, name: "Accessibility Report", category: "project" });
@@ -106,7 +164,9 @@ test("a valid no-supported-evidence document set remains reviewable without manu
   const value = await fixture(); try {
     await writeFile(join(value.output, "resume-evidence.md"), "# Resume Evidence (Proposed / Unreviewed)\n\n> Explicit import and individual approval are required.\n\n## Evidence Items\n\n- No supported evidence items found.\n", "utf8"); await writeFile(join(value.output, "resume-bullet-candidates.md"), "# Resume Bullet Candidates (Proposed / Unreviewed)\n\n## Candidate Bullets\n\n- No supported bullet candidates found.\n", "utf8");
     const result = await importDocumentedEvidenceArtifacts({ ...value, outputDirectory: value.output, name: "No Evidence", category: "experience" });
-    assert.equal(result.documentsAdded, 3); assert.equal(result.candidatesAdded, 0); assert.equal((await listExperienceProjectCollection(value))[0].evidence.length, 0);
+    await writeFile(join(value.workspaceRoot, "resume-evidence", "workspaces", value.workspaceId, "experiences", "No-Evidence", "resume-clarifications.md"), "# Resume Clarifications (Candidate-Provided)\n\n- Explicit unknown: Candidate skipped this clarification.\n", "utf8");
+    const collection = await listExperienceProjectCollection(value);
+    assert.equal(result.documentsAdded, 3); assert.equal(result.candidatesAdded, 0); assert.equal(collection[0].evidence.length, 0); assert.equal(collection[0].artifactNames.includes("resume-clarifications.md"), false);
   } finally { await rm(value.root, { recursive: true, force: true }); }
 });
 
