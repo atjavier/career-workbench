@@ -3,162 +3,1386 @@ import { lstat, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { resolve } from "node:path";
 import { createAuditEvent, createUuidV7 } from "@/audit/audit-event";
-import { copyDocumentedEvidenceArtifacts, copyExperienceMarkdown, copyProjectMarkdown, evidenceLibraryRoot, readManagedDocumentedArtifacts, readManagedMarkdown, readResumeDocumentationSource, readUploadedResumeDocumentationSource, type CopiedLibraryContent, type LibraryCategory, type MarkdownDocument, type ResumeDocumentationSource } from "@/files/evidence-library";
+import {
+  copyDocumentedEvidenceArtifacts,
+  copyExperienceMarkdown,
+  copyProjectMarkdown,
+  evidenceLibraryRoot,
+  readManagedDocumentedArtifacts,
+  readManagedMarkdown,
+  readResumeDocumentationSource,
+  readUploadedResumeDocumentationSource,
+  type CopiedLibraryContent,
+  type LibraryCategory,
+  type MarkdownDocument,
+  type ResumeDocumentationSource,
+} from "@/files/evidence-library";
 import { resolveAppDataPaths } from "@/files/app-data";
-import { insertRecord, insertRevision, listCurrentEvidence, type EvidenceRevision } from "@/persistence/evidence-repository";
-import { candidateExists, findDocumentByPath, findDocumentByPathAndDigest, findImport, insertCandidate, insertDocument, insertImport, type EvidenceLibraryDocument } from "@/persistence/evidence-library-repository";
-import { attachEvidenceToWorkspace, attachImportToWorkspace, readActiveResumeWorkspace } from "@/persistence/resume-workspace-repository";
+import {
+  insertRecord,
+  insertRevision,
+  listCurrentEvidence,
+  type EvidenceRevision,
+} from "@/persistence/evidence-repository";
+import {
+  candidateExists,
+  findDocumentByPath,
+  findDocumentByPathAndDigest,
+  findImport,
+  insertCandidate,
+  insertDocument,
+  insertImport,
+  type EvidenceLibraryDocument,
+} from "@/persistence/evidence-library-repository";
+import {
+  attachEvidenceToWorkspace,
+  attachImportToWorkspace,
+  readActiveResumeWorkspace,
+} from "@/persistence/resume-workspace-repository";
 import { applyMigrations, openDatabase } from "@/persistence/database";
 import { appendAuditEvent } from "@/persistence/workspace-repository";
 import { WorkspaceError } from "@/domain/workspace/types";
-import { buildResumeDocumentationSet, requestResumeEvidenceDocumentation, resumeEvidenceDocumenterConsentFingerprint } from "@/adapters/local-model/local-model-gateway";
+import {
+  buildResumeDocumentationSet,
+  requestResumeEvidenceDocumentation,
+  resumeEvidenceDocumenterConsentFingerprint,
+} from "@/adapters/local-model/local-model-gateway";
 import { readLocalModelGatewayConfiguration } from "@/domain/resume-generation/local-model-configuration-commands";
 import { getResumeAgentSkill } from "@/domain/resume-agent/skill-registry";
-import { markWorkspaceClarificationPacketRecovery, writeWorkspaceClarificationPacket } from "@/domain/resume-generation/resume-evidence-packets";
+import {
+  markWorkspaceClarificationPacketRecovery,
+  writeWorkspaceClarificationPacket,
+} from "@/domain/resume-generation/resume-evidence-packets";
 type Options = { appDataRoot?: string; workspaceRoot?: string };
-export type LibraryImportResult = { documentsAdded: number; candidatesAdded: number; documents: EvidenceLibraryDocument[] };
-export type ExperienceProjectCollection = { name: string; category: LibraryCategory; summary: string; artifactNames: string[]; evidence: Array<Pick<EvidenceRevision, "factualText" | "reviewState"> & { reviewHandle: string }> };
+export type LibraryImportResult = {
+  documentsAdded: number;
+  candidatesAdded: number;
+  documents: EvidenceLibraryDocument[];
+};
+export type ExperienceProjectCollection = {
+  name: string;
+  category: LibraryCategory;
+  summary: string;
+  artifactNames: string[];
+  evidence: Array<
+    Pick<EvidenceRevision, "factualText" | "reviewState"> & {
+      reviewHandle: string;
+    }
+  >;
+};
 const maxCandidatesPerOperation = 2000;
 
 /** A managed directory without any durable document registration cannot belong
  * to a live workspace. Reclaiming it prevents a deleted or interrupted prior
  * onboarding run from blocking a new workspace with the same project name. */
-async function reclaimUnregisteredManagedDirectory(input: Pick<Options, "workspaceRoot" | "appDataRoot"> & { workspaceId: string; category: LibraryCategory; name: string }): Promise<void> {
+async function reclaimUnregisteredManagedDirectory(
+  input: Pick<Options, "workspaceRoot" | "appDataRoot"> & {
+    workspaceId: string;
+    category: LibraryCategory;
+    name: string;
+  },
+): Promise<void> {
   if (!/^[A-Za-z0-9._-]+$/.test(input.name)) return;
-  const categoryDirectory = input.category === "project" ? "projects" : "experiences";
+  const categoryDirectory =
+    input.category === "project" ? "projects" : "experiences";
   const paths = await resolveAppDataPaths(input.appDataRoot);
   const database = openDatabase(paths.databasePath);
   try {
     applyMigrations(database);
     const prefix = `resume-evidence/workspaces/${input.workspaceId}/${categoryDirectory}/${input.name}/%`;
-    const registered = database.prepare("SELECT 1 FROM evidence_library_documents WHERE library_path LIKE ? LIMIT 1").get(prefix);
+    const registered = database
+      .prepare(
+        "SELECT 1 FROM evidence_library_documents WHERE library_path LIKE ? LIMIT 1",
+      )
+      .get(prefix);
     if (registered) return;
-  } finally { database.close(); }
+  } finally {
+    database.close();
+  }
   // This directory is application-managed and has no database registration;
   // it is safe to remove before the new immutable import is staged.
-  await rm(join(evidenceLibraryRoot(input.workspaceRoot), "workspaces", input.workspaceId, categoryDirectory, input.name), { recursive: true, force: true });
+  await rm(
+    join(
+      evidenceLibraryRoot(input.workspaceRoot),
+      "workspaces",
+      input.workspaceId,
+      categoryDirectory,
+      input.name,
+    ),
+    { recursive: true, force: true },
+  );
 }
-const hash = (text: string) => `sha256:${createHash("sha256").update(text).digest("hex")}`;
-type Candidate = { factualText: string; sourceSection: string; lineNumber: number; contentDigest: string; evidenceKey?: string };
+const hash = (text: string) =>
+  `sha256:${createHash("sha256").update(text).digest("hex")}`;
+type Candidate = {
+  factualText: string;
+  sourceSection: string;
+  lineNumber: number;
+  contentDigest: string;
+  evidenceKey?: string;
+};
 type SourceSnapshot = ResumeDocumentationSource;
-function safeSection(value: string): string { return value.replace(/[\u0000-\u001f]/g, " ").replace(/\.\./g, "…").replace(/^(?:[a-z]:[\\/]|[\\/]{1,2}|file:)/i, "").replace(/\s+/g, " ").trim().slice(0, 300) || "document"; }
-function candidates(document: MarkdownDocument): Candidate[] { let heading = "document"; let fence: { marker: string; length: number } | undefined; const result: Candidate[] = []; for (const [index, raw] of document.text.split(/\r?\n/).entries()) { const text = raw.trim(); const fenceMatch = /^(`{3,}|~{3,})(.*)$/.exec(text); if (fence) { if (fenceMatch && fenceMatch[1][0] === fence.marker && fenceMatch[1].length >= fence.length && !fenceMatch[2].trim()) fence = undefined; continue; } if (fenceMatch) { fence = { marker: fenceMatch[1][0], length: fenceMatch[1].length }; continue; } if (!text) continue; const match = /^(#{1,6})\s+(.+)$/.exec(text); if (match) { heading = safeSection(match[2]); continue; } const factualText = text.replace(/^[-*+]\s+/, "").replace(/^\d+[.)]\s+/, "").trim(); if (!factualText || factualText.length > 5000 || /[\u0000-\u001f]/.test(factualText)) continue; result.push({ factualText, sourceSection: `${heading}, line ${index + 1}`, lineNumber: index + 1, contentDigest: hash(factualText) }); if (result.length > maxCandidatesPerOperation) throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "One Markdown document has too many evidence candidates.", "Split the document into smaller resume-evidence files and try again."); } return result; }
-function prepare(documents: MarkdownDocument[]): Array<{ document: MarkdownDocument; candidates: Candidate[] }> { const prepared = documents.map((document) => ({ document, candidates: candidates(document) })); if (prepared.reduce((total, value) => total + value.candidates.length, 0) > maxCandidatesPerOperation) throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "This library operation has too many evidence candidates.", "Import or refresh fewer Markdown documents at a time."); return prepared; }
-const containsAbsolutePath = (value: string) => /(?:\b[a-z]:[\\/]|\\\\|\bfile:(?:\/\/+|\/?[a-z]:)|(?:^|[\s[(])\/(?:Users?|home|var|tmp|etc|opt|mnt|private|root)(?:\/|\b))/im.test(value);
-function normalizeDirectText(value: string): string { return value.normalize("NFKC").replace(/\s+/g, " ").trim(); }
-function validateSnapshotFact(snapshot: SourceSnapshot, sourcePath: string, sourceHeading: string, line: number, fact: string): void {
+function safeSection(value: string): string {
+  return (
+    value
+      .replace(/[\u0000-\u001f]/g, " ")
+      .replace(/\.\./g, "…")
+      .replace(/^(?:[a-z]:[\\/]|[\\/]{1,2}|file:)/i, "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 300) || "document"
+  );
+}
+function candidates(document: MarkdownDocument): Candidate[] {
+  let heading = "document";
+  let fence: { marker: string; length: number } | undefined;
+  const result: Candidate[] = [];
+  for (const [index, raw] of document.text.split(/\r?\n/).entries()) {
+    const text = raw.trim();
+    const fenceMatch = /^(`{3,}|~{3,})(.*)$/.exec(text);
+    if (fence) {
+      if (
+        fenceMatch &&
+        fenceMatch[1][0] === fence.marker &&
+        fenceMatch[1].length >= fence.length &&
+        !fenceMatch[2].trim()
+      )
+        fence = undefined;
+      continue;
+    }
+    if (fenceMatch) {
+      fence = { marker: fenceMatch[1][0], length: fenceMatch[1].length };
+      continue;
+    }
+    if (!text) continue;
+    const match = /^(#{1,6})\s+(.+)$/.exec(text);
+    if (match) {
+      heading = safeSection(match[2]);
+      continue;
+    }
+    const factualText = text
+      .replace(/^[-*+]\s+/, "")
+      .replace(/^\d+[.)]\s+/, "")
+      .trim();
+    if (
+      !factualText ||
+      factualText.length > 5000 ||
+      /[\u0000-\u001f]/.test(factualText)
+    )
+      continue;
+    result.push({
+      factualText,
+      sourceSection: `${heading}, line ${index + 1}`,
+      lineNumber: index + 1,
+      contentDigest: hash(factualText),
+    });
+    if (result.length > maxCandidatesPerOperation)
+      throw new WorkspaceError(
+        "EVIDENCE_LIBRARY_INVALID",
+        "One Markdown document has too many evidence candidates.",
+        "Split the document into smaller resume-evidence files and try again.",
+      );
+  }
+  return result;
+}
+function prepare(
+  documents: MarkdownDocument[],
+): Array<{ document: MarkdownDocument; candidates: Candidate[] }> {
+  const prepared = documents.map((document) => ({
+    document,
+    candidates: candidates(document),
+  }));
+  if (
+    prepared.reduce((total, value) => total + value.candidates.length, 0) >
+    maxCandidatesPerOperation
+  )
+    throw new WorkspaceError(
+      "EVIDENCE_LIBRARY_INVALID",
+      "This library operation has too many evidence candidates.",
+      "Import or refresh fewer Markdown documents at a time.",
+    );
+  return prepared;
+}
+const containsAbsolutePath = (value: string) =>
+  /(?:\b[a-z]:[\\/]|\\\\|\bfile:(?:\/\/+|\/?[a-z]:)|(?:^|[\s[(])\/(?:Users?|home|var|tmp|etc|opt|mnt|private|root)(?:\/|\b))/im.test(
+    value,
+  );
+function normalizeDirectText(value: string): string {
+  return value.normalize("NFKC").replace(/\s+/g, " ").trim();
+}
+function validateSnapshotFact(
+  snapshot: SourceSnapshot,
+  sourcePath: string,
+  sourceHeading: string,
+  line: number,
+  fact: string,
+): void {
   const source = snapshot.files.find((file) => file.path === sourcePath);
   const sourceLine = source?.text.split(/\r?\n/)[line - 1];
   // The selected file, exact one-based line, and direct text are the grounding
   // contract. Heading labels help a reviewer navigate but can differ after
   // harmless Unicode/Markdown normalization, so they must not reject a fact
   // that is demonstrably present on its stated source line.
-  if (!source || !sourceLine || !normalizeDirectText(sourceLine).includes(normalizeDirectText(fact))) throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "A generated evidence item is not grounded in the selected source snapshot.", "Run the local documentation action again after reviewing the selected folder.");
+  if (
+    !source ||
+    !sourceLine ||
+    !normalizeDirectText(sourceLine).includes(normalizeDirectText(fact))
+  )
+    throw new WorkspaceError(
+      "EVIDENCE_LIBRARY_INVALID",
+      "A generated evidence item is not grounded in the selected source snapshot.",
+      "Run the local documentation action again after reviewing the selected folder.",
+    );
   void sourceHeading;
 }
-function documentedCandidates(document: MarkdownDocument, snapshot?: SourceSnapshot): Candidate[] {
+function documentedCandidates(
+  document: MarkdownDocument,
+  snapshot?: SourceSnapshot,
+): Candidate[] {
   if (!document.libraryPath.endsWith("/resume-evidence.md")) return [];
-  if (!/^# Resume Evidence \(Proposed \/ Unreviewed\)/m.test(document.text)) throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "The generated evidence document is not a proposed review artifact.", "Run the documentation skill again into a new empty output folder.");
-  if (/^- No supported evidence items found\.\s*$/m.test(document.text)) return [];
-  const result: Candidate[] = []; const blocks = [...document.text.matchAll(/^### (E-\d{3})\s*$([\s\S]*?)(?=^### E-\d{3}\s*$|(?![\s\S]))/gm)]; const evidenceKeys = new Set<string>();
+  if (!/^# Resume Evidence \(Proposed \/ Unreviewed\)/m.test(document.text))
+    throw new WorkspaceError(
+      "EVIDENCE_LIBRARY_INVALID",
+      "The generated evidence document is not a proposed review artifact.",
+      "Run the documentation skill again into a new empty output folder.",
+    );
+  if (/^- No supported evidence items found\.\s*$/m.test(document.text))
+    return [];
+  const result: Candidate[] = [];
+  const blocks = [
+    ...document.text.matchAll(
+      /^### (E-\d{3})\s*$([\s\S]*?)(?=^### E-\d{3}\s*$|(?![\s\S]))/gm,
+    ),
+  ];
+  const evidenceKeys = new Set<string>();
   for (const block of blocks) {
-    const body = block[2]; const fact = /^- Fact:\s*(.+?)\s*$/m.exec(body)?.[1]?.trim(); const rawProvenance = /^- Provenance:\s*(.+?)\s*$/m.exec(body)?.[1]?.trim(); const provenance = rawProvenance?.startsWith("[") && rawProvenance.endsWith("]") ? rawProvenance.slice(1, -1).replaceAll("`", "").trim() : rawProvenance?.replaceAll("`", "").trim(); const unknowns = /^- Explicit unknowns:\s*.+\S\s*$/m.test(body); const status = /^- Status:\s*Proposed\s*\/\s*unreviewed\s*$/mi.test(body);
-    const provenanceMatch = provenance && /^([^\\/][^\\]*?),\s*(.+?),\s*line\s+([1-9]\d*)$/i.exec(provenance);
-    if (!fact || fact.length > 5000 || /[\u0000-\u001f]/.test(fact) || containsAbsolutePath(fact) || !unknowns || !status || !provenanceMatch || evidenceKeys.has(block[1])) throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "A generated evidence item is malformed or ambiguous.", "Run the documentation skill again and import a new output folder.");
+    const body = block[2];
+    const fact = /^- Fact:\s*(.+?)\s*$/m.exec(body)?.[1]?.trim();
+    const rawProvenance = /^- Provenance:\s*(.+?)\s*$/m.exec(body)?.[1]?.trim();
+    const provenance =
+      rawProvenance?.startsWith("[") && rawProvenance.endsWith("]")
+        ? rawProvenance.slice(1, -1).replaceAll("`", "").trim()
+        : rawProvenance?.replaceAll("`", "").trim();
+    const unknowns = /^- Explicit unknowns:\s*.+\S\s*$/m.test(body);
+    const status = /^- Status:\s*Proposed\s*\/\s*unreviewed\s*$/im.test(body);
+    const provenanceMatch =
+      provenance &&
+      /^([^\\/][^\\]*?),\s*(.+?),\s*line\s+([1-9]\d*)$/i.exec(provenance);
+    if (
+      !fact ||
+      fact.length > 5000 ||
+      /[\u0000-\u001f]/.test(fact) ||
+      containsAbsolutePath(fact) ||
+      !unknowns ||
+      !status ||
+      !provenanceMatch ||
+      evidenceKeys.has(block[1])
+    )
+      throw new WorkspaceError(
+        "EVIDENCE_LIBRARY_INVALID",
+        "A generated evidence item is malformed or ambiguous.",
+        "Run the documentation skill again and import a new output folder.",
+      );
     const [, sourcePath, sourceHeading, line] = provenanceMatch;
-    if (sourcePath.includes("..") || sourcePath.includes("\\") || /^(?:[a-z]:|\/|\\\\|[a-z][a-z0-9+.-]*:)/i.test(sourcePath) || !sourceHeading.trim()) throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "A generated evidence item has unsafe provenance.", "Run the documentation skill again and import a new output folder.");
-    if (snapshot) validateSnapshotFact(snapshot, sourcePath, sourceHeading, Number(line), fact);
-    const lineNumber = document.text.slice(0, block.index).split(/\r?\n/).length + body.slice(0, body.indexOf(fact)).split(/\r?\n/).length - 1;
-    evidenceKeys.add(block[1]); result.push({ factualText: fact, sourceSection: safeSection(`${sourcePath}, ${sourceHeading}, line ${line}`), lineNumber, contentDigest: hash(`${fact}\n${sourcePath}\n${sourceHeading}\n${line}`), evidenceKey: block[1] });
+    if (
+      sourcePath.includes("..") ||
+      sourcePath.includes("\\") ||
+      /^(?:[a-z]:|\/|\\\\|[a-z][a-z0-9+.-]*:)/i.test(sourcePath) ||
+      !sourceHeading.trim()
+    )
+      throw new WorkspaceError(
+        "EVIDENCE_LIBRARY_INVALID",
+        "A generated evidence item has unsafe provenance.",
+        "Run the documentation skill again and import a new output folder.",
+      );
+    if (snapshot)
+      validateSnapshotFact(
+        snapshot,
+        sourcePath,
+        sourceHeading,
+        Number(line),
+        fact,
+      );
+    const lineNumber =
+      document.text.slice(0, block.index).split(/\r?\n/).length +
+      body.slice(0, body.indexOf(fact)).split(/\r?\n/).length -
+      1;
+    evidenceKeys.add(block[1]);
+    result.push({
+      factualText: fact,
+      sourceSection: safeSection(
+        `${sourcePath}, ${sourceHeading}, line ${line}`,
+      ),
+      lineNumber,
+      contentDigest: hash(`${fact}\n${sourcePath}\n${sourceHeading}\n${line}`),
+      evidenceKey: block[1],
+    });
   }
-  if (!blocks.length || result.length !== blocks.length) throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "The generated evidence document has no valid evidence items.", "Run the documentation skill again and import a new output folder.");
+  if (!blocks.length || result.length !== blocks.length)
+    throw new WorkspaceError(
+      "EVIDENCE_LIBRARY_INVALID",
+      "The generated evidence document has no valid evidence items.",
+      "Run the documentation skill again and import a new output folder.",
+    );
   return result;
 }
-function validateReviewArtifacts(documents: MarkdownDocument[], evidenceKeys: Set<string>, category: LibraryCategory): void { const overviewNames = category === "project" ? ["project-overview.md"] : ["experience-overview.md", "project-overview.md"]; const overview = documents.find((document) => overviewNames.some((name) => document.libraryPath.endsWith(`/${name}`))); const bullets = documents.find((document) => document.libraryPath.endsWith("/resume-bullet-candidates.md")); const summary = documents.find((document) => document.libraryPath.endsWith("/resume-summary.md")); const overviewHeading = category === "project" ? /^# Project Overview \(Proposed \/ Unreviewed\)/m : /^# (?:Experience|Project) Overview \(Proposed \/ Unreviewed\)/m; if (!overview || !bullets || !overviewHeading.test(overview.text) || (summary && (!/^# Resume Summary \(Proposed \/ Unreviewed\)/m.test(summary.text) || containsAbsolutePath(summary.text))) || !/^# Resume Bullet Candidates \(Proposed \/ Unreviewed\)/m.test(bullets.text) || containsAbsolutePath(overview.text) || containsAbsolutePath(bullets.text)) throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "The generated review artifacts do not match the safe documentation contract.", "Run the local documentation action again."); const blocks = [...bullets.text.matchAll(/^### (B-\d{3})\s*$([\s\S]*?)(?=^### B-\d{3}\s*$|(?![\s\S]))/gm)]; if (!evidenceKeys.size && /^- No supported bullet candidates found\.\s*$/m.test(bullets.text)) return; const bulletKeys = new Set<string>(); for (const block of blocks) { const body = block[2]; const candidate = /^- Candidate:\s*(.+?)\s*$/m.exec(body)?.[1]?.trim(); const support = /^- Supporting evidence:\s*((?:E-\d{3})(?:,\s*E-\d{3})*)\s*$/m.exec(body)?.[1]?.split(/,\s*/); if (!candidate || containsAbsolutePath(candidate) || bulletKeys.has(block[1]) || !support?.length || support.some((id) => !evidenceKeys.has(id)) || !/^- Explicit unknowns:\s*.+\S\s*$/m.test(body) || !/^- Status:\s*Proposed\s*\/\s*unreviewed;\s*not claim-eligible\s*$/mi.test(body)) continue; bulletKeys.add(block[1]); } }
-function prepareDocumented(documents: MarkdownDocument[], category: LibraryCategory, snapshot?: SourceSnapshot): Array<{ document: MarkdownDocument; candidates: Candidate[] }> { const prepared = documents.map((document) => ({ document, candidates: documentedCandidates(document, snapshot) })); const evidenceDocuments = prepared.filter((item) => item.document.libraryPath.endsWith("/resume-evidence.md")); const evidenceKeys = new Set(prepared.flatMap((item) => item.candidates.map((candidate) => candidate.evidenceKey).filter((key): key is string => Boolean(key)))); if (evidenceDocuments.length !== 1 || prepared.reduce((total, value) => total + value.candidates.length, 0) > maxCandidatesPerOperation) throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "The generated review documents contain an invalid amount of evidence.", "Run the documentation skill again and import a new output folder."); validateReviewArtifacts(documents, evidenceKeys, category); return prepared; }
-function revision(evidenceId: string, candidate: Candidate, document: MarkdownDocument): EvidenceRevision { return { id: createUuidV7(), evidenceId, revisionNumber: 1, origin: "extracted", sourceDocument: document.libraryPath, sourceSection: candidate.sourceSection, factualText: candidate.factualText, reviewState: "unreviewed", createdAt: new Date().toISOString(), contentDigest: candidate.contentDigest }; }
-function saveDocuments(database: ReturnType<typeof openDatabase>, prepared: ReturnType<typeof prepare>, importId: string, workspaceId: string): LibraryImportResult { let documentsAdded = 0; let candidatesAdded = 0; const stored: EvidenceLibraryDocument[] = []; for (const value of prepared) { const latest = findDocumentByPath(database, value.document.libraryPath); let record = findDocumentByPathAndDigest(database, value.document.libraryPath, value.document.contentDigest); if (!record) { record = { id: createUuidV7(), category: value.document.category, libraryPath: value.document.libraryPath, contentDigest: value.document.contentDigest, importedAt: new Date().toISOString() }; insertDocument(database, { ...record, importId }); documentsAdded += 1; } else if (!latest || latest.id !== record.id) { documentsAdded += 0; } stored.push(record); for (const candidate of value.candidates) { if (candidateExists(database, record.id, candidate.sourceSection, candidate.lineNumber, candidate.contentDigest)) continue; const item = revision(createUuidV7(), candidate, value.document); insertRecord(database, item.evidenceId, item.createdAt); insertRevision(database, item); attachEvidenceToWorkspace(database, workspaceId, item.evidenceId); insertCandidate(database, { documentId: record.id, sourceSection: candidate.sourceSection, lineNumber: candidate.lineNumber, contentDigest: candidate.contentDigest, evidenceRevisionId: item.id }); appendAuditEvent(database, createAuditEvent({ actor: "local-os-user", action: "evidence.library_candidate_created", outcome: "success", entityId: item.id, contentHash: item.contentDigest })); candidatesAdded += 1; } } return { documentsAdded, candidatesAdded, documents: stored }; }
-async function persist(options: Options & { expectedWorkspaceId?: string }, source: { category: "project" | "experience" | "refresh"; identity: string; digest: string }, documents: MarkdownDocument[]): Promise<LibraryImportResult> { const prepared = prepare(documents); const paths = await resolveAppDataPaths(options.appDataRoot); const database = openDatabase(paths.databasePath); try { applyMigrations(database); database.exec("BEGIN IMMEDIATE;"); try { const workspace = readActiveResumeWorkspace(database).workspace; if (!workspace) throw new WorkspaceError("RESUME_WORKSPACE_NOT_FOUND", "Create a resume workspace before documenting a folder.", "Name your first resume workspace to begin."); if (options.expectedWorkspaceId && workspace.id !== options.expectedWorkspaceId) throw new WorkspaceError("RESUME_WORKSPACE_STALE", "That resume workspace was changed while its evidence was being prepared.", "Open the intended resume workspace and add the item again."); const existing = findImport(database, source.identity, source.digest); if (existing && source.category !== "refresh") throw new WorkspaceError("EVIDENCE_LIBRARY_DUPLICATE", "That source has already been added to the evidence library.", "Refresh the library or choose a different source folder."); const importId = existing?.id ?? createUuidV7(); if (!existing) { insertImport(database, { id: importId, category: source.category, sourceIdentity: source.identity, sourceDigest: source.digest, createdAt: new Date().toISOString() }); attachImportToWorkspace(database, workspace.id, importId); } const result = saveDocuments(database, prepared, importId, workspace.id); appendAuditEvent(database, createAuditEvent({ actor: "local-os-user", action: "evidence.library_imported", outcome: "success", entityId: importId, contentHash: source.digest })); database.exec("COMMIT;"); return result; } catch (error) { database.exec("ROLLBACK;"); throw error; } } finally { database.close(); } }
-async function persistCopied(input: Options & { expectedWorkspaceId?: string }, source: { category: "project" | "experience"; identity: string; digest: string }, copied: CopiedLibraryContent): Promise<LibraryImportResult> { try { return await persist(input, source, copied.documents); } catch (error) { await copied.cleanup(); throw error; } }
-async function persistDocumentedCopied(input: Options & { expectedWorkspaceId?: string }, source: { category: "project" | "experience"; identity: string; digest: string }, copied: CopiedLibraryContent, snapshot?: SourceSnapshot): Promise<LibraryImportResult> { let prepared: ReturnType<typeof prepareDocumented>; try { prepared = prepareDocumented(copied.documents, source.category, snapshot); } catch (error) { await copied.cleanup(); throw error; } const paths = await resolveAppDataPaths(input.appDataRoot); const database = openDatabase(paths.databasePath); try { applyMigrations(database); database.exec("BEGIN IMMEDIATE;"); try { const workspace = readActiveResumeWorkspace(database).workspace; if (!workspace) throw new WorkspaceError("RESUME_WORKSPACE_NOT_FOUND", "Create a resume workspace before documenting a folder.", "Name your first resume workspace to begin."); if (input.expectedWorkspaceId && workspace.id !== input.expectedWorkspaceId) throw new WorkspaceError("RESUME_WORKSPACE_STALE", "That resume workspace was changed or deleted while its folders were being documented.", "Open the intended resume workspace and start its folder documentation again."); const existing = findImport(database, source.identity, source.digest); if (existing) throw new WorkspaceError("EVIDENCE_LIBRARY_DUPLICATE", "That documented item has already been imported.", "Review the existing collection item or choose a different documented item."); const importId = createUuidV7(); insertImport(database, { id: importId, category: source.category, sourceIdentity: source.identity, sourceDigest: source.digest, createdAt: new Date().toISOString() }); attachImportToWorkspace(database, workspace.id, importId); const result = saveDocuments(database, prepared, importId, workspace.id); appendAuditEvent(database, createAuditEvent({ actor: "local-os-user", action: "evidence.library_imported", outcome: "success", entityId: importId, contentHash: source.digest })); database.exec("COMMIT;"); return result; } catch (error) { database.exec("ROLLBACK;"); throw error; } } catch (error) { await copied.cleanup(); throw error; } finally { database.close(); } }
-export async function addProjectToEvidenceLibrary(input: Options & { expectedWorkspaceId?: string; sourceDirectory: string; name?: string }): Promise<LibraryImportResult> { const copied = await copyProjectMarkdown(input.sourceDirectory, input.name, input.workspaceRoot); return persistCopied(input, { category: "project", identity: `project:${hash(resolve(input.sourceDirectory))}`, digest: copied.sourceDigest }, copied); }
-export async function addExperienceToEvidenceLibrary(input: Options & { expectedWorkspaceId?: string; name: string; markdown?: string; sourceFile?: string }): Promise<LibraryImportResult> { const copied = await copyExperienceMarkdown(input); return persistCopied(input, { category: "experience", identity: `experience:${input.name.trim().toLowerCase()}`, digest: copied.sourceDigest }, copied); }
-export async function importDocumentedEvidenceArtifacts(input: Options & { expectedWorkspaceId?: string; outputDirectory: string; name: string; category: LibraryCategory; sourceSnapshot?: SourceSnapshot }): Promise<LibraryImportResult> { const paths = await resolveAppDataPaths(input.appDataRoot); const db = openDatabase(paths.databasePath); let workspaceId: string; try { applyMigrations(db); const workspace = readActiveResumeWorkspace(db).workspace; if (!workspace || (input.expectedWorkspaceId && workspace.id !== input.expectedWorkspaceId)) throw new WorkspaceError("RESUME_WORKSPACE_STALE", "That resume workspace changed while its folders were being documented.", "Open the intended resume workspace and start its folder documentation again."); workspaceId = workspace.id; } finally { db.close(); } const safeName = input.name.trim().replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^[.\s-]+|[.\s-]+$/g, ""); await reclaimUnregisteredManagedDirectory({ ...input, workspaceId: workspaceId!, name: safeName }); const copied = await copyDocumentedEvidenceArtifacts({ ...input, workspaceId: workspaceId! }); const result = await persistDocumentedCopied(input, { category: input.category, identity: `documented:${workspaceId!}:${input.category}:${input.name.trim().toLowerCase()}`, digest: copied.sourceDigest }, copied, input.sourceSnapshot); const itemKey = `${input.category}:${safeName}`; try { await writeWorkspaceClarificationPacket({ appDataRoot: input.appDataRoot, workspaceRoot: input.workspaceRoot, workspaceId: workspaceId!, itemKey }); } catch { await markWorkspaceClarificationPacketRecovery({ appDataRoot: input.appDataRoot, workspaceId: workspaceId!, itemKey }); } return result; }
-export async function documentResumeEvidenceFolder(input: Options & { expectedWorkspaceId?: string; sourceDirectory?: string; sourceSnapshot?: { files: File[]; manifest: string }; name: string; category: LibraryCategory; disclosed: boolean }): Promise<LibraryImportResult> {
-  const skill = getResumeAgentSkill("resume.document-source-folder"); if (!skill.requiresConsent || !skill.writableRoots.includes("private-staging-output") || skill.prohibitedOperations.some((operation) => !["network", "shell", "watchers", "background-jobs", "credentials", "source-mutation", "unregistered-skills", "external-developer-prompts"].includes(operation))) throw new WorkspaceError("EVIDENCE_DOCUMENTER_INVALID", "The local documentation skill policy is unavailable.", "Review the configured local documentation skill and try again.");
-  if (!input.disclosed) throw new WorkspaceError("EVIDENCE_DOCUMENTER_INVALID", "Confirm that this selected folder may be inspected by your configured local AI.", "Select the local documentation consent checkbox and try again.");
-  const source = input.sourceSnapshot ? await readUploadedResumeDocumentationSource(input.sourceSnapshot) : input.sourceDirectory ? await readResumeDocumentationSource(input.sourceDirectory, input.workspaceRoot) : (() => { throw new WorkspaceError("EVIDENCE_DOCUMENTER_INVALID", "Choose a folder before documenting it.", "Choose a folder and try documentation again."); })(); const configured = await readLocalModelGatewayConfiguration({ appDataRoot: input.appDataRoot }); const request = { connection: { configurationRevisionId: configured.id, configurationDigest: configured.configurationDigest, modelIdentifier: configured.modelIdentifier }, category: input.category, sourceDigest: source.sourceDigest, files: source.files, consentFingerprint: "" } as const; const consentFingerprint = resumeEvidenceDocumenterConsentFingerprint(request); const output = await requestResumeEvidenceDocumentation({ ...request, consentFingerprint }); if (input.sourceDirectory) { const currentSource = await readResumeDocumentationSource(input.sourceDirectory, input.workspaceRoot); if (currentSource.sourceDigest !== source.sourceDigest) throw new WorkspaceError("EVIDENCE_DOCUMENTER_INVALID", "The selected folder changed while documentation was running.", "Review the folder and run local documentation again."); } const paths = await resolveAppDataPaths(input.appDataRoot); const staging = await mkdtemp(join(paths.root, "documenter-staging-"));
-  try {
-    const generatedArtifacts: Record<string, string> = { ...output.artifacts, ...buildResumeDocumentationSet({ ...request, consentFingerprint }) };
-    if (input.category === "experience") {
-      generatedArtifacts["experience-overview.md"] = generatedArtifacts["project-overview.md"]!;
-      delete generatedArtifacts["project-overview.md"];
+function validateReviewArtifacts(
+  documents: MarkdownDocument[],
+  evidenceKeys: Set<string>,
+  category: LibraryCategory,
+): void {
+  const overviewNames =
+    category === "project"
+      ? ["project-overview.md"]
+      : ["experience-overview.md", "project-overview.md"];
+  const overview = documents.find((document) =>
+    overviewNames.some((name) => document.libraryPath.endsWith(`/${name}`)),
+  );
+  const bullets = documents.find((document) =>
+    document.libraryPath.endsWith("/resume-bullet-candidates.md"),
+  );
+  const summary = documents.find((document) =>
+    document.libraryPath.endsWith("/resume-summary.md"),
+  );
+  const overviewHeading =
+    category === "project"
+      ? /^# Project Overview \(Proposed \/ Unreviewed\)/m
+      : /^# (?:Experience|Project) Overview \(Proposed \/ Unreviewed\)/m;
+  if (
+    !overview ||
+    !bullets ||
+    !overviewHeading.test(overview.text) ||
+    (summary &&
+      (!/^# Resume Summary \(Proposed \/ Unreviewed\)/m.test(summary.text) ||
+        containsAbsolutePath(summary.text))) ||
+    !/^# Resume Bullet Candidates \(Proposed \/ Unreviewed\)/m.test(
+      bullets.text,
+    ) ||
+    containsAbsolutePath(overview.text) ||
+    containsAbsolutePath(bullets.text)
+  )
+    throw new WorkspaceError(
+      "EVIDENCE_LIBRARY_INVALID",
+      "The generated review artifacts do not match the safe documentation contract.",
+      "Run the local documentation action again.",
+    );
+  const blocks = [
+    ...bullets.text.matchAll(
+      /^### (B-\d{3})\s*$([\s\S]*?)(?=^### B-\d{3}\s*$|(?![\s\S]))/gm,
+    ),
+  ];
+  if (
+    !evidenceKeys.size &&
+    /^- No supported bullet candidates found\.\s*$/m.test(bullets.text)
+  )
+    return;
+  const bulletKeys = new Set<string>();
+  for (const block of blocks) {
+    const body = block[2];
+    const candidate = /^- Candidate:\s*(.+?)\s*$/m.exec(body)?.[1]?.trim();
+    const support =
+      /^- Supporting evidence:\s*((?:E-\d{3})(?:,\s*E-\d{3})*)\s*$/m
+        .exec(body)?.[1]
+        ?.split(/,\s*/);
+    if (
+      !candidate ||
+      containsAbsolutePath(candidate) ||
+      bulletKeys.has(block[1]) ||
+      !support?.length ||
+      support.some((id) => !evidenceKeys.has(id)) ||
+      !/^- Explicit unknowns:\s*.+\S\s*$/m.test(body) ||
+      !/^- Status:\s*Proposed\s*\/\s*unreviewed;\s*not claim-eligible\s*$/im.test(
+        body,
+      )
+    )
+      continue;
+    bulletKeys.add(block[1]);
+  }
+}
+function prepareDocumented(
+  documents: MarkdownDocument[],
+  category: LibraryCategory,
+  snapshot?: SourceSnapshot,
+): Array<{ document: MarkdownDocument; candidates: Candidate[] }> {
+  const prepared = documents.map((document) => ({
+    document,
+    candidates: documentedCandidates(document, snapshot),
+  }));
+  const evidenceDocuments = prepared.filter((item) =>
+    item.document.libraryPath.endsWith("/resume-evidence.md"),
+  );
+  const evidenceKeys = new Set(
+    prepared.flatMap((item) =>
+      item.candidates
+        .map((candidate) => candidate.evidenceKey)
+        .filter((key): key is string => Boolean(key)),
+    ),
+  );
+  if (
+    evidenceDocuments.length !== 1 ||
+    prepared.reduce((total, value) => total + value.candidates.length, 0) >
+      maxCandidatesPerOperation
+  )
+    throw new WorkspaceError(
+      "EVIDENCE_LIBRARY_INVALID",
+      "The generated review documents contain an invalid amount of evidence.",
+      "Run the documentation skill again and import a new output folder.",
+    );
+  validateReviewArtifacts(documents, evidenceKeys, category);
+  return prepared;
+}
+function revision(
+  evidenceId: string,
+  candidate: Candidate,
+  document: MarkdownDocument,
+): EvidenceRevision {
+  return {
+    id: createUuidV7(),
+    evidenceId,
+    revisionNumber: 1,
+    origin: "extracted",
+    sourceDocument: document.libraryPath,
+    sourceSection: candidate.sourceSection,
+    factualText: candidate.factualText,
+    reviewState: "unreviewed",
+    createdAt: new Date().toISOString(),
+    contentDigest: candidate.contentDigest,
+  };
+}
+function saveDocuments(
+  database: ReturnType<typeof openDatabase>,
+  prepared: ReturnType<typeof prepare>,
+  importId: string,
+  workspaceId: string,
+): LibraryImportResult {
+  let documentsAdded = 0;
+  let candidatesAdded = 0;
+  const stored: EvidenceLibraryDocument[] = [];
+  for (const value of prepared) {
+    const latest = findDocumentByPath(database, value.document.libraryPath);
+    let record = findDocumentByPathAndDigest(
+      database,
+      value.document.libraryPath,
+      value.document.contentDigest,
+    );
+    if (!record) {
+      record = {
+        id: createUuidV7(),
+        category: value.document.category,
+        libraryPath: value.document.libraryPath,
+        contentDigest: value.document.contentDigest,
+        importedAt: new Date().toISOString(),
+      };
+      insertDocument(database, { ...record, importId });
+      documentsAdded += 1;
+    } else if (!latest || latest.id !== record.id) {
+      documentsAdded += 0;
     }
-    for (const [name, content] of Object.entries(generatedArtifacts)) await writeFile(join(staging, name), content, { encoding: "utf8", flag: "wx" });
-    return await importDocumentedEvidenceArtifacts({ appDataRoot: input.appDataRoot, workspaceRoot: input.workspaceRoot, expectedWorkspaceId: input.expectedWorkspaceId, outputDirectory: staging, name: input.name, category: input.category, sourceSnapshot: source });
-  } finally { await rm(staging, { recursive: true, force: true }).catch(() => undefined); }
+    stored.push(record);
+    for (const candidate of value.candidates) {
+      if (
+        candidateExists(
+          database,
+          record.id,
+          candidate.sourceSection,
+          candidate.lineNumber,
+          candidate.contentDigest,
+        )
+      )
+        continue;
+      const item = revision(createUuidV7(), candidate, value.document);
+      insertRecord(database, item.evidenceId, item.createdAt);
+      insertRevision(database, item);
+      attachEvidenceToWorkspace(database, workspaceId, item.evidenceId);
+      insertCandidate(database, {
+        documentId: record.id,
+        sourceSection: candidate.sourceSection,
+        lineNumber: candidate.lineNumber,
+        contentDigest: candidate.contentDigest,
+        evidenceRevisionId: item.id,
+      });
+      appendAuditEvent(
+        database,
+        createAuditEvent({
+          actor: "local-os-user",
+          action: "evidence.library_candidate_created",
+          outcome: "success",
+          entityId: item.id,
+          contentHash: item.contentDigest,
+        }),
+      );
+      candidatesAdded += 1;
+    }
+  }
+  return { documentsAdded, candidatesAdded, documents: stored };
 }
-function restoreEvidenceDeletionGuards(database: ReturnType<typeof openDatabase>): void {
-  database.exec("CREATE TRIGGER IF NOT EXISTS material_claim_support_immutable_delete BEFORE DELETE ON material_claim_support BEGIN SELECT RAISE(ABORT, 'material claim support is immutable'); END;");
-  database.exec("CREATE TRIGGER IF NOT EXISTS material_draft_claims_immutable_delete BEFORE DELETE ON material_draft_claims BEGIN SELECT RAISE(ABORT, 'material draft claims are immutable'); END;");
-  database.exec("CREATE TRIGGER IF NOT EXISTS material_draft_evidence_immutable_delete BEFORE DELETE ON material_draft_evidence BEGIN SELECT RAISE(ABORT, 'material draft evidence is immutable'); END;");
-  database.exec("CREATE TRIGGER IF NOT EXISTS material_draft_handoffs_immutable_delete BEFORE DELETE ON material_draft_handoffs BEGIN SELECT RAISE(ABORT, 'material draft handoffs are immutable'); END;");
-  database.exec("CREATE TRIGGER IF NOT EXISTS material_drafts_immutable_delete BEFORE DELETE ON material_drafts BEGIN SELECT RAISE(ABORT, 'material drafts are immutable'); END;");
-  database.exec("CREATE TRIGGER IF NOT EXISTS evidence_library_imports_immutable_delete BEFORE DELETE ON evidence_library_imports BEGIN SELECT RAISE(ABORT, 'library imports are immutable'); END;");
-  database.exec("CREATE TRIGGER IF NOT EXISTS evidence_library_documents_immutable_delete BEFORE DELETE ON evidence_library_documents BEGIN SELECT RAISE(ABORT, 'library documents are immutable'); END;");
-  database.exec("CREATE TRIGGER IF NOT EXISTS evidence_library_candidates_immutable_delete BEFORE DELETE ON evidence_library_candidates BEGIN SELECT RAISE(ABORT, 'library candidates are immutable'); END;");
-  database.exec("CREATE TRIGGER IF NOT EXISTS evidence_records_immutable_delete BEFORE DELETE ON evidence_records BEGIN SELECT RAISE(ABORT, 'evidence records are immutable'); END;");
-  database.exec("CREATE TRIGGER IF NOT EXISTS evidence_revisions_immutable_delete BEFORE DELETE ON evidence_revisions BEGIN SELECT RAISE(ABORT, 'evidence revisions are immutable'); END;");
-  database.exec("CREATE TRIGGER IF NOT EXISTS evidence_documenter_decisions_immutable_delete BEFORE DELETE ON evidence_documenter_proposal_decisions BEGIN SELECT RAISE(ABORT, 'documenter proposal decisions are immutable'); END;");
-}
-export async function permanentlyDeleteDocumentedEvidenceItem(input: Options & { category: LibraryCategory; name: string; confirmation: string }): Promise<{ findingsDeleted: number; artifactCleanupIncomplete: boolean }> {
-  if (input.confirmation !== "DELETE") throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "Permanent deletion was not confirmed.", "Type DELETE to permanently remove this project or experience.");
-  if (!/^[A-Za-z0-9._-]+$/.test(input.name)) throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "That documented item is unavailable.", "Refresh Experience & Projects and try again.");
-  const categoryDirectory = input.category === "project" ? "projects" : "experiences";
-  const paths = await resolveAppDataPaths(input.appDataRoot);
+async function persist(
+  options: Options & { expectedWorkspaceId?: string },
+  source: {
+    category: "project" | "experience" | "refresh";
+    identity: string;
+    digest: string;
+  },
+  documents: MarkdownDocument[],
+): Promise<LibraryImportResult> {
+  const prepared = prepare(documents);
+  const paths = await resolveAppDataPaths(options.appDataRoot);
   const database = openDatabase(paths.databasePath);
-  let findingsDeleted = 0; let activeWorkspaceId: string | undefined;
   try {
-    applyMigrations(database); database.exec("BEGIN IMMEDIATE;");
+    applyMigrations(database);
+    database.exec("BEGIN IMMEDIATE;");
     try {
       const workspace = readActiveResumeWorkspace(database).workspace;
-      if (!workspace) throw new WorkspaceError("RESUME_WORKSPACE_NOT_FOUND", "Choose a resume workspace before deleting documented work.", "Open Resume and choose the workspace to change.");
+      if (!workspace)
+        throw new WorkspaceError(
+          "RESUME_WORKSPACE_NOT_FOUND",
+          "Create a resume workspace before documenting a folder.",
+          "Name your first resume workspace to begin.",
+        );
+      if (
+        options.expectedWorkspaceId &&
+        workspace.id !== options.expectedWorkspaceId
+      )
+        throw new WorkspaceError(
+          "RESUME_WORKSPACE_STALE",
+          "That resume workspace was changed while its evidence was being prepared.",
+          "Open the intended resume workspace and add the item again.",
+        );
+      const existing = findImport(database, source.identity, source.digest);
+      if (existing && source.category !== "refresh")
+        throw new WorkspaceError(
+          "EVIDENCE_LIBRARY_DUPLICATE",
+          "That source has already been added to the evidence library.",
+          "Refresh the library or choose a different source folder.",
+        );
+      const importId = existing?.id ?? createUuidV7();
+      if (!existing) {
+        insertImport(database, {
+          id: importId,
+          category: source.category,
+          sourceIdentity: source.identity,
+          sourceDigest: source.digest,
+          createdAt: new Date().toISOString(),
+        });
+        attachImportToWorkspace(database, workspace.id, importId);
+      }
+      const result = saveDocuments(database, prepared, importId, workspace.id);
+      appendAuditEvent(
+        database,
+        createAuditEvent({
+          actor: "local-os-user",
+          action: "evidence.library_imported",
+          outcome: "success",
+          entityId: importId,
+          contentHash: source.digest,
+        }),
+      );
+      database.exec("COMMIT;");
+      return result;
+    } catch (error) {
+      database.exec("ROLLBACK;");
+      throw error;
+    }
+  } finally {
+    database.close();
+  }
+}
+async function persistCopied(
+  input: Options & { expectedWorkspaceId?: string },
+  source: {
+    category: "project" | "experience";
+    identity: string;
+    digest: string;
+  },
+  copied: CopiedLibraryContent,
+): Promise<LibraryImportResult> {
+  try {
+    return await persist(input, source, copied.documents);
+  } catch (error) {
+    await copied.cleanup();
+    throw error;
+  }
+}
+async function persistDocumentedCopied(
+  input: Options & { expectedWorkspaceId?: string },
+  source: {
+    category: "project" | "experience";
+    identity: string;
+    digest: string;
+  },
+  copied: CopiedLibraryContent,
+  snapshot?: SourceSnapshot,
+): Promise<LibraryImportResult> {
+  let prepared: ReturnType<typeof prepareDocumented>;
+  try {
+    prepared = prepareDocumented(copied.documents, source.category, snapshot);
+  } catch (error) {
+    await copied.cleanup();
+    throw error;
+  }
+  const paths = await resolveAppDataPaths(input.appDataRoot);
+  const database = openDatabase(paths.databasePath);
+  try {
+    applyMigrations(database);
+    database.exec("BEGIN IMMEDIATE;");
+    try {
+      const workspace = readActiveResumeWorkspace(database).workspace;
+      if (!workspace)
+        throw new WorkspaceError(
+          "RESUME_WORKSPACE_NOT_FOUND",
+          "Create a resume workspace before documenting a folder.",
+          "Name your first resume workspace to begin.",
+        );
+      if (
+        input.expectedWorkspaceId &&
+        workspace.id !== input.expectedWorkspaceId
+      )
+        throw new WorkspaceError(
+          "RESUME_WORKSPACE_STALE",
+          "That resume workspace was changed or deleted while its folders were being documented.",
+          "Open the intended resume workspace and start its folder documentation again.",
+        );
+      const existing = findImport(database, source.identity, source.digest);
+      if (existing)
+        throw new WorkspaceError(
+          "EVIDENCE_LIBRARY_DUPLICATE",
+          "That documented item has already been imported.",
+          "Review the existing collection item or choose a different documented item.",
+        );
+      const importId = createUuidV7();
+      insertImport(database, {
+        id: importId,
+        category: source.category,
+        sourceIdentity: source.identity,
+        sourceDigest: source.digest,
+        createdAt: new Date().toISOString(),
+      });
+      attachImportToWorkspace(database, workspace.id, importId);
+      const result = saveDocuments(database, prepared, importId, workspace.id);
+      appendAuditEvent(
+        database,
+        createAuditEvent({
+          actor: "local-os-user",
+          action: "evidence.library_imported",
+          outcome: "success",
+          entityId: importId,
+          contentHash: source.digest,
+        }),
+      );
+      database.exec("COMMIT;");
+      return result;
+    } catch (error) {
+      database.exec("ROLLBACK;");
+      throw error;
+    }
+  } catch (error) {
+    await copied.cleanup();
+    throw error;
+  } finally {
+    database.close();
+  }
+}
+export async function addProjectToEvidenceLibrary(
+  input: Options & {
+    expectedWorkspaceId?: string;
+    sourceDirectory: string;
+    name?: string;
+  },
+): Promise<LibraryImportResult> {
+  const copied = await copyProjectMarkdown(
+    input.sourceDirectory,
+    input.name,
+    input.workspaceRoot,
+  );
+  return persistCopied(
+    input,
+    {
+      category: "project",
+      identity: `project:${hash(resolve(input.sourceDirectory))}`,
+      digest: copied.sourceDigest,
+    },
+    copied,
+  );
+}
+export async function addExperienceToEvidenceLibrary(
+  input: Options & {
+    expectedWorkspaceId?: string;
+    name: string;
+    markdown?: string;
+    sourceFile?: string;
+  },
+): Promise<LibraryImportResult> {
+  const copied = await copyExperienceMarkdown(input);
+  return persistCopied(
+    input,
+    {
+      category: "experience",
+      identity: `experience:${input.name.trim().toLowerCase()}`,
+      digest: copied.sourceDigest,
+    },
+    copied,
+  );
+}
+export async function importDocumentedEvidenceArtifacts(
+  input: Options & {
+    expectedWorkspaceId?: string;
+    outputDirectory: string;
+    name: string;
+    category: LibraryCategory;
+    sourceSnapshot?: SourceSnapshot;
+  },
+): Promise<LibraryImportResult> {
+  const paths = await resolveAppDataPaths(input.appDataRoot);
+  const db = openDatabase(paths.databasePath);
+  let workspaceId: string;
+  try {
+    applyMigrations(db);
+    const workspace = readActiveResumeWorkspace(db).workspace;
+    if (
+      !workspace ||
+      (input.expectedWorkspaceId && workspace.id !== input.expectedWorkspaceId)
+    )
+      throw new WorkspaceError(
+        "RESUME_WORKSPACE_STALE",
+        "That resume workspace changed while its folders were being documented.",
+        "Open the intended resume workspace and start its folder documentation again.",
+      );
+    workspaceId = workspace.id;
+  } finally {
+    db.close();
+  }
+  const safeName = input.name
+    .trim()
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")
+    .replace(/^[.\s-]+|[.\s-]+$/g, "");
+  await reclaimUnregisteredManagedDirectory({
+    ...input,
+    workspaceId: workspaceId!,
+    name: safeName,
+  });
+  const copied = await copyDocumentedEvidenceArtifacts({
+    ...input,
+    workspaceId: workspaceId!,
+  });
+  const result = await persistDocumentedCopied(
+    input,
+    {
+      category: input.category,
+      identity: `documented:${workspaceId!}:${input.category}:${input.name.trim().toLowerCase()}`,
+      digest: copied.sourceDigest,
+    },
+    copied,
+    input.sourceSnapshot,
+  );
+  const itemKey = `${input.category}:${safeName}`;
+  try {
+    await writeWorkspaceClarificationPacket({
+      appDataRoot: input.appDataRoot,
+      workspaceRoot: input.workspaceRoot,
+      workspaceId: workspaceId!,
+      itemKey,
+    });
+  } catch {
+    await markWorkspaceClarificationPacketRecovery({
+      appDataRoot: input.appDataRoot,
+      workspaceId: workspaceId!,
+      itemKey,
+    });
+  }
+  return result;
+}
+export async function documentResumeEvidenceFolder(
+  input: Options & {
+    expectedWorkspaceId?: string;
+    sourceDirectory?: string;
+    sourceSnapshot?: { files: File[]; manifest: string };
+    name: string;
+    category: LibraryCategory;
+    disclosed: boolean;
+  },
+): Promise<LibraryImportResult> {
+  const skill = getResumeAgentSkill("resume.document-source-folder");
+  if (
+    !skill.requiresConsent ||
+    !skill.writableRoots.includes("private-staging-output") ||
+    skill.prohibitedOperations.some(
+      (operation) =>
+        ![
+          "network",
+          "shell",
+          "watchers",
+          "background-jobs",
+          "credentials",
+          "source-mutation",
+          "unregistered-skills",
+          "external-developer-prompts",
+        ].includes(operation),
+    )
+  )
+    throw new WorkspaceError(
+      "EVIDENCE_DOCUMENTER_INVALID",
+      "The local documentation skill policy is unavailable.",
+      "Review the configured local documentation skill and try again.",
+    );
+  if (!input.disclosed)
+    throw new WorkspaceError(
+      "EVIDENCE_DOCUMENTER_INVALID",
+      "Confirm that this selected folder may be inspected by your configured local AI.",
+      "Select the local documentation consent checkbox and try again.",
+    );
+  const source = input.sourceSnapshot
+    ? await readUploadedResumeDocumentationSource(input.sourceSnapshot)
+    : input.sourceDirectory
+      ? await readResumeDocumentationSource(
+          input.sourceDirectory,
+          input.workspaceRoot,
+        )
+      : (() => {
+          throw new WorkspaceError(
+            "EVIDENCE_DOCUMENTER_INVALID",
+            "Choose a folder before documenting it.",
+            "Choose a folder and try documentation again.",
+          );
+        })();
+  const configured = await readLocalModelGatewayConfiguration({
+    appDataRoot: input.appDataRoot,
+  });
+  const request = {
+    connection: {
+      configurationRevisionId: configured.id,
+      configurationDigest: configured.configurationDigest,
+      modelIdentifier: configured.modelIdentifier,
+    },
+    category: input.category,
+    sourceDigest: source.sourceDigest,
+    files: source.files,
+    consentFingerprint: "",
+  } as const;
+  const consentFingerprint =
+    resumeEvidenceDocumenterConsentFingerprint(request);
+  const output = await requestResumeEvidenceDocumentation({
+    ...request,
+    consentFingerprint,
+  });
+  if (input.sourceDirectory) {
+    const currentSource = await readResumeDocumentationSource(
+      input.sourceDirectory,
+      input.workspaceRoot,
+    );
+    if (currentSource.sourceDigest !== source.sourceDigest)
+      throw new WorkspaceError(
+        "EVIDENCE_DOCUMENTER_INVALID",
+        "The selected folder changed while documentation was running.",
+        "Review the folder and run local documentation again.",
+      );
+  }
+  const paths = await resolveAppDataPaths(input.appDataRoot);
+  const staging = await mkdtemp(join(paths.root, "documenter-staging-"));
+  try {
+    const generatedArtifacts: Record<string, string> = {
+      ...output.artifacts,
+      ...buildResumeDocumentationSet({ ...request, consentFingerprint }),
+    };
+    if (input.category === "experience") {
+      generatedArtifacts["experience-overview.md"] =
+        generatedArtifacts["project-overview.md"]!;
+      delete generatedArtifacts["project-overview.md"];
+    }
+    for (const [name, content] of Object.entries(generatedArtifacts))
+      await writeFile(join(staging, name), content, {
+        encoding: "utf8",
+        flag: "wx",
+      });
+    return await importDocumentedEvidenceArtifacts({
+      appDataRoot: input.appDataRoot,
+      workspaceRoot: input.workspaceRoot,
+      expectedWorkspaceId: input.expectedWorkspaceId,
+      outputDirectory: staging,
+      name: input.name,
+      category: input.category,
+      sourceSnapshot: source,
+    });
+  } finally {
+    await rm(staging, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+function restoreEvidenceDeletionGuards(
+  database: ReturnType<typeof openDatabase>,
+): void {
+  database.exec(
+    "CREATE TRIGGER IF NOT EXISTS material_claim_support_immutable_delete BEFORE DELETE ON material_claim_support BEGIN SELECT RAISE(ABORT, 'material claim support is immutable'); END;",
+  );
+  database.exec(
+    "CREATE TRIGGER IF NOT EXISTS material_draft_claims_immutable_delete BEFORE DELETE ON material_draft_claims BEGIN SELECT RAISE(ABORT, 'material draft claims are immutable'); END;",
+  );
+  database.exec(
+    "CREATE TRIGGER IF NOT EXISTS material_draft_evidence_immutable_delete BEFORE DELETE ON material_draft_evidence BEGIN SELECT RAISE(ABORT, 'material draft evidence is immutable'); END;",
+  );
+  database.exec(
+    "CREATE TRIGGER IF NOT EXISTS material_draft_handoffs_immutable_delete BEFORE DELETE ON material_draft_handoffs BEGIN SELECT RAISE(ABORT, 'material draft handoffs are immutable'); END;",
+  );
+  database.exec(
+    "CREATE TRIGGER IF NOT EXISTS material_drafts_immutable_delete BEFORE DELETE ON material_drafts BEGIN SELECT RAISE(ABORT, 'material drafts are immutable'); END;",
+  );
+  database.exec(
+    "CREATE TRIGGER IF NOT EXISTS evidence_library_imports_immutable_delete BEFORE DELETE ON evidence_library_imports BEGIN SELECT RAISE(ABORT, 'library imports are immutable'); END;",
+  );
+  database.exec(
+    "CREATE TRIGGER IF NOT EXISTS evidence_library_documents_immutable_delete BEFORE DELETE ON evidence_library_documents BEGIN SELECT RAISE(ABORT, 'library documents are immutable'); END;",
+  );
+  database.exec(
+    "CREATE TRIGGER IF NOT EXISTS evidence_library_candidates_immutable_delete BEFORE DELETE ON evidence_library_candidates BEGIN SELECT RAISE(ABORT, 'library candidates are immutable'); END;",
+  );
+  database.exec(
+    "CREATE TRIGGER IF NOT EXISTS evidence_records_immutable_delete BEFORE DELETE ON evidence_records BEGIN SELECT RAISE(ABORT, 'evidence records are immutable'); END;",
+  );
+  database.exec(
+    "CREATE TRIGGER IF NOT EXISTS evidence_revisions_immutable_delete BEFORE DELETE ON evidence_revisions BEGIN SELECT RAISE(ABORT, 'evidence revisions are immutable'); END;",
+  );
+  database.exec(
+    "CREATE TRIGGER IF NOT EXISTS evidence_documenter_decisions_immutable_delete BEFORE DELETE ON evidence_documenter_proposal_decisions BEGIN SELECT RAISE(ABORT, 'documenter proposal decisions are immutable'); END;",
+  );
+}
+export async function permanentlyDeleteDocumentedEvidenceItem(
+  input: Options & {
+    category: LibraryCategory;
+    name: string;
+    confirmation: string;
+  },
+): Promise<{ findingsDeleted: number; artifactCleanupIncomplete: boolean }> {
+  if (input.confirmation !== "DELETE")
+    throw new WorkspaceError(
+      "EVIDENCE_LIBRARY_INVALID",
+      "Permanent deletion was not confirmed.",
+      "Type DELETE to permanently remove this project or experience.",
+    );
+  if (!/^[A-Za-z0-9._-]+$/.test(input.name))
+    throw new WorkspaceError(
+      "EVIDENCE_LIBRARY_INVALID",
+      "That documented item is unavailable.",
+      "Refresh Experience & Projects and try again.",
+    );
+  const categoryDirectory =
+    input.category === "project" ? "projects" : "experiences";
+  const paths = await resolveAppDataPaths(input.appDataRoot);
+  const database = openDatabase(paths.databasePath);
+  let findingsDeleted = 0;
+  let activeWorkspaceId: string | undefined;
+  try {
+    applyMigrations(database);
+    database.exec("BEGIN IMMEDIATE;");
+    try {
+      const workspace = readActiveResumeWorkspace(database).workspace;
+      if (!workspace)
+        throw new WorkspaceError(
+          "RESUME_WORKSPACE_NOT_FOUND",
+          "Choose a resume workspace before deleting documented work.",
+          "Open Resume and choose the workspace to change.",
+        );
       activeWorkspaceId = workspace.id;
       const libraryPrefix = `resume-evidence/workspaces/${workspace.id}/${categoryDirectory}/${input.name}/%`;
-      const importIds = (database.prepare("SELECT DISTINCT i.id FROM evidence_library_imports i JOIN resume_workspace_imports w ON w.import_id = i.id JOIN evidence_library_documents d ON d.import_id = i.id WHERE w.workspace_id = ? AND d.library_path LIKE ?").all(workspace.id, libraryPrefix) as Array<{ id: string }>).map((item) => item.id);
-      if (!importIds.length) throw new WorkspaceError("EVIDENCE_LIBRARY_INVALID", "That documented item is no longer available.", "Refresh Experience & Projects and try again.");
-      const evidenceIds = (database.prepare("SELECT DISTINCT r.evidence_id FROM evidence_library_candidates c JOIN evidence_library_documents d ON d.id = c.document_id JOIN evidence_library_imports i ON i.id = d.import_id JOIN resume_workspace_imports w ON w.import_id = i.id JOIN evidence_revisions r ON r.id = c.evidence_revision_id WHERE w.workspace_id = ? AND d.library_path LIKE ?").all(workspace.id, libraryPrefix) as Array<{ evidence_id: string }>).map((item) => item.evidence_id);
+      const importIds = (
+        database
+          .prepare(
+            "SELECT DISTINCT i.id FROM evidence_library_imports i JOIN resume_workspace_imports w ON w.import_id = i.id JOIN evidence_library_documents d ON d.import_id = i.id WHERE w.workspace_id = ? AND d.library_path LIKE ?",
+          )
+          .all(workspace.id, libraryPrefix) as Array<{ id: string }>
+      ).map((item) => item.id);
+      if (!importIds.length)
+        throw new WorkspaceError(
+          "EVIDENCE_LIBRARY_INVALID",
+          "That documented item is no longer available.",
+          "Refresh Experience & Projects and try again.",
+        );
+      const evidenceIds = (
+        database
+          .prepare(
+            "SELECT DISTINCT r.evidence_id FROM evidence_library_candidates c JOIN evidence_library_documents d ON d.id = c.document_id JOIN evidence_library_imports i ON i.id = d.import_id JOIN resume_workspace_imports w ON w.import_id = i.id JOIN evidence_revisions r ON r.id = c.evidence_revision_id WHERE w.workspace_id = ? AND d.library_path LIKE ?",
+          )
+          .all(workspace.id, libraryPrefix) as Array<{ evidence_id: string }>
+      ).map((item) => item.evidence_id);
       const itemKey = `${input.category}:${input.name}`;
-      const draftIds = evidenceIds.length ? (database.prepare("SELECT DISTINCT m.id FROM material_drafts m JOIN material_draft_evidence e ON e.draft_id = m.id WHERE e.evidence_revision_id IN (SELECT id FROM evidence_revisions WHERE evidence_id IN (SELECT evidence_id FROM resume_workspace_evidence WHERE workspace_id = ? AND evidence_id IN (" + evidenceIds.map(() => "?").join(",") + ")))").all(workspace.id, ...evidenceIds) as Array<{ id: string }>).map((item) => item.id) : [];
-      for (const trigger of ["material_claim_support_immutable_delete", "material_draft_claims_immutable_delete", "material_draft_evidence_immutable_delete", "material_draft_handoffs_immutable_delete", "material_drafts_immutable_delete", "evidence_library_imports_immutable_delete", "evidence_library_documents_immutable_delete", "evidence_library_candidates_immutable_delete", "evidence_records_immutable_delete", "evidence_revisions_immutable_delete", "evidence_documenter_decisions_immutable_delete"]) database.exec(`DROP TRIGGER IF EXISTS ${trigger}`);
-      for (const id of draftIds) { database.prepare("DELETE FROM material_claim_support WHERE claim_id IN (SELECT id FROM material_draft_claims WHERE draft_id = ?)").run(id); database.prepare("DELETE FROM material_draft_claims WHERE draft_id = ?").run(id); database.prepare("DELETE FROM material_draft_evidence WHERE draft_id = ?").run(id); database.prepare("DELETE FROM material_draft_handoffs WHERE draft_id = ?").run(id); database.prepare("DELETE FROM resume_workspace_drafts WHERE draft_id = ?").run(id); database.prepare("DELETE FROM material_drafts WHERE id = ?").run(id); }
-      for (const id of evidenceIds) { database.prepare("DELETE FROM evidence_documenter_proposal_decisions WHERE evidence_revision_id IN (SELECT id FROM evidence_revisions WHERE evidence_id = ?)").run(id); database.prepare("DELETE FROM evidence_library_candidates WHERE evidence_revision_id IN (SELECT id FROM evidence_revisions WHERE evidence_id = ?)").run(id); database.prepare("DELETE FROM resume_workspace_evidence WHERE workspace_id = ? AND evidence_id = ?").run(workspace.id, id); database.prepare("DELETE FROM evidence_revisions WHERE evidence_id = ?").run(id); database.prepare("DELETE FROM evidence_records WHERE id = ?").run(id); }
-      for (const id of importIds) { database.prepare("DELETE FROM evidence_library_candidates WHERE document_id IN (SELECT id FROM evidence_library_documents WHERE import_id = ?)").run(id); database.prepare("DELETE FROM evidence_library_documents WHERE import_id = ?").run(id); database.prepare("DELETE FROM resume_workspace_imports WHERE workspace_id = ? AND import_id = ?").run(workspace.id, id); database.prepare("DELETE FROM evidence_library_imports WHERE id = ?").run(id); }
+      const draftIds = evidenceIds.length
+        ? (
+            database
+              .prepare(
+                "SELECT DISTINCT m.id FROM material_drafts m JOIN material_draft_evidence e ON e.draft_id = m.id WHERE e.evidence_revision_id IN (SELECT id FROM evidence_revisions WHERE evidence_id IN (SELECT evidence_id FROM resume_workspace_evidence WHERE workspace_id = ? AND evidence_id IN (" +
+                  evidenceIds.map(() => "?").join(",") +
+                  ")))",
+              )
+              .all(workspace.id, ...evidenceIds) as Array<{ id: string }>
+          ).map((item) => item.id)
+        : [];
+      for (const trigger of [
+        "material_claim_support_immutable_delete",
+        "material_draft_claims_immutable_delete",
+        "material_draft_evidence_immutable_delete",
+        "material_draft_handoffs_immutable_delete",
+        "material_drafts_immutable_delete",
+        "evidence_library_imports_immutable_delete",
+        "evidence_library_documents_immutable_delete",
+        "evidence_library_candidates_immutable_delete",
+        "evidence_records_immutable_delete",
+        "evidence_revisions_immutable_delete",
+        "evidence_documenter_decisions_immutable_delete",
+      ])
+        database.exec(`DROP TRIGGER IF EXISTS ${trigger}`);
+      for (const id of draftIds) {
+        database
+          .prepare(
+            "DELETE FROM material_claim_support WHERE claim_id IN (SELECT id FROM material_draft_claims WHERE draft_id = ?)",
+          )
+          .run(id);
+        database
+          .prepare("DELETE FROM material_draft_claims WHERE draft_id = ?")
+          .run(id);
+        database
+          .prepare("DELETE FROM material_draft_evidence WHERE draft_id = ?")
+          .run(id);
+        database
+          .prepare("DELETE FROM material_draft_handoffs WHERE draft_id = ?")
+          .run(id);
+        database
+          .prepare("DELETE FROM resume_workspace_drafts WHERE draft_id = ?")
+          .run(id);
+        database.prepare("DELETE FROM material_drafts WHERE id = ?").run(id);
+      }
+      for (const id of evidenceIds) {
+        database
+          .prepare(
+            "DELETE FROM evidence_documenter_proposal_decisions WHERE evidence_revision_id IN (SELECT id FROM evidence_revisions WHERE evidence_id = ?)",
+          )
+          .run(id);
+        database
+          .prepare(
+            "DELETE FROM evidence_library_candidates WHERE evidence_revision_id IN (SELECT id FROM evidence_revisions WHERE evidence_id = ?)",
+          )
+          .run(id);
+        database
+          .prepare(
+            "DELETE FROM resume_workspace_evidence WHERE workspace_id = ? AND evidence_id = ?",
+          )
+          .run(workspace.id, id);
+        database
+          .prepare("DELETE FROM evidence_revisions WHERE evidence_id = ?")
+          .run(id);
+        database.prepare("DELETE FROM evidence_records WHERE id = ?").run(id);
+      }
+      for (const id of importIds) {
+        database
+          .prepare(
+            "DELETE FROM evidence_library_candidates WHERE document_id IN (SELECT id FROM evidence_library_documents WHERE import_id = ?)",
+          )
+          .run(id);
+        database
+          .prepare("DELETE FROM evidence_library_documents WHERE import_id = ?")
+          .run(id);
+        database
+          .prepare(
+            "DELETE FROM resume_workspace_imports WHERE workspace_id = ? AND import_id = ?",
+          )
+          .run(workspace.id, id);
+        database
+          .prepare("DELETE FROM evidence_library_imports WHERE id = ?")
+          .run(id);
+      }
       // Interpretations and questions are workspace-owned projections of the
       // documented item, not archival facts. Remove them with the item so a
       // deleted project cannot hold Coach Resume in an obsolete interview.
-      database.prepare("DELETE FROM resume_clarification_tasks WHERE workspace_id = ? AND item_key = ?").run(workspace.id, itemKey);
-      database.prepare("DELETE FROM resume_evidence_interpretations WHERE workspace_id = ? AND item_key = ?").run(workspace.id, itemKey);
-      restoreEvidenceDeletionGuards(database); findingsDeleted = evidenceIds.length;
-      appendAuditEvent(database, createAuditEvent({ actor: "local-os-user", action: "evidence.library_deleted", outcome: "success" }));
+      database
+        .prepare(
+          "DELETE FROM resume_clarification_tasks WHERE workspace_id = ? AND item_key = ?",
+        )
+        .run(workspace.id, itemKey);
+      database
+        .prepare(
+          "DELETE FROM resume_evidence_interpretations WHERE workspace_id = ? AND item_key = ?",
+        )
+        .run(workspace.id, itemKey);
+      restoreEvidenceDeletionGuards(database);
+      findingsDeleted = evidenceIds.length;
+      appendAuditEvent(
+        database,
+        createAuditEvent({
+          actor: "local-os-user",
+          action: "evidence.library_deleted",
+          outcome: "success",
+        }),
+      );
       database.exec("COMMIT;");
-    } catch (error) { database.exec("ROLLBACK;"); throw error; }
-  } finally { database.close(); }
+    } catch (error) {
+      database.exec("ROLLBACK;");
+      throw error;
+    }
+  } finally {
+    database.close();
+  }
   let artifactCleanupIncomplete = false;
-  const artifactDirectory = activeWorkspaceId ? join(evidenceLibraryRoot(input.workspaceRoot), "workspaces", activeWorkspaceId, categoryDirectory, input.name) : join(evidenceLibraryRoot(input.workspaceRoot), categoryDirectory, input.name);
-  await rm(artifactDirectory, { recursive: true, force: true, maxRetries: 4, retryDelay: 200 }).catch(() => { artifactCleanupIncomplete = true; });
-  if (await lstat(artifactDirectory).then(() => true).catch(() => false)) artifactCleanupIncomplete = true;
+  const artifactDirectory = activeWorkspaceId
+    ? join(
+        evidenceLibraryRoot(input.workspaceRoot),
+        "workspaces",
+        activeWorkspaceId,
+        categoryDirectory,
+        input.name,
+      )
+    : join(
+        evidenceLibraryRoot(input.workspaceRoot),
+        categoryDirectory,
+        input.name,
+      );
+  await rm(artifactDirectory, {
+    recursive: true,
+    force: true,
+    maxRetries: 4,
+    retryDelay: 200,
+  }).catch(() => {
+    artifactCleanupIncomplete = true;
+  });
+  if (
+    await lstat(artifactDirectory)
+      .then(() => true)
+      .catch(() => false)
+  )
+    artifactCleanupIncomplete = true;
   return { findingsDeleted, artifactCleanupIncomplete };
 }
-export async function refreshEvidenceLibrary(input: Options = {}): Promise<LibraryImportResult> { const documents = await readManagedMarkdown(input.workspaceRoot); const digest = hash(documents.map((document) => `${document.libraryPath}:${document.contentDigest}`).sort().join("\n")); return persist(input, { category: "refresh", identity: `refresh:${digest}`, digest }, documents); }
-export async function listEvidenceLibrary(options: Options = {}): Promise<EvidenceLibraryDocument[]> { const documents = await readManagedMarkdown(options.workspaceRoot).catch((error) => { if (error instanceof WorkspaceError && error.code === "EVIDENCE_LIBRARY_EMPTY") return []; throw error; }); if (!documents.length) return []; const paths = await resolveAppDataPaths(options.appDataRoot); const database = openDatabase(paths.databasePath); try { applyMigrations(database); return documents.flatMap((document) => { const record = findDocumentByPathAndDigest(database, document.libraryPath, document.contentDigest); return record ? [record] : []; }); } finally { database.close(); } }
-export function summaryFromProjectOverview(markdown: string): string {
-  let fence: { marker: string; length: number } | undefined; const paragraphs: string[] = []; let current: string[] = []; const lines = markdown.replace(/<!--[\s\S]*?-->/g, "").split(/\r?\n/); const frontMatterEnd = lines[0]?.trim() === "---" ? lines.slice(1).findIndex((line) => line.trim() === "---") : -1; const content = frontMatterEnd >= 0 ? lines.slice(frontMatterEnd + 2) : lines[0]?.trim() === "---" ? [] : lines;
-  const push = () => { const text = current.join(" ").replace(/^[-*+]\s+/, "").replace(/^\d+[.)]\s+/, "").replace(/\s+/g, " ").trim(); if (text) paragraphs.push(text); current = []; };
-  for (const raw of content) { if (/^\s*<!--.*-->\s*$/.test(raw)) continue; const fenceMatch = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(raw); if (fence) { if (fenceMatch && fenceMatch[1][0] === fence.marker && fenceMatch[1].length >= fence.length && !fenceMatch[2].trim()) fence = undefined; continue; } if (fenceMatch) { push(); fence = { marker: fenceMatch[1][0], length: fenceMatch[1].length }; continue; } if (!raw.trim() || /^\s*#{1,6}\s+/.test(raw)) { push(); continue; } current.push(raw.trim()); }
-  push(); const sentence = paragraphs[0]?.match(/^(.+?[.!?])(?:\s|$)/)?.[1] ?? paragraphs[0]; if (!sentence) return "No summary found yet."; return sentence.length <= 240 ? sentence : `${sentence.slice(0, 239).replace(/\s+\S*$/, "").trimEnd()}…`;
+export async function refreshEvidenceLibrary(
+  input: Options = {},
+): Promise<LibraryImportResult> {
+  const documents = await readManagedMarkdown(input.workspaceRoot);
+  const digest = hash(
+    documents
+      .map((document) => `${document.libraryPath}:${document.contentDigest}`)
+      .sort()
+      .join("\n"),
+  );
+  return persist(
+    input,
+    { category: "refresh", identity: `refresh:${digest}`, digest },
+    documents,
+  );
 }
-export function collectionReviewHandle(evidenceId: string, revisionId: string): string { return hash(`review-handle:${evidenceId}:${revisionId}`); }
-export async function resolveCollectionReviewHandle(handle: string, options: Options = {}): Promise<{ evidenceId: string; expectedRevisionId: string }> { if (!/^sha256:[a-f0-9]{64}$/.test(handle)) throw new WorkspaceError("EVIDENCE_INVALID", "The requested evidence review item is unavailable.", "Refresh the collection and try the individual review action again."); const paths = await resolveAppDataPaths(options.appDataRoot); const database = openDatabase(paths.databasePath); try { applyMigrations(database); const workspace = readActiveResumeWorkspace(database).workspace; const item = workspace ? listCurrentEvidence(database).find((candidate) => collectionReviewHandle(candidate.evidenceId, candidate.id) === handle && Boolean(database.prepare("SELECT 1 FROM resume_workspace_evidence WHERE workspace_id = ? AND evidence_id = ?").get(workspace.id, candidate.evidenceId))) : undefined; if (!item) throw new WorkspaceError("EVIDENCE_INVALID", "The requested evidence review item is unavailable.", "Refresh the collection and try the individual review action again."); return { evidenceId: item.evidenceId, expectedRevisionId: item.id }; } finally { database.close(); } }
-export async function listExperienceProjectCollection(options: Options = {}): Promise<ExperienceProjectCollection[]> { const groups = await readManagedDocumentedArtifacts(options.workspaceRoot); if (!groups.length) return []; const paths = await resolveAppDataPaths(options.appDataRoot); const database = openDatabase(paths.databasePath); try { applyMigrations(database); const workspace = readActiveResumeWorkspace(database).workspace; if (!workspace) return []; const ownedDocumentPaths = new Set((database.prepare("SELECT d.library_path FROM evidence_library_documents d JOIN evidence_library_imports i ON i.id = d.import_id JOIN resume_workspace_imports w ON w.import_id = i.id WHERE w.workspace_id = ?").all(workspace.id) as Array<{ library_path: string }>).map((item) => item.library_path)); const evidence = listCurrentEvidence(database).filter((item) => Boolean(database.prepare("SELECT 1 FROM resume_workspace_evidence WHERE workspace_id = ? AND evidence_id = ?").get(workspace.id, item.evidenceId))); return groups.filter((group) => group.documents.some((document) => ownedDocumentPaths.has(document.libraryPath))).map((group) => { const overviewFile = group.category === "project" ? "project-overview.md" : "experience-overview.md"; const overview = group.documents.find((document) => document.libraryPath.endsWith(`/${overviewFile}`)); const evidenceDocument = group.documents.find((document) => document.libraryPath.endsWith("/resume-evidence.md")); return { name: group.name, category: group.category, summary: summaryFromProjectOverview(overview?.text ?? ""), artifactNames: group.documents.map((document) => document.libraryPath.split("/").at(-1)!).sort(), evidence: evidence.filter((item) => item.sourceDocument === evidenceDocument?.libraryPath).map(({ id, evidenceId, factualText, reviewState }) => ({ factualText, reviewState, reviewHandle: collectionReviewHandle(evidenceId, id) })) }; }); } finally { database.close(); } }
-export async function recordEvidenceLibraryFailure(options: Options = {}): Promise<void> { const paths = await resolveAppDataPaths(options.appDataRoot); const database = openDatabase(paths.databasePath); try { applyMigrations(database); appendAuditEvent(database, createAuditEvent({ actor: "local-os-user", action: "evidence.library_failed", outcome: "failure" })); } finally { database.close(); } }
+export async function listEvidenceLibrary(
+  options: Options = {},
+): Promise<EvidenceLibraryDocument[]> {
+  const documents = await readManagedMarkdown(options.workspaceRoot).catch(
+    (error) => {
+      if (
+        error instanceof WorkspaceError &&
+        error.code === "EVIDENCE_LIBRARY_EMPTY"
+      )
+        return [];
+      throw error;
+    },
+  );
+  if (!documents.length) return [];
+  const paths = await resolveAppDataPaths(options.appDataRoot);
+  const database = openDatabase(paths.databasePath);
+  try {
+    applyMigrations(database);
+    return documents.flatMap((document) => {
+      const record = findDocumentByPathAndDigest(
+        database,
+        document.libraryPath,
+        document.contentDigest,
+      );
+      return record ? [record] : [];
+    });
+  } finally {
+    database.close();
+  }
+}
+export function summaryFromProjectOverview(markdown: string): string {
+  let fence: { marker: string; length: number } | undefined;
+  const paragraphs: string[] = [];
+  let current: string[] = [];
+  const lines = markdown.replace(/<!--[\s\S]*?-->/g, "").split(/\r?\n/);
+  const frontMatterEnd =
+    lines[0]?.trim() === "---"
+      ? lines.slice(1).findIndex((line) => line.trim() === "---")
+      : -1;
+  const content =
+    frontMatterEnd >= 0
+      ? lines.slice(frontMatterEnd + 2)
+      : lines[0]?.trim() === "---"
+        ? []
+        : lines;
+  const push = () => {
+    const text = current
+      .join(" ")
+      .replace(/^[-*+]\s+/, "")
+      .replace(/^\d+[.)]\s+/, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (text) paragraphs.push(text);
+    current = [];
+  };
+  for (const raw of content) {
+    if (/^\s*<!--.*-->\s*$/.test(raw)) continue;
+    const fenceMatch = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(raw);
+    if (fence) {
+      if (
+        fenceMatch &&
+        fenceMatch[1][0] === fence.marker &&
+        fenceMatch[1].length >= fence.length &&
+        !fenceMatch[2].trim()
+      )
+        fence = undefined;
+      continue;
+    }
+    if (fenceMatch) {
+      push();
+      fence = { marker: fenceMatch[1][0], length: fenceMatch[1].length };
+      continue;
+    }
+    if (!raw.trim() || /^\s*#{1,6}\s+/.test(raw)) {
+      push();
+      continue;
+    }
+    current.push(raw.trim());
+  }
+  push();
+  const sentence =
+    paragraphs[0]?.match(/^(.+?[.!?])(?:\s|$)/)?.[1] ?? paragraphs[0];
+  if (!sentence) return "No summary found yet.";
+  return sentence.length <= 240
+    ? sentence
+    : `${sentence
+        .slice(0, 239)
+        .replace(/\s+\S*$/, "")
+        .trimEnd()}…`;
+}
+export function collectionReviewHandle(
+  evidenceId: string,
+  revisionId: string,
+): string {
+  return hash(`review-handle:${evidenceId}:${revisionId}`);
+}
+export async function resolveCollectionReviewHandle(
+  handle: string,
+  options: Options = {},
+): Promise<{ evidenceId: string; expectedRevisionId: string }> {
+  if (!/^sha256:[a-f0-9]{64}$/.test(handle))
+    throw new WorkspaceError(
+      "EVIDENCE_INVALID",
+      "The requested evidence review item is unavailable.",
+      "Refresh the collection and try the individual review action again.",
+    );
+  const paths = await resolveAppDataPaths(options.appDataRoot);
+  const database = openDatabase(paths.databasePath);
+  try {
+    applyMigrations(database);
+    const workspace = readActiveResumeWorkspace(database).workspace;
+    const item = workspace
+      ? listCurrentEvidence(database).find(
+          (candidate) =>
+            collectionReviewHandle(candidate.evidenceId, candidate.id) ===
+              handle &&
+            Boolean(
+              database
+                .prepare(
+                  "SELECT 1 FROM resume_workspace_evidence WHERE workspace_id = ? AND evidence_id = ?",
+                )
+                .get(workspace.id, candidate.evidenceId),
+            ),
+        )
+      : undefined;
+    if (!item)
+      throw new WorkspaceError(
+        "EVIDENCE_INVALID",
+        "The requested evidence review item is unavailable.",
+        "Refresh the collection and try the individual review action again.",
+      );
+    return { evidenceId: item.evidenceId, expectedRevisionId: item.id };
+  } finally {
+    database.close();
+  }
+}
+export async function listExperienceProjectCollection(
+  options: Options = {},
+): Promise<ExperienceProjectCollection[]> {
+  const groups = await readManagedDocumentedArtifacts(options.workspaceRoot);
+  if (!groups.length) return [];
+  const paths = await resolveAppDataPaths(options.appDataRoot);
+  const database = openDatabase(paths.databasePath);
+  try {
+    applyMigrations(database);
+    const workspace = readActiveResumeWorkspace(database).workspace;
+    if (!workspace) return [];
+    const ownedDocumentPaths = new Set(
+      (
+        database
+          .prepare(
+            "SELECT d.library_path FROM evidence_library_documents d JOIN evidence_library_imports i ON i.id = d.import_id JOIN resume_workspace_imports w ON w.import_id = i.id WHERE w.workspace_id = ?",
+          )
+          .all(workspace.id) as Array<{ library_path: string }>
+      ).map((item) => item.library_path),
+    );
+    const evidence = listCurrentEvidence(database).filter((item) =>
+      Boolean(
+        database
+          .prepare(
+            "SELECT 1 FROM resume_workspace_evidence WHERE workspace_id = ? AND evidence_id = ?",
+          )
+          .get(workspace.id, item.evidenceId),
+      ),
+    );
+    return groups
+      .filter((group) =>
+        group.documents.some((document) =>
+          ownedDocumentPaths.has(document.libraryPath),
+        ),
+      )
+      .map((group) => {
+        const overviewFile =
+          group.category === "project"
+            ? "project-overview.md"
+            : "experience-overview.md";
+        const overview = group.documents.find((document) =>
+          document.libraryPath.endsWith(`/${overviewFile}`),
+        );
+        const evidenceDocument = group.documents.find((document) =>
+          document.libraryPath.endsWith("/resume-evidence.md"),
+        );
+        return {
+          name: group.name,
+          category: group.category,
+          summary: summaryFromProjectOverview(overview?.text ?? ""),
+          artifactNames: group.documents
+            .map((document) => document.libraryPath.split("/").at(-1)!)
+            .sort(),
+          evidence: evidence
+            .filter(
+              (item) => item.sourceDocument === evidenceDocument?.libraryPath,
+            )
+            .map(({ id, evidenceId, factualText, reviewState }) => ({
+              factualText,
+              reviewState,
+              reviewHandle: collectionReviewHandle(evidenceId, id),
+            })),
+        };
+      });
+  } finally {
+    database.close();
+  }
+}
+export async function recordEvidenceLibraryFailure(
+  options: Options = {},
+): Promise<void> {
+  const paths = await resolveAppDataPaths(options.appDataRoot);
+  const database = openDatabase(paths.databasePath);
+  try {
+    applyMigrations(database);
+    appendAuditEvent(
+      database,
+      createAuditEvent({
+        actor: "local-os-user",
+        action: "evidence.library_failed",
+        outcome: "failure",
+      }),
+    );
+  } finally {
+    database.close();
+  }
+}
