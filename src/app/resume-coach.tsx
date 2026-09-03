@@ -216,21 +216,9 @@ export function ResumeCoach({
               <form action={revisionAction} aria-busy={revisionPending} className="revision-request-form">
                 <input type="hidden" name="generationCommand" value="revision" />
                 <input type="hidden" name="workspaceId" value={workspaceId ?? ""} />
-                <label htmlFor="resume-revision" className="revision-label">
-                  Apply a small supported change
-                </label>
-                <div className="revision-input-row">
-                  <input
-                    id="resume-revision"
-                    name="resumeRequest"
-                    maxLength={900}
-                    placeholder="For example: emphasize API integration in the AgriMart project."
-                    className="revision-input"
-                  />
-                  <button type="submit" disabled={revisionPending} className="revision-submit-button">
-                    {revisionPending ? "Updating resume…" : "Apply change"}
-                  </button>
-                </div>
+                <button type="submit" disabled={revisionPending} className="revision-submit-button">
+                  {revisionPending ? "Regenerating resume…" : "Regenerate resume"}
+                </button>
               </form>
               {revisionState.status !== "idle" ? (
                 <p role="status" aria-live="polite" className={revisionState.status === "error" ? "status status-error" : "status"}>
