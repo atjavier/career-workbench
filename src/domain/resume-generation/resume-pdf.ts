@@ -18,8 +18,22 @@ const contactSize = 9.5;
 const lineHeight = 11.8;
 
 type PageSize = { width: number; height: number };
-type FlowLine = { text: string; font: "regular" | "bold" | "italic"; size: number; x?: number; right?: boolean; gapBefore?: number; bullet?: boolean };
-export type ResumeEntry = { title: string; detail?: string; meta?: string; date?: string; bullets: string[] };
+type FlowLine = {
+  text: string;
+  font: "regular" | "bold" | "italic";
+  size: number;
+  x?: number;
+  right?: boolean;
+  gapBefore?: number;
+  bullet?: boolean;
+};
+export type ResumeEntry = {
+  title: string;
+  detail?: string;
+  meta?: string;
+  date?: string;
+  bullets: string[];
+};
 export type ResumeDocumentModel = {
   name: string;
   contact: string;
@@ -55,7 +69,12 @@ function plainText(value: string): string {
     .trim();
 }
 
-function normalized(value: string): string { return value.toLocaleLowerCase().replace(/[^a-z0-9]+/g, " ").trim(); }
+function normalized(value: string): string {
+  return value
+    .toLocaleLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
 
 function wrap(value: string, maximumCharacters = 92): string[] {
   const result: string[] = [];
@@ -68,8 +87,12 @@ function wrap(value: string, maximumCharacters = 92): string[] {
     let current = "";
     for (const word of text.split(/\s+/)) {
       if (!current) current = word;
-      else if (`${current} ${word}`.length <= maximumCharacters) current += ` ${word}`;
-      else { result.push(current); current = word; }
+      else if (`${current} ${word}`.length <= maximumCharacters)
+        current += ` ${word}`;
+      else {
+        result.push(current);
+        current = word;
+      }
     }
     if (current) result.push(current);
   }
@@ -79,55 +102,126 @@ function wrap(value: string, maximumCharacters = 92): string[] {
 
 function templatePageSize(templateBytes?: Uint8Array): PageSize {
   if (!templateBytes) return defaultPage;
-  if (Buffer.from(templateBytes.subarray(0, 5)).toString("ascii") !== "%PDF-") throw new Error("The Resume.pdf template is invalid.");
+  if (Buffer.from(templateBytes.subarray(0, 5)).toString("ascii") !== "%PDF-")
+    throw new Error("The Resume.pdf template is invalid.");
   const source = Buffer.from(templateBytes).toString("latin1");
-  const match = /\/MediaBox\s*\[\s*0\s+0\s+([0-9.]+)\s+([0-9.]+)\s*\]/.exec(source);
-  if (!match) throw new Error("The Resume.pdf template page geometry is unavailable.");
+  const match = /\/MediaBox\s*\[\s*0\s+0\s+([0-9.]+)\s+([0-9.]+)\s*\]/.exec(
+    source,
+  );
+  if (!match)
+    throw new Error("The Resume.pdf template page geometry is unavailable.");
   const width = Number(match[1]);
   const height = Number(match[2]);
-  if (!Number.isFinite(width) || !Number.isFinite(height) || width < 300 || height < 400 || width > 2_000 || height > 2_000) throw new Error("The Resume.pdf template page geometry is invalid.");
+  if (
+    !Number.isFinite(width) ||
+    !Number.isFinite(height) ||
+    width < 300 ||
+    height < 400 ||
+    width > 2_000 ||
+    height > 2_000
+  )
+    throw new Error("The Resume.pdf template page geometry is invalid.");
   return { width, height };
 }
 
-function findSection(draft: MaterialDraftView, pattern: RegExp): { heading: string; text: string } | undefined { return draft.sections.find((section) => pattern.test(section.heading)); }
-function sectionParagraphs(text: string): string[] { return text.split(/\n\s*\n/).map((item) => item.trim()).filter(Boolean); }
+function findSection(
+  draft: MaterialDraftView,
+  pattern: RegExp,
+): { heading: string; text: string } | undefined {
+  return draft.sections.find((section) => pattern.test(section.heading));
+}
+function sectionParagraphs(text: string): string[] {
+  return text
+    .split(/\n\s*\n/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
 
-function contactAndName(draft: MaterialDraftView): { name: string; contact: string } {
+function contactAndName(draft: MaterialDraftView): {
+  name: string;
+  contact: string;
+} {
   const contact = findSection(draft, /contact/i);
-  const lines = contact?.text.split(/\r?\n/).map((item) => plainText(item)).filter(Boolean) ?? [];
+  const lines =
+    contact?.text
+      .split(/\r?\n/)
+      .map((item) => plainText(item))
+      .filter(Boolean) ?? [];
   const summary = findSection(draft, /summary|profile|objective/i)?.text ?? "";
-  const name = lines.length > 1 ? lines[0]! : (plainText(summary).split(/\s+(?:is|has|with)\s+/i)[0] || "Candidate");
-  return { name, contact: (lines.length > 1 ? lines.slice(1) : lines).join(" | ") };
+  const name =
+    lines.length > 1
+      ? lines[0]!
+      : plainText(summary).split(/\s+(?:is|has|with)\s+/i)[0] || "Candidate";
+  return {
+    name,
+    contact: (lines.length > 1 ? lines.slice(1) : lines).join(" | "),
+  };
 }
 
-function entriesFromSection(section: { heading: string; text: string } | undefined): ResumeEntry[] {
+function entriesFromSection(
+  section: { heading: string; text: string } | undefined,
+): ResumeEntry[] {
   if (!section) return [];
-  if (/^no (?:experience|project) entries were documented\.?$/i.test(section.text.trim())) return [];
-  return sectionParagraphs(section.text).map((paragraph) => {
-    const lines = paragraph.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
-    const titleSource = plainText(lines.shift() ?? "");
-    const separator = titleSource.indexOf("|");
-    const title = separator >= 0 ? titleSource.slice(0, separator).trim() : titleSource;
-    const detail = separator >= 0 ? titleSource.slice(separator + 1).trim() || undefined : undefined;
-    const bulletStart = lines.findIndex((line) => /^[•*\-]\s+/.test(line));
-    // New model output marks every accomplishment as a bullet. Keeping that
-    // boundary prevents the first achievement from becoming italic metadata.
-    // Legacy drafts without markers retain their prior first-metadata-line
-    // interpretation so old material stays readable.
-    const metadata = bulletStart >= 0 ? lines.slice(0, bulletStart) : lines.slice(0, 1);
-    const bulletLines = bulletStart >= 0 ? lines.slice(bulletStart) : lines.slice(1);
-    const dateIndex = metadata.findIndex((line) => /\b(?:19|20)\d{2}\b|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b.*\b(?:19|20)\d{2}\b/i.test(line));
-    const date = dateIndex >= 0 ? plainText(metadata[dateIndex] ?? "") : undefined;
-    const meta = metadata.filter((_, index) => index !== dateIndex).map(plainText).filter(Boolean).join(" | ") || undefined;
-    const bullets = bulletLines.flatMap((line) => wrap(line, 87)).filter(Boolean);
-    if (!bullets.length && title.includes(" - ")) bullets.push(...wrap(title, 87).slice(1));
-    return { title: title || "Documented work", detail, meta, date, bullets };
-  }).filter((entry) => entry.title || entry.bullets.length);
+  if (
+    /^no (?:experience|project) entries were documented\.?$/i.test(
+      section.text.trim(),
+    )
+  )
+    return [];
+  return sectionParagraphs(section.text)
+    .map((paragraph) => {
+      const lines = paragraph
+        .split(/\r?\n/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+      const titleSource = plainText(lines.shift() ?? "");
+      const separator = titleSource.indexOf("|");
+      const title =
+        separator >= 0 ? titleSource.slice(0, separator).trim() : titleSource;
+      const detail =
+        separator >= 0
+          ? titleSource.slice(separator + 1).trim() || undefined
+          : undefined;
+      const bulletStart = lines.findIndex((line) => /^[•*\-]\s+/.test(line));
+      // New model output marks every accomplishment as a bullet. Keeping that
+      // boundary prevents the first achievement from becoming italic metadata.
+      // Legacy drafts without markers retain their prior first-metadata-line
+      // interpretation so old material stays readable.
+      const metadata =
+        bulletStart >= 0 ? lines.slice(0, bulletStart) : lines.slice(0, 1);
+      const bulletLines =
+        bulletStart >= 0 ? lines.slice(bulletStart) : lines.slice(1);
+      const dateIndex = metadata.findIndex((line) =>
+        /\b(?:19|20)\d{2}\b|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b.*\b(?:19|20)\d{2}\b/i.test(
+          line,
+        ),
+      );
+      const date =
+        dateIndex >= 0 ? plainText(metadata[dateIndex] ?? "") : undefined;
+      const meta =
+        metadata
+          .filter((_, index) => index !== dateIndex)
+          .map(plainText)
+          .filter(Boolean)
+          .join(" | ") || undefined;
+      const bullets = bulletLines
+        .flatMap((line) => wrap(line, 87))
+        .filter(Boolean);
+      if (!bullets.length && title.includes(" - "))
+        bullets.push(...wrap(title, 87).slice(1));
+      return { title: title || "Documented work", detail, meta, date, bullets };
+    })
+    .filter((entry) => entry.title || entry.bullets.length);
 }
 
-function claimsNotAlreadyWritten(draft: MaterialDraftView, written: string): string[] {
+function claimsNotAlreadyWritten(
+  draft: MaterialDraftView,
+  written: string,
+): string[] {
   const haystack = normalized(written);
-  return draft.claims.flatMap((claim) => haystack.includes(normalized(claim.text)) ? [] : wrap(claim.text, 87));
+  return draft.claims.flatMap((claim) =>
+    haystack.includes(normalized(claim.text)) ? [] : wrap(claim.text, 87),
+  );
 }
 
 /**
@@ -136,7 +230,9 @@ function claimsNotAlreadyWritten(draft: MaterialDraftView, written: string): str
  * place prevents the two template paths from drifting in section order or
  * accidentally showing raw source snippets.
  */
-export function resumeDocumentModel(draft: MaterialDraftView): ResumeDocumentModel {
+export function resumeDocumentModel(
+  draft: MaterialDraftView,
+): ResumeDocumentModel {
   const { name, contact } = contactAndName(draft);
   const summary = findSection(draft, /summary|profile|objective/i);
   const education = findSection(draft, /education/i);
@@ -147,11 +243,25 @@ export function resumeDocumentModel(draft: MaterialDraftView): ResumeDocumentMod
   const written = draft.sections.map((section) => section.text).join("\n");
   const experienceEntries = entriesFromSection(experience);
   const projectEntries = entriesFromSection(projects);
-  if (!experienceEntries.length && selected) experienceEntries.push(...entriesFromSection(selected).slice(0, 2));
+  if (!experienceEntries.length && selected)
+    experienceEntries.push(...entriesFromSection(selected).slice(0, 2));
   const remainingClaims = claimsNotAlreadyWritten(draft, written);
-  if (!projectEntries.length && remainingClaims.length) projectEntries.push({ title: "Documented projects and contributions", bullets: remainingClaims });
-  else if (projectEntries.length && remainingClaims.length) projectEntries[projectEntries.length - 1]!.bullets.push(...remainingClaims);
-  if (!experienceEntries.length && !projectEntries.length && draft.claims.length) experienceEntries.push({ title: "Documented experience and projects", bullets: draft.claims.flatMap((claim) => wrap(claim.text, 87)) });
+  if (!projectEntries.length && remainingClaims.length)
+    projectEntries.push({
+      title: "Documented projects and contributions",
+      bullets: remainingClaims,
+    });
+  else if (projectEntries.length && remainingClaims.length)
+    projectEntries[projectEntries.length - 1]!.bullets.push(...remainingClaims);
+  if (
+    !experienceEntries.length &&
+    !projectEntries.length &&
+    draft.claims.length
+  )
+    experienceEntries.push({
+      title: "Documented experience and projects",
+      bullets: draft.claims.flatMap((claim) => wrap(claim.text, 87)),
+    });
 
   return {
     name,
@@ -164,53 +274,64 @@ export function resumeDocumentModel(draft: MaterialDraftView): ResumeDocumentMod
   };
 }
 
-function flowFor(draft: MaterialDraftView): { name: string; contact: string; lines: FlowLine[] } {
-  const model = resumeDocumentModel(draft);
-  const { name, contact } = model;
-  const summary = model.summary;
-  const education = model.education;
-  const experienceEntries = model.experienceEntries;
-  const projectEntries = model.projectEntries;
-  const skills = model.skills;
-
+function flowFor(draft: MaterialDraftView): {
+  name: string;
+  contact: string;
+  lines: FlowLine[];
+} {
+  const { name, contact } = contactAndName(draft);
   const lines: FlowLine[] = [];
-  const section = (heading: string) => { lines.push({ text: heading.toUpperCase(), font: "regular", size: sectionSize, x: leftMargin, gapBefore: 5 }); lines.push({ text: "", font: "regular", size: 1, x: leftMargin }); };
-  const entry = (item: ResumeEntry) => {
-    lines.push({ text: item.title, font: "bold", size: entryTitleSize, x: bodyLeft, gapBefore: 2 });
-    if (item.date) lines.push({ text: item.date, font: "regular", size: entryMetaSize, right: true });
-    if (item.meta) lines.push({ text: item.meta, font: "italic", size: entryMetaSize, x: bodyLeft });
-    for (const bullet of item.bullets) lines.push({ text: bullet, font: "regular", size: bodySize, x: textLeft, bullet: true });
+  const section = (heading: string) => {
+    lines.push({
+      text: heading.toUpperCase(),
+      font: "regular",
+      size: sectionSize,
+      x: leftMargin,
+      gapBefore: 5,
+    });
+    lines.push({ text: "", font: "regular", size: 1, x: leftMargin });
   };
-  if (summary) { section("Summary"); for (const line of wrap(summary, 94)) lines.push({ text: line, font: "regular", size: bodySize, x: bodyLeft }); }
-  section("Experience");
-  for (const item of experienceEntries) entry(item);
-  if (!experienceEntries.length) lines.push({ text: "No experience entries were documented.", font: "regular", size: bodySize, x: bodyLeft });
-  section("Education");
-  if (education) for (const line of wrap(education, 94)) lines.push({ text: line, font: "regular", size: bodySize, x: bodyLeft });
-  else lines.push({ text: "Education details were not supplied.", font: "regular", size: bodySize, x: bodyLeft });
-  section("Projects");
-  for (const item of projectEntries) entry(item);
-  if (!projectEntries.length) lines.push({ text: "No project entries were documented.", font: "regular", size: bodySize, x: bodyLeft });
-  section("Technical Skills");
-  if (skills) for (const line of wrap(skills, 94)) lines.push({ text: line, font: "regular", size: bodySize, x: bodyLeft });
-  else lines.push({ text: "Skills are listed only when directly supported by the documented work.", font: "regular", size: bodySize, x: bodyLeft });
+  for (const item of draft.sections) {
+    if (!item.text.trim()) continue;
+    section(item.heading);
+    for (const rawLine of item.text.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line) continue;
+      const bullet = /^(?:[-*•])\s+(.+)$/.exec(line);
+      for (const wrapped of wrap(bullet?.[1] ?? line, bullet ? 87 : 94))
+        lines.push({
+          text: wrapped,
+          font: "regular",
+          size: bodySize,
+          x: bullet ? textLeft : bodyLeft,
+          bullet: Boolean(bullet),
+        });
+    }
+  }
   return { name, contact, lines };
 }
 
-function pageStreams(draft: MaterialDraftView, page: PageSize): { streams: string[] } {
+function pageStreams(
+  draft: MaterialDraftView,
+  page: PageSize,
+): { streams: string[] } {
   const flow = flowFor(draft);
   const streams: string[] = [];
   let stream = "";
   let y = page.height - topMargin;
   let firstPage = true;
-  const finish = () => { streams.push(stream); stream = ""; };
+  const finish = () => {
+    streams.push(stream);
+    stream = "";
+  };
   const start = () => {
     y = page.height - topMargin;
     if (firstPage) {
       const nameWidth = Math.max(1, flow.name.length * 11.5);
       const nameX = (page.width - nameWidth) / 2;
       stream += `BT /F2 21 Tf 1 0 0 1 ${Math.max(leftMargin, nameX)} ${y} Tm (${printable(flow.name)}) Tj ET\n`;
-      if (flow.contact) stream += `BT /F1 ${contactSize} Tf 1 0 0 1 ${leftMargin + 44} ${y - 16} Tm (${printable(flow.contact)}) Tj ET\n`;
+      if (flow.contact)
+        stream += `BT /F1 ${contactSize} Tf 1 0 0 1 ${leftMargin + 44} ${y - 16} Tm (${printable(flow.contact)}) Tj ET\n`;
       y -= 37;
       firstPage = false;
     } else {
@@ -218,7 +339,12 @@ function pageStreams(draft: MaterialDraftView, page: PageSize): { streams: strin
       y -= 22;
     }
   };
-  const ensure = (height: number) => { if (y - height < bottomMargin) { finish(); start(); } };
+  const ensure = (height: number) => {
+    if (y - height < bottomMargin) {
+      finish();
+      start();
+    }
+  };
   const draw = (line: FlowLine) => {
     const gap = line.gapBefore ?? 0;
     ensure(lineHeight + gap + (line.text ? 0 : 4));
@@ -231,9 +357,12 @@ function pageStreams(draft: MaterialDraftView, page: PageSize): { streams: strin
       y -= 7;
       return;
     }
-    const x = line.right ? page.width - rightMargin - Math.min(220, line.text.length * 5.1) : (line.x ?? bodyLeft);
+    const x = line.right
+      ? page.width - rightMargin - Math.min(220, line.text.length * 5.1)
+      : (line.x ?? bodyLeft);
     const text = line.bullet ? `- ${line.text}` : line.text;
-    const font = line.font === "bold" ? "F2" : line.font === "italic" ? "F3" : "F1";
+    const font =
+      line.font === "bold" ? "F2" : line.font === "italic" ? "F3" : "F1";
     stream += `BT /${font} ${line.size} Tf 1 0 0 1 ${x} ${y} Tm (${printable(text)}) Tj ET\n`;
     y -= lineHeight;
   };
@@ -246,22 +375,36 @@ function pageStreams(draft: MaterialDraftView, page: PageSize): { streams: strin
 function pdfBytes(objects: string[]): Uint8Array {
   let output = "%PDF-1.4\n%\xE2\xE3\xCF\xD3\n";
   const offsets: number[] = [];
-  for (const [index, object] of objects.entries()) { offsets.push(Buffer.byteLength(output, "binary")); output += `${index + 1} 0 obj\n${object}\nendobj\n`; }
+  for (const [index, object] of objects.entries()) {
+    offsets.push(Buffer.byteLength(output, "binary"));
+    output += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  }
   const startxref = Buffer.byteLength(output, "binary");
   output += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n${offsets.map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`).join("")}trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${startxref}\n%%EOF\n`;
   return new Uint8Array(Buffer.from(output, "binary"));
 }
 
 /** Render a draft using the immutable Resume.pdf geometry and visual system. */
-export function renderResumeDraftPdf(draft: MaterialDraftView, templateBytes?: Uint8Array): Uint8Array {
+export function renderResumeDraftPdf(
+  draft: MaterialDraftView,
+  templateBytes?: Uint8Array,
+): Uint8Array {
   const page = templatePageSize(templateBytes);
   const streams = pageStreams(draft, page).streams;
   const firstPageObject = 5;
   const firstContentObject = firstPageObject + streams.length;
   const firstFontObject = firstContentObject + streams.length;
-  const pageObjects = streams.map((_, index) => `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${page.width} ${page.height}] /Resources << /Font << /F1 ${firstFontObject} 0 R /F2 ${firstFontObject + 1} 0 R /F3 ${firstFontObject + 2} 0 R >> >> /Contents ${firstContentObject + index} 0 R >>`);
-  const contentObjects = streams.map((stream) => `<< /Length ${Buffer.byteLength(stream, "binary")} >>\nstream\n${stream}endstream`);
-  const kids = pageObjects.map((_, index) => `${firstPageObject + index} 0 R`).join(" ");
+  const pageObjects = streams.map(
+    (_, index) =>
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${page.width} ${page.height}] /Resources << /Font << /F1 ${firstFontObject} 0 R /F2 ${firstFontObject + 1} 0 R /F3 ${firstFontObject + 2} 0 R >> >> /Contents ${firstContentObject + index} 0 R >>`,
+  );
+  const contentObjects = streams.map(
+    (stream) =>
+      `<< /Length ${Buffer.byteLength(stream, "binary")} >>\nstream\n${stream}endstream`,
+  );
+  const kids = pageObjects
+    .map((_, index) => `${firstPageObject + index} 0 R`)
+    .join(" ");
   return pdfBytes([
     "<< /Type /Catalog /Pages 2 0 R >>",
     `<< /Type /Pages /Kids [${kids}] /Count ${pageObjects.length} >>`,
