@@ -54,30 +54,26 @@ function FolderSelectionTile({
   folderName,
   folderPath,
   onSelected,
-  error,
 }: {
   label: string;
   itemName: string;
   folderName?: string;
   folderPath?: string;
   onSelected: (result: FolderPickerActionState) => void;
-  error?: string;
 }) {
   const [state, action, pending] = useActionState(
     chooseLocalEvidenceFolderAction,
     pickerInitial,
   );
 
-  const onSelectedRef = useRef(onSelected);
-  onSelectedRef.current = onSelected;
   const lastStateRef = useRef<FolderPickerActionState>(pickerInitial);
 
   useEffect(() => {
     if (state.folderPath && state !== lastStateRef.current) {
       lastStateRef.current = state;
-      onSelectedRef.current(state);
+      onSelected(state);
     }
-  }, [state]);
+  }, [onSelected, state]);
 
   const accessibleName = folderPath
     ? `Change folder for ${itemName || label}`
@@ -108,10 +104,9 @@ function FolderSelectionTile({
       <p role="status" className="folder-status-note">
         {folderName
           ? `${folderName} selected for bounded local inspection. Source files remain unchanged and no transfer begins merely by choosing it.`
-          : error ??
-            (state.status === "error"
-              ? state.summary
-              : "Choose a local folder from this computer.")}
+          : state.status === "error"
+            ? state.summary
+            : "Choose a local folder from this computer."}
       </p>
     </div>
   );
@@ -139,7 +134,9 @@ export function ResumeOnboarding({ localAiReady }: { localAiReady: boolean }) {
 
   const addProject = () => {
     if (projects.length + experiences.length >= 12) {
-      setSelectionMessage("You can add up to 12 total Projects and Experiences.");
+      setSelectionMessage(
+        "You can add up to 12 total Projects and Experiences.",
+      );
       return;
     }
     setSelectionMessage(undefined);
@@ -180,7 +177,9 @@ export function ResumeOnboarding({ localAiReady }: { localAiReady: boolean }) {
 
   const addExperience = () => {
     if (projects.length + experiences.length >= 12) {
-      setSelectionMessage("You can add up to 12 total Projects and Experiences.");
+      setSelectionMessage(
+        "You can add up to 12 total Projects and Experiences.",
+      );
       return;
     }
     setSelectionMessage(undefined);
@@ -288,7 +287,8 @@ export function ResumeOnboarding({ localAiReady }: { localAiReady: boolean }) {
       data.set(`startDate-${index}`, item.startDate);
       data.set(
         `endDate-${index}`,
-        item.category === "experience" && (item as ExperienceItem).currentlyWorking
+        item.category === "experience" &&
+          (item as ExperienceItem).currentlyWorking
           ? "Present"
           : item.endDate,
       );
@@ -324,10 +324,10 @@ export function ResumeOnboarding({ localAiReady }: { localAiReady: boolean }) {
           <p className="builder-subtitle">
             Complete your profile to generate a tailored, ATS-friendly resume.
             Add every Project and Experience you want to start with. The local
-            evidence agent reads each chosen folder directly within its allowlist
-            and safety limits, then Coach Resume will ask about important context
-            the folders cannot establish. Folder paths and raw files are not
-            retained.
+            evidence agent reads each chosen folder directly within its
+            allowlist and safety limits, then Coach Resume will ask about
+            important context the folders cannot establish. Folder paths and raw
+            files are not retained.
           </p>
         </div>
 
@@ -338,42 +338,57 @@ export function ResumeOnboarding({ localAiReady }: { localAiReady: boolean }) {
           <div className="stage-goal-card stage-active" aria-current="step">
             <div className="stage-goal-header">
               <span className="stage-number-pill">Stage 1</span>
-              <span className="stage-status-badge stage-badge-active">In Progress</span>
+              <span className="stage-status-badge stage-badge-active">
+                In Progress
+              </span>
             </div>
             <h3 className="stage-goal-title">Profile &amp; Evidence Intake</h3>
             <p className="stage-goal-desc">
-              Input verified details and select local work folders for bounded inspection.
+              Input verified details and select local work folders for bounded
+              inspection.
             </p>
             <div className="stage-goal-meta">
-              <span className="stage-meta-item">Goal: Extract source-backed technical facts</span>
+              <span className="stage-meta-item">
+                Goal: Extract source-backed technical facts
+              </span>
             </div>
           </div>
 
           <div className="stage-goal-card stage-upcoming">
             <div className="stage-goal-header">
               <span className="stage-number-pill">Stage 2</span>
-              <span className="stage-status-badge stage-badge-upcoming">Next Up</span>
+              <span className="stage-status-badge stage-badge-upcoming">
+                Next Up
+              </span>
             </div>
             <h3 className="stage-goal-title">AI Clarification Interview</h3>
             <p className="stage-goal-desc">
-              Your local Coach clarifies architectural decisions, tradeoffs, and outcomes.
+              Your local Coach clarifies architectural decisions, tradeoffs, and
+              outcomes.
             </p>
             <div className="stage-goal-meta">
-              <span className="stage-meta-item">Goal: Turn facts into validated achievements</span>
+              <span className="stage-meta-item">
+                Goal: Turn facts into validated achievements
+              </span>
             </div>
           </div>
 
           <div className="stage-goal-card stage-upcoming">
             <div className="stage-goal-header">
               <span className="stage-number-pill">Stage 3</span>
-              <span className="stage-status-badge stage-badge-upcoming">Final Milestone</span>
+              <span className="stage-status-badge stage-badge-upcoming">
+                Final Milestone
+              </span>
             </div>
             <h3 className="stage-goal-title">Resume Generation &amp; Review</h3>
             <p className="stage-goal-desc">
-              Synthesize ATS-optimized resumes with side-by-side evidence inspection.
+              Synthesize ATS-optimized resumes with side-by-side evidence
+              inspection.
             </p>
             <div className="stage-goal-meta">
-              <span className="stage-meta-item">Goal: Export verifiable, tailored resumes</span>
+              <span className="stage-meta-item">
+                Goal: Export verifiable, tailored resumes
+              </span>
             </div>
           </div>
         </div>
@@ -394,7 +409,16 @@ export function ResumeOnboarding({ localAiReady }: { localAiReady: boolean }) {
             <div className="section-card-header">
               <h3 className="section-card-title">
                 <span className="icon-badge" aria-hidden="true">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
                     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
                     <polyline points="14 2 14 8 20 8" />
                     <line x1="16" y1="13" x2="8" y2="13" />
@@ -407,7 +431,8 @@ export function ResumeOnboarding({ localAiReady }: { localAiReady: boolean }) {
               <span className="badge-counter">Primary Identifier</span>
             </div>
             <p className="collection-hint">
-              Give your resume a clear, descriptive title to easily identify and compare versions later.
+              Give your resume a clear, descriptive title to easily identify and
+              compare versions later.
             </p>
             <div className="resume-onboarding-fields">
               <label htmlFor="resume-name">
@@ -428,7 +453,16 @@ export function ResumeOnboarding({ localAiReady }: { localAiReady: boolean }) {
             <div className="card-surface personal-details-card">
               <h3 className="section-card-title">
                 <span className="icon-badge" aria-hidden="true">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
                     <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
                     <circle cx="12" cy="7" r="4" />
                   </svg>
@@ -438,31 +472,72 @@ export function ResumeOnboarding({ localAiReady }: { localAiReady: boolean }) {
               <div className="resume-onboarding-fields">
                 <label>
                   First name
-                  <input name="firstName" required maxLength={120} className="input-base" placeholder="Jane" />
+                  <input
+                    name="firstName"
+                    required
+                    maxLength={120}
+                    className="input-base"
+                    placeholder="Jane"
+                  />
                 </label>
                 <label>
                   Middle name (optional)
-                  <input name="middleName" maxLength={120} className="input-base" />
+                  <input
+                    name="middleName"
+                    maxLength={120}
+                    className="input-base"
+                  />
                 </label>
                 <label>
                   Last name
-                  <input name="lastName" required maxLength={120} className="input-base" placeholder="Doe" />
+                  <input
+                    name="lastName"
+                    required
+                    maxLength={120}
+                    className="input-base"
+                    placeholder="Doe"
+                  />
                 </label>
                 <label>
                   Email
-                  <input name="email" type="email" required maxLength={254} className="input-base" placeholder="jane.doe@example.com" />
+                  <input
+                    name="email"
+                    type="email"
+                    required
+                    maxLength={254}
+                    className="input-base"
+                    placeholder="jane.doe@example.com"
+                  />
                 </label>
                 <label>
                   Phone
-                  <input name="phone" required maxLength={40} className="input-base" placeholder="+1 (555) 000-0000" />
+                  <input
+                    name="phone"
+                    required
+                    maxLength={40}
+                    className="input-base"
+                    placeholder="+1 (555) 000-0000"
+                  />
                 </label>
                 <label>
                   LinkedIn URL (optional)
-                  <input name="linkedInUrl" type="url" maxLength={2048} className="input-base" placeholder="https://linkedin.com/in/username" />
+                  <input
+                    name="linkedInUrl"
+                    type="url"
+                    maxLength={2048}
+                    className="input-base"
+                    placeholder="https://linkedin.com/in/username"
+                  />
                 </label>
                 <label>
                   GitHub URL (optional)
-                  <input name="githubUrl" type="url" maxLength={2048} className="input-base" placeholder="https://github.com/username" />
+                  <input
+                    name="githubUrl"
+                    type="url"
+                    maxLength={2048}
+                    className="input-base"
+                    placeholder="https://github.com/username"
+                  />
                 </label>
               </div>
             </div>
@@ -470,7 +545,16 @@ export function ResumeOnboarding({ localAiReady }: { localAiReady: boolean }) {
             <div className="card-surface education-card">
               <h3 className="section-card-title">
                 <span className="icon-badge" aria-hidden="true">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
                     <path d="M22 10v6M2 10l10-5 10 5-10 5z" />
                     <path d="M6 12v5c3 3 9 3 12 0v-5" />
                   </svg>
@@ -480,11 +564,23 @@ export function ResumeOnboarding({ localAiReady }: { localAiReady: boolean }) {
               <div className="resume-onboarding-fields">
                 <label>
                   School
-                  <input name="school" required maxLength={240} className="input-base" placeholder="University of the Philippines" />
+                  <input
+                    name="school"
+                    required
+                    maxLength={240}
+                    className="input-base"
+                    placeholder="University of the Philippines"
+                  />
                 </label>
                 <label>
                   Degree or program
-                  <input name="program" required maxLength={240} className="input-base" placeholder="BS Computer Science" />
+                  <input
+                    name="program"
+                    required
+                    maxLength={240}
+                    className="input-base"
+                    placeholder="BS Computer Science"
+                  />
                 </label>
                 <label>
                   Expected or graduation year
@@ -499,11 +595,21 @@ export function ResumeOnboarding({ localAiReady }: { localAiReady: boolean }) {
                 </label>
                 <label>
                   GWA (optional)
-                  <input name="gwa" maxLength={20} className="input-base" placeholder="1.25" />
+                  <input
+                    name="gwa"
+                    maxLength={20}
+                    className="input-base"
+                    placeholder="1.25"
+                  />
                 </label>
                 <label>
                   Latin honors (optional)
-                  <input name="latinHonors" maxLength={120} className="input-base" placeholder="Magna Cum Laude" />
+                  <input
+                    name="latinHonors"
+                    maxLength={120}
+                    className="input-base"
+                    placeholder="Magna Cum Laude"
+                  />
                 </label>
               </div>
             </div>
@@ -512,7 +618,16 @@ export function ResumeOnboarding({ localAiReady }: { localAiReady: boolean }) {
           <div className="work-collections-header">
             <h3 className="section-card-title">
               <span className="icon-badge" aria-hidden="true">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
                   <rect width="20" height="14" x="2" y="7" rx="2" />
                   <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" />
                 </svg>
@@ -529,20 +644,32 @@ export function ResumeOnboarding({ localAiReady }: { localAiReady: boolean }) {
             <div className="section-card-header">
               <span className="section-card-title">
                 <span className="icon-badge" aria-hidden="true">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
                     <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
                   </svg>
                 </span>
                 Projects
               </span>
-              <span className="badge-counter">{projects.length} project{projects.length === 1 ? "" : "s"}</span>
+              <span className="badge-counter">
+                {projects.length} project{projects.length === 1 ? "" : "s"}
+              </span>
             </div>
             <p className="collection-hint">
               Add projects you have created or contributed to.
             </p>
             {projects.length === 0 ? (
               <p className="collection-empty-note">
-                No projects added yet. Click &ldquo;Add project&rdquo; below to add your first project.
+                No projects added yet. Click &ldquo;Add project&rdquo; below to
+                add your first project.
               </p>
             ) : null}
             {projects.map((item, index) => (
@@ -552,7 +679,9 @@ export function ResumeOnboarding({ localAiReady }: { localAiReady: boolean }) {
                 aria-label={`Project: ${item.name || "Untitled"}`}
               >
                 <div>
-                  <label htmlFor={`project-name-${item.id}`}>Project name</label>
+                  <label htmlFor={`project-name-${item.id}`}>
+                    Project name
+                  </label>
                   <input
                     id={`project-name-${item.id}`}
                     name={`projectName-${index}`}
@@ -568,7 +697,9 @@ export function ResumeOnboarding({ localAiReady }: { localAiReady: boolean }) {
                 </div>
                 <div className="work-date-range">
                   <div>
-                    <label htmlFor={`project-start-${item.id}`}>Start date</label>
+                    <label htmlFor={`project-start-${item.id}`}>
+                      Start date
+                    </label>
                     <input
                       id={`project-start-${item.id}`}
                       name={`projectStartDate-${index}`}
@@ -631,21 +762,34 @@ export function ResumeOnboarding({ localAiReady }: { localAiReady: boolean }) {
             <div className="section-card-header">
               <span className="section-card-title">
                 <span className="icon-badge" aria-hidden="true">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
                     <rect width="20" height="14" x="2" y="7" rx="2" />
                     <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" />
                   </svg>
                 </span>
                 Experiences
               </span>
-              <span className="badge-counter">{experiences.length} experience{experiences.length === 1 ? "" : "s"}</span>
+              <span className="badge-counter">
+                {experiences.length} experience
+                {experiences.length === 1 ? "" : "s"}
+              </span>
             </div>
             <p className="collection-hint">
               Add internships, employment, or leadership roles.
             </p>
             {experiences.length === 0 ? (
               <p className="collection-empty-note">
-                No experiences added yet. Click &ldquo;Add experience&rdquo; below to add your first role.
+                No experiences added yet. Click &ldquo;Add experience&rdquo;
+                below to add your first role.
               </p>
             ) : null}
             {experiences.map((item, index) => (
@@ -712,7 +856,9 @@ export function ResumeOnboarding({ localAiReady }: { localAiReady: boolean }) {
                       onChange={(e) =>
                         updateExperience(item.id, { endDate: e.target.value })
                       }
-                      placeholder={item.currentlyWorking ? "Present" : "YYYY-MM"}
+                      placeholder={
+                        item.currentlyWorking ? "Present" : "YYYY-MM"
+                      }
                       required={!item.currentlyWorking}
                       maxLength={20}
                       aria-describedby={`exp-current-desc-${item.id}`}
@@ -781,7 +927,9 @@ export function ResumeOnboarding({ localAiReady }: { localAiReady: boolean }) {
               <div>
                 <h3 className="section-card-title">Ready for AI Analysis</h3>
                 <p className="collection-hint">
-                  Your profile details and selected local folders will be inspected locally to extract technical evidence and prepare clarification questions for your AI Resume Coach interview.
+                  Your profile details and selected local folders will be
+                  inspected locally to extract technical evidence and prepare
+                  clarification questions for your AI Resume Coach interview.
                 </p>
               </div>
               <div className="submit-action-row">
@@ -807,5 +955,3 @@ export function ResumeOnboarding({ localAiReady }: { localAiReady: boolean }) {
     </div>
   );
 }
-
-

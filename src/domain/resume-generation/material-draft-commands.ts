@@ -10,13 +10,20 @@ import { readActiveResumeWorkspace, workspaceOwnsDraft } from "@/persistence/res
 import { appendAuditEvent } from "@/persistence/workspace-repository";
 
 type Options = { appDataRoot?: string };
-export type MaterialDraftView = { id: string; profileLabel: string; templateLabel: string; templateId: string; templateDigest: string; opportunityLabel?: string; evidenceLabels: string[]; sections: Array<{ heading: string; text: string }>; claims: Array<{ text: string; evidence: string[] }>; unknowns: string[]; handedOff: boolean };
+export type MaterialDraftCandidateClarification = { itemName: string; itemCategory: "project" | "experience"; category: string; text: string; provenance: "candidate_interview_answer" };
+export type MaterialDraftView = { id: string; profileLabel: string; templateLabel: string; templateId: string; templateDigest: string; opportunityLabel?: string; evidenceLabels: string[]; sections: Array<{ heading: string; text: string }>; claims: Array<{ text: string; evidence: string[]; candidateClarifications: MaterialDraftCandidateClarification[] }>; unknowns: string[]; handedOff: boolean };
 export type MaterialDraftHandoff = { destination: "review" };
 
 const uuidV7 = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 const digest = (value: string) => /^sha256:[0-9a-f]{64}$/i.test(value);
 const hash = (value: unknown) => `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
 const plain = (value: unknown, maximum: number) => typeof value === "string" && value.length > 0 && value.length <= maximum && !/[\u0000-\u001f\u007f-\u009f]/.test(value);
+const exactKeys = (value: Record<string, unknown>, keys: string[]) => Object.keys(value).every((key) => keys.includes(key)) && keys.every((key) => key in value);
+const supports = (claim: string, source: string) => {
+  const words = (value: string) => new Set(value.toLocaleLowerCase().match(/[a-z0-9]{3,}/g) ?? []);
+  const claimWords = words(claim);
+  return [...claimWords].filter((word) => words(source).has(word)).length >= 2;
+};
 // Resume sections intentionally preserve line breaks: the composer uses them
 // for contact details, role metadata, and bullets. These are content, not a
 // malformed control sequence; reject the remaining non-printing controls.
@@ -29,24 +36,32 @@ const invalid = (summary = "That material draft is unavailable.", next = "Return
 
 function parseStoredDraft(row: StoredMaterialDraftRead): MaterialDraftView {
   const selectedEvidenceIds = new Set(row.evidence.map((item) => item.id));
-  const invalidClaims = row.claims.some((claim, ordinal) => !uuidV7(claim.id) || claim.ordinal !== ordinal || !plain(claim.text, 1_000) || !claim.evidence.length || claim.evidence.length > 50 || claim.evidence.some((item) => !uuidV7(item.id) || !selectedEvidenceIds.has(item.id) || !plain(item.label, 600)));
+  const invalidClaims = row.claims.some((claim, ordinal) => !uuidV7(claim.id) || claim.ordinal !== ordinal || !plain(claim.text, 1_000) || claim.evidence.length > 50 || claim.evidence.some((item) => !uuidV7(item.id) || !selectedEvidenceIds.has(item.id) || !plain(item.label, 600)));
   if (!uuidV7(row.id) || !uuidV7(row.profileRevisionId) || !digest(row.profileDigest) || !uuidV7(row.templateId) || !digest(row.templateDigest) || (row.opportunityRevisionId === undefined) !== (row.opportunityDigest === undefined) || (row.opportunityRevisionId !== undefined && (!row.opportunityResolved || !uuidV7(row.opportunityRevisionId) || !digest(row.opportunityDigest!))) || !digest(row.contentDigest) || !digest(row.provenanceDigest) || !plain(row.templateFilename, 255) || !row.evidence.length || row.evidence.length > maxResumeCoachEvidence || row.evidence.some((item) => !uuidV7(item.id) || !digest(item.contentDigest) || !plain(item.label, 600)) || row.claims.length > 20 || invalidClaims || hash(row.contentJson) !== row.contentDigest) invalid();
   let response: unknown;
   try { response = JSON.parse(row.contentJson); } catch { invalid(); }
   if (!response || typeof response !== "object" || Array.isArray(response)) invalid();
-  const value = response as { schemaVersion?: unknown; selectionEcho?: unknown; sections?: unknown; claims?: unknown; unknowns?: unknown };
-  const sectionsInput = value.sections; const claimsInput = value.claims; const unknownsInput = value.unknowns;
+  const value = response as { schemaVersion?: unknown; selectionEcho?: unknown; sections?: unknown; claims?: unknown; candidateClarifications?: unknown; unknowns?: unknown };
+  const sectionsInput = value.sections; const claimsInput = value.claims; const candidateClarificationsInput = value.candidateClarifications ?? []; const unknownsInput = value.unknowns;
   if (value.schemaVersion !== 1 || !digest(String(value.selectionEcho ?? "")) || row.provenanceDigest !== hash({ capability: localModelCapabilityVersion("resume-coach"), profile: { revisionId: row.profileRevisionId, contentDigest: row.profileDigest }, template: { id: row.templateId, contentDigest: row.templateDigest }, evidence: row.evidence.map(({ id, contentDigest }) => ({ id, contentDigest })).sort((left, right) => left.id.localeCompare(right.id)), opportunity: row.opportunityRevisionId ? { revisionId: row.opportunityRevisionId, contentDigest: row.opportunityDigest } : null, consent: value.selectionEcho })) return invalid();
   if (!Array.isArray(sectionsInput) || !sectionsInput.length || sectionsInput.length > 8) return invalid();
   if (!Array.isArray(claimsInput) || claimsInput.length !== row.claims.length) return invalid();
+  if (!Array.isArray(candidateClarificationsInput) || candidateClarificationsInput.length > 24) return invalid();
+  const candidateClarifications = candidateClarificationsInput.map((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item) || !exactKeys(item as Record<string, unknown>, ["itemName", "itemCategory", "category", "text", "provenance"]) || !plain((item as { itemName?: unknown }).itemName, 240) || ((item as { itemCategory?: unknown }).itemCategory !== "project" && (item as { itemCategory?: unknown }).itemCategory !== "experience") || !plain((item as { category?: unknown }).category, 120) || !plain((item as { text?: unknown }).text, 2_400) || (item as { provenance?: unknown }).provenance !== "candidate_interview_answer") invalid();
+    return item as MaterialDraftCandidateClarification;
+  });
   if (!Array.isArray(unknownsInput) || unknownsInput.length > 12) return invalid();
   const sections = sectionsInput.map((item) => {
     if (!item || typeof item !== "object" || !plain((item as { heading?: unknown }).heading, 120) || !textBlock((item as { text?: unknown }).text, 2_000)) invalid();
     return { heading: (item as { heading: string }).heading, text: (item as { text: string }).text };
   });
   const claims = claimsInput.map((item, ordinal) => {
-    if (!item || typeof item !== "object" || !plain((item as { text?: unknown }).text, 1_000) || !Array.isArray((item as { evidenceIndexes?: unknown }).evidenceIndexes) || !(item as { evidenceIndexes: unknown[] }).evidenceIndexes.length || row.claims[ordinal]?.text !== (item as { text: string }).text) invalid();
-    return { text: row.claims[ordinal]!.text, evidence: row.claims[ordinal]!.evidence.map((evidence) => evidence.label) };
+    if (!item || typeof item !== "object" || Array.isArray(item) || !plain((item as { text?: unknown }).text, 1_000) || !Array.isArray((item as { evidenceIndexes?: unknown }).evidenceIndexes) || (!Array.isArray((item as { clarificationIndexes?: unknown }).clarificationIndexes) && (item as { clarificationIndexes?: unknown }).clarificationIndexes !== undefined) || row.claims[ordinal]?.text !== (item as { text: string }).text) invalid();
+    const evidenceIndexes = (item as { evidenceIndexes: unknown[] }).evidenceIndexes;
+    const clarificationIndexes = (item as { clarificationIndexes?: unknown[] }).clarificationIndexes ?? [];
+    if ((!evidenceIndexes.length && !clarificationIndexes.length) || new Set(evidenceIndexes).size !== evidenceIndexes.length || new Set(clarificationIndexes).size !== clarificationIndexes.length || evidenceIndexes.some((index) => !Number.isInteger(index) || (index as number) < 0 || (index as number) >= row.evidence.length) || clarificationIndexes.some((index) => !Number.isInteger(index) || (index as number) < 0 || (index as number) >= candidateClarifications.length || !supports((item as { text: string }).text, candidateClarifications[index as number]!.text)) || row.claims[ordinal]!.evidence.length !== evidenceIndexes.length) invalid();
+    return { text: row.claims[ordinal]!.text, evidence: row.claims[ordinal]!.evidence.map((evidence) => evidence.label), candidateClarifications: clarificationIndexes.map((index) => candidateClarifications[index as number]!) };
   });
   if (unknownsInput.some((item) => !plain(item, 500))) invalid();
   if (row.handedOffAt !== undefined && Number.isNaN(new Date(row.handedOffAt).getTime())) invalid();

@@ -13,6 +13,7 @@ import {
   resumeCoachSystemInstruction,
   resumeInterviewCoachConsentFingerprint,
 } from "../src/adapters/local-model/local-model-gateway";
+import type { ResumeFileReadSession } from "../src/files/evidence-library";
 import {
   resumeGeneratorEditorialInstruction,
   resumeGeneratorEvidenceIntelligenceInstruction,
@@ -24,6 +25,32 @@ const connection = {
   configurationRevisionId: "00000000-0000-7000-8000-000000000009",
   configurationDigest: `sha256:${"f".repeat(64)}`,
   modelIdentifier: "qwen/qwen3.5-9b",
+};
+const baseline = {
+  baselineId: "00000000-0000-7000-8000-000000000014",
+  baselineDigest: `sha256:${"d".repeat(64)}`,
+  sections: [
+    {
+      heading: "Experience",
+      tag: "experience",
+      existingDetail: "Software Engineering Intern | Example Co",
+    },
+    {
+      heading: "Education",
+      tag: "education",
+      existingDetail: "Example University | Computer Science | 2026",
+    },
+    {
+      heading: "Projects",
+      tag: "projects",
+      existingDetail: "",
+    },
+    {
+      heading: "Technical Skills",
+      tag: "technical-skills",
+      existingDetail: "Languages: TypeScript",
+    },
+  ],
 };
 const requestBase = {
   connection,
@@ -233,8 +260,7 @@ test("Resume Interview Coach starts an empty conversation with a brief Coach ope
     ...base,
     consentFingerprint: resumeInterviewCoachConsentFingerprint(base),
   };
-  const content =
-    "I will help clarify your documented experience without inventing claims. What was your contribution?";
+  const content = "What was your contribution?";
   const stream = streamResumeInterviewCoach(
     value,
     undefined,
@@ -248,7 +274,7 @@ test("Resume Interview Coach starts an empty conversation with a brief Coach ope
         latestCandidateMessage: null,
         clarificationUsed: false,
         responseShape:
-          "Initiate the conversation yourself. In two or three concise sentences, briefly explain that you will clarify documented experience for an accurate resume without inventing claims, introduce the exact saved question, and invite a natural answer. Reply with no JSON, labels, tools, or actions.",
+          "Ask the exact saved question directly. Reply with that question only: no preamble, explanation, labels, tools, or actions.",
       });
       return new Response(
         [
@@ -384,6 +410,39 @@ test("Resume Interview Coach accepts a complete decision without a generic addit
     decision: { disposition: "complete", answerSource: "latest" },
   });
   assert.doesNotMatch(visible, /add or clarify anything else/i);
+});
+
+test("Resume Interview Coach rejects a complete decision that visibly asks a follow-up", async () => {
+  const base = {
+    connection,
+    workspaceId: "00000000-0000-7000-8000-000000000099",
+    taskId: "task-contradiction",
+    question: "What was your contribution?",
+    context: ["Built the documented workflow."],
+    transcript: ["Candidate: I built the documented workflow."],
+    consentNonce: "contradiction-consent",
+  };
+  const value = {
+    ...base,
+    consentFingerprint: resumeInterviewCoachConsentFingerprint(base),
+  };
+  const visible = "That sounds useful. Could you clarify what you owned?";
+  const content = interviewDecisionContent(visible, {
+    schemaVersion: 1,
+    selectionEcho: value.consentFingerprint,
+    disposition: "complete",
+    answerSource: "latest",
+  });
+  const stream = streamResumeInterviewCoach(
+    value,
+    undefined,
+    async () =>
+      new Response(
+        `event: message.delta\ndata: ${JSON.stringify({ type: "message.delta", content })}\n\nevent: chat.end\ndata: ${JSON.stringify({ type: "chat.end", result: { output: [{ type: "message", content }] } })}\n\n`,
+        { status: 200, headers: { "content-type": "text/event-stream" } },
+      ),
+  );
+  await assert.rejects(stream.next(), { code: "RESUME_COACH_INVALID" });
 });
 
 test("Resume Interview Coach accepts native SSE complete/prior and unknown decisions, including a 2,400-character delta", async () => {
@@ -584,7 +643,11 @@ test("Resume Coach sends one bounded tokenless native loopback request and valid
   let authorization = "";
   let headerNames: string[] = [];
   let hasSignal = false;
-  const value = request();
+  const base = { ...requestBase, baseline };
+  const value = {
+    ...base,
+    consentFingerprint: resumeCoachConsentFingerprint(base),
+  };
   const result = await requestResumeCoach(value, async (url, init) => {
     calls += 1;
     target = String(url);
@@ -592,19 +655,42 @@ test("Resume Coach sends one bounded tokenless native loopback request and valid
     authorization = new Headers(init.headers).get("authorization") ?? "";
     headerNames = [...new Headers(init.headers).keys()].sort();
     hasSignal = init.signal instanceof AbortSignal;
-    return native({
-      schemaVersion: 1,
-      selectionEcho: value.consentFingerprint,
-      sections: [
-        { heading: "Strength", text: "Your TypeScript work is relevant." },
-      ],
-      claims: [
-        { text: "You built TypeScript interfaces.", evidenceIndexes: [0] },
-      ],
-      unknowns: ["Production scope is not established."],
-    });
+    if (calls === 1)
+      return native({
+        findings: [
+          {
+            evidenceIndexes: [0],
+            clarificationIndexes: [],
+            fact: "Built accessible TypeScript interfaces.",
+          },
+        ],
+        unknowns: [],
+      });
+    if (calls === 2)
+      return native({
+        slots: [{ sectionIndex: 2, findingIndexes: [0] }],
+        unknowns: [],
+      });
+    if (calls === 3)
+      return native({
+        edits: [
+          {
+            sectionIndex: 2,
+            text: "Portfolio | Accessible interface\n- Built accessible TypeScript interfaces.",
+            claims: [
+              {
+                text: "Built accessible TypeScript interfaces.",
+                evidenceIndexes: [0],
+                clarificationIndexes: [],
+              },
+            ],
+          },
+        ],
+        unknowns: [],
+      });
+    return native({ verdict: "accept", reasons: [] });
   });
-  assert.equal(calls, 1);
+  assert.equal(calls, 4);
   assert.equal(target, "http://127.0.0.1:1234/api/v1/chat");
   assert.equal(authorization, "");
   assert.match(body, /"store":false/);
@@ -614,10 +700,7 @@ test("Resume Coach sends one bounded tokenless native loopback request and valid
     resumeCoachSystemInstruction,
     /Never extrapolate or calculate a benefit/,
   );
-  assert.doesNotMatch(
-    body,
-    /tools|integrations|previous_response_id|https:\/\//,
-  );
+  assert.doesNotMatch(body, /integrations|previous_response_id|https:\/\//);
   assert.equal(result.claims[0]?.evidenceIndexes[0], 0);
   assert.deepEqual(headerNames, ["content-type"]);
   assert.equal(hasSignal, true);
@@ -631,6 +714,208 @@ test("Resume Coach sends one bounded tokenless native loopback request and valid
     "system_prompt",
     "temperature",
   ]);
+});
+
+test("Resume Architect reads host-authorized files and maps citations without model-facing evidence indexes", async () => {
+  const citation = {
+    citationId: "citation-1",
+    path: "README.md",
+    startLine: 1,
+    endLine: 2,
+    contentDigest: `sha256:${"e".repeat(64)}`,
+  };
+  const session: ResumeFileReadSession = {
+    roots: [
+      { rootId: "root-1", label: "application" },
+      { rootId: "root-2", label: "managed-work" },
+    ],
+    execute: async (action) => {
+      assert.deepEqual(action, {
+        action: "read",
+        rootId: "root-2",
+        path: "README.md",
+        startLine: 1,
+        endLine: 2,
+      });
+      return {
+        ok: true,
+        type: "read",
+        rootId: "root-2",
+        path: "README.md",
+        citation,
+        text: "Built accessible TypeScript interfaces.\nCandidate-facing workflow.",
+      };
+    },
+    validateCitation: (value) =>
+      JSON.stringify(value) === JSON.stringify(citation),
+  };
+  const base = { ...requestBase, baseline, fileReadSession: session };
+  const value = {
+    ...base,
+    consentFingerprint: resumeCoachConsentFingerprint(base),
+  };
+  let calls = 0;
+  const result = await requestResumeCoach(value, async (_url, init) => {
+    calls += 1;
+    const packet = JSON.parse(JSON.parse(String(init.body)).input);
+    if (calls === 1) {
+      assert.deepEqual(packet.roots, session.roots);
+      assert.match(JSON.stringify(packet.slots), /projects/);
+      assert.doesNotMatch(JSON.stringify(packet), /evidenceIndexes/);
+      return native({
+        kind: "tool",
+        action: {
+          action: "read",
+          rootId: "root-2",
+          path: "README.md",
+          startLine: 1,
+          endLine: 2,
+        },
+      });
+    }
+    assert.match(JSON.stringify(packet.observations), /citation-1/);
+    return native({
+      kind: "final",
+      edits: [
+        {
+          slotId: "projects",
+          text: "Portfolio | Accessible interface\n- Built accessible TypeScript interfaces.",
+          claims: [
+            {
+              text: "Built accessible TypeScript interfaces.",
+              citations: [citation],
+            },
+          ],
+        },
+      ],
+      unknowns: [],
+    });
+  });
+  assert.equal(calls, 2);
+  assert.match(
+    result.sections.find((section) => section.heading === "Projects")?.text ??
+      "",
+    /Built accessible TypeScript interfaces/,
+  );
+  assert.deepEqual(result.claims[0]?.evidenceIndexes, [0]);
+});
+
+test("Resume Architect treats Work Experience as an editable staged slot", async () => {
+  const workBaseline = {
+    ...baseline,
+    sections: baseline.sections.map((section, index) =>
+      index === 0
+        ? { ...section, heading: "Work Experience", tag: "work-experience" }
+        : section,
+    ),
+  };
+  const base = { ...requestBase, baseline: workBaseline };
+  const value = {
+    ...base,
+    consentFingerprint: resumeCoachConsentFingerprint(base),
+  };
+  let calls = 0;
+  const result = await requestResumeCoach(value, async (_url, init) => {
+    calls += 1;
+    if (calls === 1)
+      return native({
+        findings: [
+          {
+            evidenceIndexes: [0],
+            clarificationIndexes: [],
+            fact: "Built accessible TypeScript interfaces.",
+          },
+        ],
+        unknowns: [],
+      });
+    if (calls === 2) {
+      const packet = JSON.parse(JSON.parse(String(init.body)).input);
+      assert.deepEqual(packet.editableSlots[0], {
+        sectionIndex: 0,
+        heading: "Work Experience",
+        maximumCharacters: 2_000,
+      });
+      return native({
+        slots: [{ sectionIndex: 0, findingIndexes: [0] }],
+        unknowns: [],
+      });
+    }
+    if (calls === 3)
+      return native({
+        edits: [
+          {
+            sectionIndex: 0,
+            text: "Software Engineer\n- Built accessible TypeScript interfaces.",
+            claims: [
+              {
+                text: "Built accessible TypeScript interfaces.",
+                evidenceIndexes: [0],
+                clarificationIndexes: [],
+              },
+            ],
+          },
+        ],
+        unknowns: [],
+      });
+    return native({ verdict: "accept", reasons: [] });
+  });
+  assert.equal(calls, 4);
+  assert.match(
+    result.sections[0]?.text ?? "",
+    /Built accessible TypeScript interfaces/,
+  );
+});
+
+test("Resume Architect falls back when the Integrity Reviewer rejects a staged draft", async () => {
+  const base = { ...requestBase, baseline };
+  const value = {
+    ...base,
+    consentFingerprint: resumeCoachConsentFingerprint(base),
+  };
+  let calls = 0;
+  const result = await requestResumeCoach(value, async () => {
+    calls += 1;
+    if (calls === 1)
+      return native({
+        findings: [
+          {
+            evidenceIndexes: [0],
+            clarificationIndexes: [],
+            fact: "Built accessible TypeScript interfaces.",
+          },
+        ],
+        unknowns: [],
+      });
+    if (calls === 2)
+      return native({
+        slots: [{ sectionIndex: 2, findingIndexes: [0] }],
+        unknowns: [],
+      });
+    if (calls === 3)
+      return native({
+        edits: [
+          {
+            sectionIndex: 2,
+            text: "Portfolio | Accessible interface\n- Built accessible TypeScript interfaces.",
+            claims: [
+              {
+                text: "Built accessible TypeScript interfaces.",
+                evidenceIndexes: [0],
+                clarificationIndexes: [],
+              },
+            ],
+          },
+        ],
+        unknowns: [],
+      });
+    return native({ verdict: "reject", reasons: ["uncertain-provenance"] });
+  });
+  assert.equal(calls, 4);
+  assert.doesNotMatch(
+    result.sections.find((section) => section.heading === "Projects")?.text ??
+      "",
+    /Portfolio \| Accessible interface/,
+  );
 });
 
 test("Resume Coach rejects stale consent but creates an evidence-first draft when the local response is unusable", async () => {
@@ -723,6 +1008,123 @@ test("base-resume fallback never renders folder-documentation summaries, paths, 
   assert.doesNotMatch(
     rendered,
     /Name:|Repository Shape|docs\/stories|SPHOST|POST \/api/i,
+  );
+});
+
+test("base-resume fallback rewrites a documented durable run record as candidate-facing work", async () => {
+  const base = {
+    ...requestBase,
+    baseline,
+    evidence: [
+      {
+        ...requestBase.evidence[0],
+        factualText:
+          "Created durable run records for the documented analysis workflow to preserve state without raw VCF retention by default.",
+        sourceDocument:
+          "resume-evidence/projects/BioEvidence/resume-evidence.md",
+      },
+    ],
+  };
+  const value = {
+    ...base,
+    consentFingerprint: resumeCoachConsentFingerprint(base),
+  };
+  const fallback = await requestResumeCoach(
+    value,
+    async () =>
+      new Response(
+        JSON.stringify({ output: [{ type: "tool_call", content: "{}" }] }),
+        { status: 200 },
+      ),
+  );
+  assert.deepEqual(fallback.claims, [
+    {
+      text: "Implemented durable run-state management for the documented analysis workflow",
+      evidenceIndexes: [0],
+    },
+  ]);
+});
+
+test("Resume Architect preserves an intentionally empty immutable baseline section", async () => {
+  const base = {
+    ...requestBase,
+    baseline: {
+      ...baseline,
+      sections: baseline.sections.map((section) =>
+        section.heading === "Education"
+          ? { ...section, existingDetail: "" }
+          : section,
+      ),
+    },
+    evidence: [
+      {
+        ...requestBase.evidence[0],
+        factualText:
+          "Built a one-click VCF upload and validation workflow for researchers.",
+        sourceDocument:
+          "resume-evidence/projects/BioEvidence/resume-evidence.md",
+      },
+    ],
+  };
+  const value = {
+    ...base,
+    consentFingerprint: resumeCoachConsentFingerprint(base),
+  };
+  const fallback = await requestResumeCoach(
+    value,
+    async () =>
+      new Response(
+        JSON.stringify({ output: [{ type: "tool_call", content: "{}" }] }),
+        { status: 200 },
+      ),
+  );
+  assert.equal(
+    fallback.sections.find((section) => section.heading === "Education")?.text,
+    "",
+  );
+});
+
+test("base-resume fallback excludes security, model workflow, architecture, and product-manifest prose", async () => {
+  const implementationFact =
+    "The application provides immediate VCF validation feedback before analysis processing.";
+  const base = {
+    ...requestBase,
+    evidence: [
+      "For the personal-device local-only MVP, the application relies on the Windows OS-account boundary and device/full-disk encryption. It does not add application-level encryption for the SQLite database or local files.",
+      "Tokens remain out of the SQLite database and belong in the OS credential vault when later integrations require them.",
+      "The local model has no authority to access a folder, skill file, shell, network, or arbitrary tool.",
+      "The architecture follows a modular monolith pattern organized by responsibility.",
+      "Resume writing follows: information → evidence → positioning → relevance → content → optimization → validation.",
+      "**Purpose:** Career Workbench is a local-first workspace for compliant job discovery, evidence-backed resume development, and application preparation.",
+      implementationFact,
+    ].map((factualText, index) => ({
+      id: `00000000-0000-7000-8000-${String(index + 20).padStart(12, "0")}`,
+      contentDigest: `sha256:${String(index + 1).repeat(64)}`,
+      factualText,
+      sourceDocument:
+        "resume-evidence/projects/CareerWorkbench/resume-evidence.md",
+    })),
+  };
+  const value = {
+    ...base,
+    consentFingerprint: resumeCoachConsentFingerprint(base),
+  };
+  const fallback = await requestResumeCoach(
+    value,
+    async () =>
+      new Response(
+        JSON.stringify({ output: [{ type: "tool_call", content: "{}" }] }),
+        { status: 200 },
+      ),
+  );
+  assert.deepEqual(fallback.claims, [
+    { text: implementationFact, evidenceIndexes: [6] },
+  ]);
+  const rendered = fallback.sections.map((section) => section.text).join("\n");
+  assert.match(rendered, /immediate VCF validation feedback/);
+  assert.doesNotMatch(
+    rendered,
+    /OS-account|full-disk encryption|credential vault|authority to access|modular monolith|Resume writing follows|Career Workbench/i,
   );
 });
 
@@ -824,6 +1226,7 @@ test("base-resume generation sends compact purpose context instead of every cand
       input.documentation[0].documents[0].text,
       /This must not be sent/,
     );
+    assert.equal("path" in input.documentation[0].documents[0], false);
     return native({
       schemaVersion: 1,
       selectionEcho: value.consentFingerprint,
@@ -899,7 +1302,7 @@ test("base-resume generation retains the documented project identity when Qwen r
   assert.match(
     result.sections.find((section) => section.heading === "Projects")?.text ??
       "",
-    /^BioEvidence \| Validation workflow/,
+    /^BioEvidence\n- Built accessible TypeScript interfaces\./,
   );
 });
 
@@ -979,11 +1382,8 @@ test("base-resume generation preserves grounded purpose-led BioEvidence prose in
   const projects =
     result.sections.find((section) => section.heading === "Projects")?.text ??
     "";
-  assert.match(
-    projects,
-    /brings VCF validation and evidence review into one system/,
-  );
-  assert.doesNotMatch(projects, /Created durable SQLite-backed run records/);
+  assert.match(projects, /validates VCF input and coordinates evidence review/);
+  assert.match(projects, /Built a local-first workflow/);
 });
 
 test("base-resume generation retains Qwen's grounded explanatory bullet clauses and compacts its project descriptor", async () => {
@@ -1038,10 +1438,7 @@ test("base-resume generation retains Qwen's grounded explanatory bullet clauses 
   const projects =
     result.sections.find((section) => section.heading === "Projects")?.text ??
     "";
-  assert.match(
-    projects,
-    /^BioEvidence \| Local-first web system for staged analysis and interpretation of single-nucleotide variants\n\u2022 Created durable SQLite-backed/,
-  );
+  assert.match(projects, /^BioEvidence\n- Created durable SQLite-backed/);
   assert.match(
     projects,
     /to support state persistence without raw VCF retention by default/,
@@ -1310,12 +1707,12 @@ test("base-resume generation accepts a project-only response and preserves GWA e
   assert.match(
     result.sections.find((section) => section.heading === "Education")?.text ??
       "",
-    /GWA: 1\.44/,
+    /GWA 1\.44/,
   );
   assert.match(
     result.sections.find((section) => section.heading === "Projects")?.text ??
       "",
-    /Genomic-variant validation workflow/,
+    /Built durable run-record management/,
   );
 });
 
@@ -1368,21 +1765,326 @@ test("Resume Architect rejects visible work bullets without matching evidence-li
   assert.match(
     result.sections.find((section) => section.heading === "Projects")?.text ??
       "",
-    /Workflow support/,
+    /Built accessible TypeScript interfaces/,
   );
 });
 
-test("Resume Architect contract keeps Oboda v22 hierarchy and requires evidence-linked work bullets", () => {
+test("Resume Architect accepts eligible direct-less clarification support, excludes needs-review answers, and rejects out-of-contract responses", async () => {
+  const base = {
+    ...requestBase,
+    baseline,
+    clarifications: [
+      {
+        itemName: "BioEvidence",
+        itemCategory: "project" as const,
+        category: "users_workflow",
+        text: "I built the one-click VCF upload and validation workflow.",
+        provenance: "candidate_interview_answer" as const,
+      },
+    ],
+    evidence: [
+      {
+        ...requestBase.evidence[0],
+        factualText: "Built a VCF upload workflow for researchers.",
+        sourceDocument:
+          "resume-evidence/projects/BioEvidence/resume-evidence.md",
+      },
+    ],
+  };
+  const value = {
+    ...base,
+    consentFingerprint: resumeCoachConsentFingerprint(base),
+  };
+  const result = await requestResumeCoach(value, async (_url, init) => {
+    const input = JSON.parse(JSON.parse(String(init.body)).input);
+    assert.deepEqual(input.generationContract, {
+      requiredSectionSequence: [
+        "Experience",
+        "Education",
+        "Projects",
+        "Technical Skills",
+      ],
+      immutableSections: [
+        {
+          heading: "Education",
+          text: "Example University | Computer Science | 2026",
+        },
+        { heading: "Technical Skills", text: "Languages: TypeScript" },
+      ],
+      editableWorkHeadings: ["Experience", "Projects"],
+      projectEntryLimits: {
+        maximumEntries: 4,
+        descriptorMaximumWords: 12,
+        maximumBulletsPerEntry: 3,
+        maximumWordsPerBullet: 30,
+      },
+      citationRules: [
+        "Every visible Experience or Projects bullet needs an exactly matching claims.text entry.",
+        "Each claim needs one or more directly supporting evidenceIndexes and/or eligible clarificationIndexes.",
+        "clarificationIndexes are candidate-provided provenance, never direct documented facts.",
+      ],
+      forbiddenGenericHeadings: [
+        "Summary",
+        "Professional Summary",
+        "Career Summary",
+        "Skills",
+        "Core Competencies",
+        "Selected Projects",
+        "Project Experience",
+        "Work Experience",
+        "Employment History",
+      ],
+    });
+    assert.deepEqual(input.responseShape.sections, [
+      {
+        heading: "Experience",
+        text: "Resume entry text or an empty string when the baseline work section is empty",
+      },
+      {
+        heading: "Education",
+        text: "Example University | Computer Science | 2026",
+      },
+      {
+        heading: "Projects",
+        text: "Resume entry text or an empty string when the baseline work section is empty",
+      },
+      { heading: "Technical Skills", text: "Languages: TypeScript" },
+    ]);
+    assert.match(
+      String(JSON.parse(String(init.body)).system_prompt),
+      /HARD OUTPUT CONSTRAINT: The sections array must contain exactly these headings in this order: \["Experience","Education","Projects","Technical Skills"\]/,
+    );
+    assert.deepEqual(input.candidateClarifications, [
+      {
+        clarificationIndex: 0,
+        itemName: "BioEvidence",
+        itemCategory: "project",
+        category: "users_workflow",
+        text: "I built the one-click VCF upload and validation workflow.",
+        provenance: "candidate_interview_answer",
+      },
+    ]);
+    assert.doesNotMatch(
+      JSON.stringify(input),
+      /\\\\section|resume\.tex|resume-evidence\/projects/i,
+    );
+    return native({
+      schemaVersion: 1,
+      selectionEcho: value.consentFingerprint,
+      sections: [
+        baseline.sections[0],
+        baseline.sections[1],
+        {
+          heading: "Projects",
+          text: "BioEvidence | Researcher VCF validation workflow\n- Developed a one-click VCF upload and validation workflow for researchers.",
+        },
+        baseline.sections[3],
+      ].map((section) => ({
+        heading: section.heading,
+        text:
+          "existingDetail" in section ? section.existingDetail : section.text,
+      })),
+      claims: [
+        {
+          text: "Developed a one-click VCF upload and validation workflow for researchers.",
+          evidenceIndexes: [],
+          clarificationIndexes: [0],
+        },
+      ],
+      unknowns: [],
+    });
+  });
+  assert.deepEqual(result.claims[0]?.evidenceIndexes, [0]);
+  assert.equal(result.claims[0]?.clarificationIndexes?.length ?? 0, 0);
+  assert.equal(
+    result.candidateClarifications?.[0]?.provenance,
+    "candidate_interview_answer",
+  );
+  assert.deepEqual(
+    result.sections.map((section) => section.heading),
+    baseline.sections.map((section) => section.heading),
+  );
+  const projectDescription =
+    result.sections.find((section) => section.heading === "Projects")?.text ??
+    "";
+  assert.match(projectDescription, /one-click VCF upload and validation/i);
+  assert.match(projectDescription, /for researchers/i);
+  assert.doesNotMatch(projectDescription, /TypeScript|SQLite|Kubernetes/i);
+
+  const unrelatedClarification = await requestResumeCoach(value, async () =>
+    native({
+      schemaVersion: 1,
+      selectionEcho: value.consentFingerprint,
+      sections: [
+        baseline.sections[0],
+        baseline.sections[1],
+        {
+          heading: "Projects",
+          text: "BioEvidence | Deployment\n- Developed Kubernetes deployment automation.",
+        },
+        baseline.sections[3],
+      ].map((section) => ({
+        heading: section.heading,
+        text:
+          "existingDetail" in section ? section.existingDetail : section.text,
+      })),
+      claims: [
+        {
+          text: "Developed Kubernetes deployment automation.",
+          evidenceIndexes: [],
+          clarificationIndexes: [0],
+        },
+      ],
+      unknowns: [],
+    }),
+  );
+  assert.doesNotMatch(
+    unrelatedClarification.sections.map((section) => section.text).join("\n"),
+    /Kubernetes deployment automation/i,
+  );
+
+  const fallback = await requestResumeCoach(value, async () =>
+    native({
+      schemaVersion: 1,
+      selectionEcho: value.consentFingerprint,
+      sections: [
+        { heading: "Architecture", text: "The system uses a VCF pipeline." },
+      ],
+      claims: [],
+      unknowns: [],
+    }),
+  );
+  assert.deepEqual(
+    fallback.sections.map((section) => section.heading),
+    baseline.sections.map((section) => section.heading),
+  );
+  assert.doesNotMatch(
+    fallback.sections.map((section) => section.text).join("\n"),
+    /architecture|pipeline/i,
+  );
+  assert.match(
+    fallback.sections.find((section) => section.heading === "Projects")?.text ??
+      "",
+    /Candidate-provided workflow/,
+  );
+  assert.equal(
+    fallback.claims.some(
+      (claim) => claim.clarificationIndexes?.includes(0) === true,
+    ),
+    true,
+  );
+  await assert.rejects(
+    requestResumeCoach(
+      {
+        ...value,
+        clarifications: [{ ...value.clarifications[0]!, needsReview: true }],
+      } as unknown as typeof value,
+      async () => {
+        throw new Error("conflicted clarification must not reach the model");
+      },
+    ),
+    { code: "RESUME_COACH_INVALID" },
+  );
+  const insufficientBase = {
+    ...base,
+    clarifications: [],
+    evidence: [
+      {
+        ...base.evidence[0],
+        factualText: "The application provides a VCF workflow.",
+      },
+    ],
+  };
+  await assert.rejects(
+    requestResumeCoach(
+      {
+        ...insufficientBase,
+        consentFingerprint: resumeCoachConsentFingerprint(insufficientBase),
+      },
+      async () => {
+        throw new Error("insufficient fallback input must not reach the model");
+      },
+    ),
+    { code: "RESUME_COACH_INVALID" },
+  );
+});
+
+test("Resume Architect rejects a generic reordered response and preserves only its validated fallback", async () => {
+  const base = {
+    ...requestBase,
+    baseline,
+    evidence: [
+      {
+        ...requestBase.evidence[0],
+        factualText:
+          "Built a one-click VCF upload and validation workflow for researchers.",
+        sourceDocument:
+          "resume-evidence/projects/BioEvidence/resume-evidence.md",
+      },
+    ],
+  };
+  const value = {
+    ...base,
+    consentFingerprint: resumeCoachConsentFingerprint(base),
+  };
+  const result = await requestResumeCoach(value, async () =>
+    native({
+      schemaVersion: 1,
+      selectionEcho: value.consentFingerprint,
+      sections: [
+        { heading: "Summary", text: "Invented generic profile." },
+        { heading: "Skills", text: "Invented skills inventory." },
+        {
+          heading: "Selected Projects",
+          text: "Generic Project | Generic descriptor\n- Built generic work.",
+        },
+        { heading: "Education", text: "Rewritten non-work education." },
+      ],
+      claims: [{ text: "Built generic work.", evidenceIndexes: [0] }],
+      unknowns: [],
+    }),
+  );
+  assert.deepEqual(
+    result.sections.map((section) => section.heading),
+    baseline.sections.map((section) => section.heading),
+  );
+  assert.equal(
+    result.sections.find((section) => section.heading === "Education")?.text,
+    baseline.sections[1]?.existingDetail,
+  );
+  assert.equal(
+    result.sections.find((section) => section.heading === "Technical Skills")
+      ?.text,
+    baseline.sections[3]?.existingDetail,
+  );
+  assert.doesNotMatch(
+    result.sections.map((section) => section.text).join("\n"),
+    /Invented generic|Invented skills|Generic Project|Rewritten non-work/i,
+  );
+});
+
+test("Resume Architect contract instructs explicit candidate-clarification provenance", () => {
+  assert.match(
+    resumeGeneratorSystemInstruction,
+    /direct evidence and\/or eligible candidate-clarification indexes/i,
+  );
+  assert.match(
+    resumeGeneratorSystemInstruction,
+    /eligible candidate-clarification indexes/i,
+  );
+});
+
+test("Resume Architect contract requires the imported baseline hierarchy and evidence-linked work bullets", () => {
   assert.match(resumeGeneratorSystemInstruction, /Resume Architect/);
   assert.match(
     resumeGeneratorSystemInstruction,
-    /Experience.*Education.*Projects.*Technical Skills/,
+    /generationContract\.requiredSectionSequence/,
   );
   assert.match(
     resumeGeneratorSystemInstruction,
-    /Do not add Professional Summary/,
+    /Never add, rename, merge, omit, or reorder/i,
   );
-  assert.match(resumeGeneratorSystemInstruction, /claims entry/);
+  assert.match(resumeGeneratorSystemInstruction, /exactly matching claim/);
   assert.match(resumeGeneratorEditorialInstruction, /technology inventory/);
   assert.match(resumeGeneratorEditorialInstruction, /at most 30 words/);
   assert.match(
@@ -1493,7 +2195,7 @@ test("Resume Coach ignores an optional reasoning block and requires one final me
         { status: 200 },
       ),
   );
-  assert.equal(result.sections[0]?.heading, "Strength");
+  assert.equal(result.sections[0]?.heading, "Projects");
   const fallback = await requestResumeCoach(
     value,
     async () =>
@@ -1566,7 +2268,7 @@ test("Resume Coach accepts every bounded documented finding instead of rejecting
 });
 
 test("local-model capabilities isolate configuration fingerprints and assessment schemas", async () => {
-  assert.equal(localModelCapabilityVersion("resume-coach"), "resume-coach-v6");
+  assert.equal(localModelCapabilityVersion("resume-coach"), "resume-coach-v8");
   assert.equal(
     localModelCapabilityVersion("opportunity-assessment"),
     "opportunity-assessment-v1",

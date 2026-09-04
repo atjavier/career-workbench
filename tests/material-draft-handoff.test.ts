@@ -49,6 +49,22 @@ test("a stored draft has a bounded readable projection and one metadata-only rev
   } finally { await rm(value.appDataRoot, { recursive: true, force: true }); }
 });
 
+test("a clarification-supported claim retains candidate-provided provenance without direct evidence support", async () => {
+  const value = await fixture();
+  try {
+    const db = openDatabase(value.databasePath);
+    let draftId: string;
+    try {
+      const workspaceId = (db.prepare("SELECT workspace_id AS workspaceId FROM resume_workspace_drafts LIMIT 1").get() as { workspaceId: string }).workspaceId;
+      draftId = persistResumeCoachDraft({ databasePath: value.databasePath, workspaceId, profileRevisionId: ids.profileRevision, profileDigest: hash("a"), templateId: ids.template, templateDigest: hash("b"), evidence: [{ id: ids.evidenceRevision, contentDigest: hash("c") }], requestText: "Tailor my resume", consentFingerprint: hash("d"), response: { schemaVersion: 1, selectionEcho: hash("d"), sections: [{ heading: "Projects", text: "Portfolio | Interface workflow\n- Developed an accessible TypeScript interface for researchers." }], claims: [{ text: "Developed an accessible TypeScript interface for researchers.", evidenceIndexes: [], clarificationIndexes: [0] }], candidateClarifications: [{ itemName: "Portfolio", itemCategory: "project", category: "users_workflow", text: "I built an accessible TypeScript interface for researchers.", provenance: "candidate_interview_answer" }], unknowns: [] } }).id;
+      assert.equal((db.prepare("SELECT COUNT(*) AS count FROM material_claim_support WHERE claim_id IN (SELECT id FROM material_draft_claims WHERE draft_id = ?)").get(draftId) as { count: number }).count, 0);
+    } finally { db.close(); }
+    const draft = await readMaterialDraft({ appDataRoot: value.appDataRoot, draftId: draftId! });
+    assert.deepEqual(draft.claims[0]?.evidence, []);
+    assert.deepEqual(draft.claims[0]?.candidateClarifications, [{ itemName: "Portfolio", itemCategory: "project", category: "users_workflow", text: "I built an accessible TypeScript interface for researchers.", provenance: "candidate_interview_answer" }]);
+  } finally { await rm(value.appDataRoot, { recursive: true, force: true }); }
+});
+
 test("corrupt material drafts cannot be read or handed off", async () => {
   const value = await fixture(); const corruptId = "00000000-0000-7000-8000-000000000016";
   try {

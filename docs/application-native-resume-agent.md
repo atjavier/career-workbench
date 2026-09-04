@@ -5,8 +5,9 @@
 Resume Architect is a host-controlled local workflow for creating a credible,
 ATS-compatible base resume from consented, workspace-owned evidence. It combines
 evidence mining, candidate positioning, recruiter judgement, hiring-manager
-credibility review, and resume copywriting without giving the local model the
-authority to access a folder, skill file, shell, network, or arbitrary tool.
+credibility review, and resume copywriting through a host-mediated local reader.
+The model receives no ambient filesystem, shell, network, or arbitrary-tool
+authority.
 
 The application runs the stages. “Agents” are versioned instructions used in
 bounded local-model calls; product skills in
@@ -15,18 +16,28 @@ model-callable tools and not Codex or CLI skills.
 
 ## Host-controlled orchestration
 
-1. **Folder Document Stage** — after explicit folder consent, the host creates a
-   bounded source snapshot and documents a project or experience separately. It
-   captures provenance-backed atomic facts, purpose, problem, workflow or
-   users, rationale, contribution, supported outcomes, and unknowns.
-2. **Curated handoff** — the host persists all evidence for provenance, but
-   sends only `resume-evidence.md` and `resume-bullet-candidates.md` to later
-   resume stages. Architecture, setup, deployment, source-tree, configuration,
-   route, and raw-documentation material is never writer or coach input.
-3. **Resume Architect / base generation** — the host provides the saved profile
-   plus current workspace handoffs. The model mines evidence, selects relevant
-   material, writes concise candidate-facing content, checks recruiter/ATS
-   readability and claim integrity, and returns a reviewable base draft.
+1. **Folder Document Stage** — after explicit folder consent, the host creates
+   provenance-backed evidence and managed project/experience artifacts.
+2. **Scoped local reader** — base generation receives opaque root IDs for the
+   application and active managed work folders. It can only list/read bounded
+   relative files through a short-lived host session; absolute paths, traversal,
+   links, writes, shell, network, and unrestricted roots are rejected.
+3. **Legacy staged generation** — the host retains the bounded staged flow as a
+   bounded local-model calls with Qwen-compatible `reasoning: "off"`:
+   - **Resume Evidence Analyst** extracts only indexed, supported findings and
+     unknowns; it never writes resume content.
+   - **Resume Strategist** selects only host-defined editable work slots using
+     the accepted findings; it cannot alter headings or template order.
+   - **Resume Writer** supplies cited text only for those approved slots; it
+     cannot return a full resume, headings, or immutable content.
+   - **Resume Integrity Reviewer** returns a bounded accept/reject verdict on
+     the host-reconstructed result; it never rewrites the resume.
+
+   Every agent is stateless and has no filesystem, shell, network, database,
+   skill, or arbitrary-tool access. The host validates each handoff, inserts
+   accepted Writer slot edits into the imported baseline, validates the final
+   structure again, and uses the deterministic fallback on any stage failure.
+
 4. **Resume Coach / revision** — the host gives the independent coach the saved
    ordered draft and the same curated handoffs. The coach critiques clarity,
    relevance, credibility, specificity, hierarchy, and ATS readability. It may

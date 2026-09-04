@@ -1,5 +1,6 @@
 "use server";
 
+import { join } from "node:path";
 import { initializeWorkspace } from "@/domain/workspace/initialize-workspace";
 import {
   importBaseResume,
@@ -7,6 +8,7 @@ import {
   maximumBaseResumeFileSize,
   maximumBaseResumeTotalSize,
 } from "@/domain/base-resume/import-base-resume";
+import { readInitialResumeTemplateContract } from "@/domain/base-resume/resume-template-contract";
 import { toSafeWorkspaceError, WorkspaceError } from "@/domain/workspace/types";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -125,7 +127,11 @@ import {
   selectResumeWorkspace,
 } from "@/domain/resume-generation/resume-workspace-commands";
 import { chooseLocalEvidenceFolder } from "@/files/local-folder-picker";
-import { readManagedDocumentedArtifacts } from "@/files/evidence-library";
+import {
+  createResumeFileReadSession,
+  evidenceLibraryRoot,
+  readManagedDocumentedArtifacts,
+} from "@/files/evidence-library";
 import { getResumeAgentSkill } from "@/domain/resume-agent/skill-registry";
 import {
   beginResumeEvidenceIntake,
@@ -135,6 +141,7 @@ import {
 import { reconcileResumeWorkspaceJourney } from "@/domain/resume-generation/resume-workspace-journey";
 import { interpretWorkspaceEvidence } from "@/domain/resume-generation/resume-evidence-interpretation";
 import { respondToResumeClarification } from "@/domain/resume-generation/resume-clarification-interview";
+import { listClarifiedEvidenceInDatabase } from "@/domain/resume-generation/resume-clarified-evidence";
 import {
   readBoundedResumeInterviewContext,
   readBoundedResumeInterviewTranscript,
@@ -170,65 +177,6 @@ export type OpportunityAssessmentActionState = WorkspaceActionState & {
   assessment?: OpportunityAssessmentView;
   decisionId?: string;
 };
-
-function ensureProfileSections(
-  response: ResumeCoachResponse,
-  values: {
-    firstName: string;
-    middleName?: string;
-    lastName: string;
-    email: string;
-    phone: string;
-    school: string;
-    program: string;
-    graduationYear: number;
-    gwa?: string;
-    latinHonors?: string;
-    linkedInUrl?: string;
-    githubUrl?: string;
-  },
-): ResumeCoachResponse {
-  // The Resume.pdf/Oboda layout leads directly with Experience. A generic
-  // summary is both low-signal for this candidate and pushes stronger work
-  // below the first scan area, so strip it even when a local model adds one.
-  const sections = response.sections
-    .map((section) => ({ ...section, heading: section.heading.trim() }))
-    .filter(
-      (section) => !/summary|profile|objective|contact/i.test(section.heading),
-    );
-  const pick = (pattern: RegExp) =>
-    sections.find((section) => pattern.test(section.heading));
-  const name = [values.firstName, values.middleName, values.lastName]
-    .filter(Boolean)
-    .join(" ");
-  const contact = [
-    values.email,
-    values.phone,
-    values.linkedInUrl,
-    values.githubUrl,
-  ]
-    .filter(Boolean)
-    .join(" | ");
-  const education = [
-    values.program,
-    values.school,
-    String(values.graduationYear),
-    values.gwa ? `GWA ${values.gwa}` : undefined,
-    values.latinHonors,
-  ]
-    .filter(Boolean)
-    .join(" | ");
-  const ordered = [
-    { heading: "Contact", text: contact ? `${name}\n${contact}` : name },
-    pick(/^(?:experience|employment|work history)$/i),
-    pick(/^education$/i) ?? { heading: "Education", text: education },
-    pick(/^projects?$/i),
-    pick(/^(?:technical skills|skills)$/i),
-  ].filter((section): section is { heading: string; text: string } =>
-    Boolean(section && section.text.trim()),
-  );
-  return { ...response, sections: ordered };
-}
 
 export async function localModelSettingsAction(
   _: WorkspaceActionState,
@@ -371,9 +319,10 @@ export async function resumeOnboardingAction(
           "Each Project or Experience needs one local folder.",
           "Use Browse local folder for every work item and try again.",
         );
+      const name = String(formData.get(`itemName-${index}`) ?? "");
       return {
         category: category as "project" | "experience",
-        name: String(formData.get(`itemName-${index}`) ?? ""),
+        name,
         sourceDirectory,
       };
     });
@@ -519,14 +468,6 @@ export async function generateBaseResumeAction(
       summary: "The requested resume action is unavailable.",
       safeNextAction: "Refresh Resume and try the requested change again.",
     };
-  if (generationCommand === "revision" && !requestedRevision)
-    return {
-      status: "error",
-      summary:
-        "Describe the small supported change before updating your resume.",
-      safeNextAction:
-        "State the wording, emphasis, or correction you want the Resume Coach to apply.",
-    };
   const userRequest = requestedRevision
     ? `Create a revised base resume from my saved profile and all documented work. Apply this narrow, evidence-supported revision only: ${requestedRevision}`
     : "Create a base resume draft from my saved profile and all documented work.";
@@ -564,6 +505,13 @@ export async function generateBaseResumeAction(
     let evidence;
     let template;
     let workspaceId: string;
+    let eligibleClarifications: Array<{
+      itemName: string;
+      itemCategory: "project" | "experience";
+      category: string;
+      text: string;
+      provenance: "candidate_interview_answer";
+    }> = [];
     let ownedDocumentPaths = new Set<string>();
     try {
       applyMigrations(db);
@@ -585,6 +533,15 @@ export async function generateBaseResumeAction(
         listWorkspaceDocumentedEvidenceIds(db, workspace.id),
       );
       evidence = listCurrentEvidence(db).filter((item) => allowed.has(item.id));
+      eligibleClarifications = listClarifiedEvidenceInDatabase(db, workspace.id)
+        .filter((item) => !item.needsReview)
+        .map((item) => ({
+          itemName: item.itemName,
+          itemCategory: item.itemCategory,
+          category: item.category,
+          text: item.candidateText.trim(),
+          provenance: item.provenance,
+        }));
       ownedDocumentPaths = new Set(
         (
           db
@@ -612,6 +569,9 @@ export async function generateBaseResumeAction(
         "Complete the current Resume Coach step before generating a resume.",
         "Return to the active resume workspace and finish its required clarification or recovery step.",
       );
+    const baseline = await readInitialResumeTemplateContract({
+      appDataRoot: paths.root,
+    });
     if (!template) {
       await bootstrapBundledResumeTemplate();
       const templateDb = openDatabase(paths.databasePath);
@@ -694,6 +654,8 @@ export async function generateBaseResumeAction(
       templateDigest: template.contentDigest,
       evidence: selected,
       documentation,
+      baseline,
+      clarifications: eligibleClarifications,
       userRequest,
       consentNonce,
     });
@@ -736,22 +698,27 @@ export async function generateBaseResumeAction(
     } finally {
       auditDb.close();
     }
-    const response = ensureProfileSections(
-      await requestBaseResumeGeneration({
-        connection,
-        profileRevisionId: profile.revision.id,
-        profileDigest: profile.revision.contentDigest,
-        profileSnapshot,
-        templateId: template.id,
-        templateDigest: template.contentDigest,
-        evidence: selected,
-        documentation,
-        userRequest,
-        consentNonce,
-        consentFingerprint,
-      }),
-      profile.revision.values,
-    );
+    const fileReadSession = await createResumeFileReadSession({
+      managedRoots: [
+        join(evidenceLibraryRoot(paths.root), "workspaces", workspaceId!),
+      ],
+    });
+    const response = await requestBaseResumeGeneration({
+      connection,
+      profileRevisionId: profile.revision.id,
+      profileDigest: profile.revision.contentDigest,
+      profileSnapshot,
+      templateId: template.id,
+      templateDigest: template.contentDigest,
+      evidence: selected,
+      documentation,
+      baseline,
+      clarifications: eligibleClarifications,
+      userRequest,
+      consentNonce,
+      consentFingerprint,
+      fileReadSession,
+    });
     let draft: { id: string };
     try {
       draft = persistResumeCoachDraft({
@@ -1604,7 +1571,9 @@ export async function resumeClarificationAction(
   }
 }
 
-export async function readResumeEvidenceIntakeStatusAction(workspaceId: string): Promise<{
+export async function readResumeEvidenceIntakeStatusAction(
+  workspaceId: string,
+): Promise<{
   status: "queued" | "running" | "ready" | "failed" | "idle";
   message: string;
   isComplete: boolean;
@@ -1612,20 +1581,31 @@ export async function readResumeEvidenceIntakeStatusAction(workspaceId: string):
 }> {
   try {
     const intake = await readLatestResumeEvidenceIntake(workspaceId);
-    const workspaceState = await readResumeWorkspaceState().catch(() => undefined);
+    const workspaceState = await readResumeWorkspaceState().catch(
+      () => undefined,
+    );
     const phase = workspaceState?.activeWorkspace?.journey?.phase;
-    const isReady = intake?.status === "ready" || phase === "interview" || phase === "ready_to_generate" || phase === "ready_for_preview";
+    const isReady =
+      intake?.status === "ready" ||
+      phase === "interview" ||
+      phase === "ready_to_generate" ||
+      phase === "ready_for_preview";
     const isFailed = intake?.status === "failed";
     return {
       status: intake?.status ?? (isReady ? "ready" : "running"),
-      message: intake?.message ?? (isReady ? "Your evidence is documented and ready." : "Reading your selected local folders and documenting resume evidence."),
+      message:
+        intake?.message ??
+        (isReady
+          ? "Your evidence is documented and ready."
+          : "Reading your selected local folders and documenting resume evidence."),
       isComplete: Boolean(isReady),
       failed: Boolean(isFailed),
     };
   } catch {
     return {
       status: "running",
-      message: "Reading your selected local folders and documenting resume evidence.",
+      message:
+        "Reading your selected local folders and documenting resume evidence.",
       isComplete: false,
       failed: false,
     };

@@ -1,5 +1,13 @@
 import { createHash } from "node:crypto";
-import { lstat, mkdir, open, readdir, rm, writeFile } from "node:fs/promises";
+import {
+  lstat,
+  mkdir,
+  open,
+  readFile,
+  readdir,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import type { Stats } from "node:fs";
 import { basename, extname, join, relative, resolve, sep } from "node:path";
 import { WorkspaceError } from "@/domain/workspace/types";
@@ -1059,4 +1067,243 @@ export async function readManagedMarkdown(
     ...item,
     libraryPath: `resume-evidence/${item.category === "project" ? "projects" : "experiences"}/${item.libraryPath}`,
   }));
+}
+
+export type ResumeFileCitation = {
+  citationId: string;
+  path: string;
+  startLine: number;
+  endLine: number;
+  contentDigest: string;
+};
+export type ResumeFileToolAction =
+  | { action: "list"; rootId: string; path?: string }
+  | {
+      action: "read";
+      rootId: string;
+      path: string;
+      startLine?: number;
+      endLine?: number;
+    };
+export type ResumeFileToolResult =
+  | {
+      ok: true;
+      type: "list";
+      rootId: string;
+      path: string;
+      entries: Array<{ path: string; kind: "file" | "directory" }>;
+    }
+  | {
+      ok: true;
+      type: "read";
+      rootId: string;
+      path: string;
+      citation: ResumeFileCitation;
+      text: string;
+    }
+  | {
+      ok: false;
+      error:
+        | "invalid_request"
+        | "unsafe_path"
+        | "budget_exhausted"
+        | "unsupported_file";
+    };
+export type ResumeFileReadSession = Readonly<{
+  roots: Array<{ rootId: string; label: "application" | "managed-work" }>;
+  execute: (action: ResumeFileToolAction) => Promise<ResumeFileToolResult>;
+  validateCitation: (citation: ResumeFileCitation) => boolean;
+}>;
+
+type ResumeFileRoot = {
+  rootId: string;
+  root: string;
+  label: "application" | "managed-work";
+};
+const fileToolLimits = {
+  maxCalls: 24,
+  maxFiles: 120,
+  maxBytes: 48_000,
+  maxReadBytes: 8_000,
+  maxReadLines: 300,
+  maxDepth: 20,
+  maxListEntries: 80,
+  maxElapsedMs: 90_000,
+} as const;
+const toolPath = (value: string | undefined): string | undefined => {
+  if (value === undefined || value === "") return "";
+  if (
+    typeof value !== "string" ||
+    value.length > 600 ||
+    value.includes("\\") ||
+    value.startsWith("/") ||
+    /^[a-z]:/i.test(value) ||
+    /[\u0000-\u001f]/.test(value)
+  )
+    return undefined;
+  const parts = value.split("/");
+  return parts.some((part) => !part || part === "." || part === "..")
+    ? undefined
+    : value;
+};
+const withinRoot = (root: string, target: string) => {
+  const value = relative(root, target);
+  return value === "" || (value !== ".." && !value.startsWith(`..${sep}`));
+};
+
+/** Creates a short-lived, host-owned local read capability for Resume Architect. */
+export async function createResumeFileReadSession(input: {
+  applicationRoot?: string;
+  managedRoots: string[];
+}): Promise<ResumeFileReadSession> {
+  const skill = getResumeAgentSkill("resume.generate-base-resume");
+  const extensions = new Set(skill.allowedExtensions);
+  const excluded = new Set(skill.excludedDirectories);
+  const roots: ResumeFileRoot[] = [];
+  for (const candidate of [
+    {
+      root: input.applicationRoot ?? process.cwd(),
+      label: "application" as const,
+    },
+    ...input.managedRoots.map((root) => ({
+      root,
+      label: "managed-work" as const,
+    })),
+  ]) {
+    const info = await lstat(candidate.root).catch(() => undefined);
+    const canonical =
+      info?.isDirectory() && !info.isSymbolicLink()
+        ? await resolve(candidate.root)
+        : undefined;
+    if (!canonical)
+      throw new WorkspaceError(
+        "EVIDENCE_LIBRARY_INVALID",
+        "An approved local source folder is unavailable or unsafe.",
+        "Refresh the active resume workspace and try again.",
+      );
+    if (roots.some((root) => root.root === canonical)) continue;
+    roots.push({
+      rootId: `root-${roots.length + 1}`,
+      root: canonical,
+      label: candidate.label,
+    });
+  }
+  const reads = new Map<string, ResumeFileCitation>();
+  let calls = 0;
+  let files = 0;
+  let bytes = 0;
+  let ordinal = 0;
+  const started = Date.now();
+  const exhausted = () =>
+    calls >= fileToolLimits.maxCalls ||
+    files >= fileToolLimits.maxFiles ||
+    bytes >= fileToolLimits.maxBytes ||
+    Date.now() - started > fileToolLimits.maxElapsedMs;
+  const targetFor = async (root: ResumeFileRoot, path: string) => {
+    const target = resolve(root.root, path);
+    if (!withinRoot(root.root, target)) return undefined;
+    const info = await lstat(target).catch(() => undefined);
+    if (!info || info.isSymbolicLink()) return undefined;
+    return { target, info };
+  };
+  const execute = async (
+    action: ResumeFileToolAction,
+  ): Promise<ResumeFileToolResult> => {
+    if (!action || (action.action !== "list" && action.action !== "read"))
+      return { ok: false, error: "invalid_request" };
+    if (exhausted()) return { ok: false, error: "budget_exhausted" };
+    const root = roots.find((item) => item.rootId === action.rootId);
+    const path = toolPath(action.path);
+    if (!root || path === undefined) return { ok: false, error: "unsafe_path" };
+    calls += 1;
+    const found = await targetFor(root, path);
+    if (!found) return { ok: false, error: "unsafe_path" };
+    if (action.action === "list") {
+      if (
+        !found.info.isDirectory() ||
+        (path && path.split("/").length > fileToolLimits.maxDepth)
+      )
+        return { ok: false, error: "invalid_request" };
+      const entries: Array<{ path: string; kind: "file" | "directory" }> = [];
+      for (const entry of (
+        await readdir(found.target, { withFileTypes: true })
+      ).sort((left, right) => left.name.localeCompare(right.name))) {
+        if (
+          entries.length >= fileToolLimits.maxListEntries ||
+          excluded.has(entry.name.toLowerCase())
+        )
+          continue;
+        const childPath = path ? `${path}/${entry.name}` : entry.name;
+        const child = await targetFor(root, childPath);
+        if (!child) continue;
+        if (child.info.isDirectory())
+          entries.push({ path: childPath, kind: "directory" });
+        else if (
+          child.info.isFile() &&
+          extensions.has(extname(entry.name).toLowerCase())
+        )
+          entries.push({ path: childPath, kind: "file" });
+      }
+      return { ok: true, type: "list", rootId: root.rootId, path, entries };
+    }
+    if (!found.info.isFile()) return { ok: false, error: "invalid_request" };
+    if (!extensions.has(extname(path).toLowerCase()))
+      return { ok: false, error: "unsupported_file" };
+    if (
+      !found.info.size ||
+      found.info.size > fileToolLimits.maxReadBytes ||
+      bytes + found.info.size > fileToolLimits.maxBytes
+    )
+      return { ok: false, error: "budget_exhausted" };
+    const content = await readFile(found.target);
+    let text: string;
+    try {
+      text = decoder.decode(content);
+    } catch {
+      return { ok: false, error: "unsupported_file" };
+    }
+    const lines = text.split(/\r?\n/);
+    const startLine = action.startLine ?? 1;
+    const endLine = action.endLine ?? lines.length;
+    if (
+      !Number.isInteger(startLine) ||
+      !Number.isInteger(endLine) ||
+      startLine < 1 ||
+      endLine < startLine ||
+      endLine - startLine + 1 > fileToolLimits.maxReadLines
+    )
+      return { ok: false, error: "invalid_request" };
+    const selected = lines.slice(startLine - 1, endLine).join("\n");
+    if (
+      !selected ||
+      new TextEncoder().encode(selected).byteLength >
+        fileToolLimits.maxReadBytes
+    )
+      return { ok: false, error: "budget_exhausted" };
+    bytes += content.byteLength;
+    files += 1;
+    const citation = {
+      citationId: `citation-${++ordinal}`,
+      path,
+      startLine,
+      endLine,
+      contentDigest: digest(content),
+    };
+    reads.set(citation.citationId, citation);
+    return {
+      ok: true,
+      type: "read",
+      rootId: root.rootId,
+      path,
+      citation,
+      text: selected,
+    };
+  };
+  return {
+    roots: roots.map(({ rootId, label }) => ({ rootId, label })),
+    execute,
+    validateCitation: (citation) =>
+      JSON.stringify(reads.get(citation.citationId)) ===
+      JSON.stringify(citation),
+  };
 }

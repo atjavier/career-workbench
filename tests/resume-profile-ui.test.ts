@@ -43,9 +43,11 @@ test("Resume onboarding prepares evidence before the Coach interview", async () 
   assert.match(coach, /resume-coach-preview-layout/);
   assert.match(workspace, /href="\/evidence"/);
   assert.match(workspace, /readCandidateProfileState/);
+  assert.match(workspace, /BaseResumeImporter/);
+  assert.match(workspace, /readInitialResumeTemplateContract/);
   assert.doesNotMatch(
     workspace,
-    /CurrentBaseResume|BaseResumeImporter|listCurrentBaseResume|current-base-resume|Evidence and skills|Warnings|Approve Current Base Resume|iframe|api\/resume-template|Open or download Resume\.pdf/,
+    /CurrentBaseResume|listCurrentBaseResume|current-base-resume|Evidence and skills|Warnings|Approve Current Base Resume|iframe|api\/resume-template|Open or download Resume\.pdf/,
   );
   assert.doesNotMatch(
     form + workspace + coach,
@@ -208,4 +210,3 @@ test("Stitch-led Resume Builder provides separated work collections and accessib
   assert.match(styles, /\.onboarding-projects/);
   assert.match(styles, /\.onboarding-experiences/);
 });
-

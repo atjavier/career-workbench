@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { ResumeTemplateContract } from "@/domain/base-resume/resume-template-contract";
 import { WorkspaceError } from "@/domain/workspace/types";
 import {
   folderDocumenterArtifactInstruction,
@@ -6,11 +7,15 @@ import {
 } from "@/adapters/local-model/folder-documenter-agent";
 import {
   containsUnsafeResumeContent,
-  resumeGeneratorEditorialInstruction,
-  resumeGeneratorEvidenceIntelligenceInstruction,
-  resumeGeneratorProjectIdentityInstruction,
   resumeGeneratorSystemInstruction,
 } from "@/adapters/local-model/resume-generator-agent";
+import { orchestrateResumeGeneration } from "@/adapters/local-model/resume-generation-orchestrator";
+import { resumeFileAgentInstruction } from "@/adapters/local-model/resume-file-agent";
+import type {
+  ResumeFileCitation,
+  ResumeFileReadSession,
+  ResumeFileToolAction,
+} from "@/files/evidence-library";
 import { resumeCoachSystemInstruction as resumeCoachReviewSystemInstruction } from "@/adapters/local-model/resume-coach-agent";
 
 const endpoint = "http://127.0.0.1:1234/api/v1/chat";
@@ -22,8 +27,6 @@ const maxStreamFrame = 8_192;
 // ceiling; the request-size guard below still prevents oversized loopback
 // payloads and switches to the local deterministic composer when necessary.
 const maxResumeCoachEvidence = 2_000;
-const resumeGeneratorEvidenceCitationInstruction =
-  "Each supplied evidence item includes evidenceIndex. For every visible Experience or Projects bullet, claims.evidenceIndexes must contain only directly supporting supplied evidenceIndex values; never invent positions or use a digest as an index.";
 const plain = (value: unknown, maximum: number) =>
   typeof value === "string" &&
   value.length > 0 &&
@@ -54,13 +57,6 @@ const supports = (claim: string, evidence: string[]) => {
   );
 };
 const resumeBulletMarker = /^\s*[-*\u2022]\s+/;
-const comparableResumeText = (value: string) =>
-  value
-    .trim()
-    .replace(resumeBulletMarker, "")
-    .replace(/\s+/g, " ")
-    .replace(/[.]+$/, "")
-    .toLocaleLowerCase();
 function resumeRelevantModelEvidence(
   evidence: ResumeCoachRequest["evidence"],
 ): Array<{ index: number; factualText: string; contentDigest: string }> {
@@ -101,7 +97,11 @@ function resumeRelevantModelEvidence(
 }
 function resumeGenerationDocumentation(
   documentation: ResumeCoachDocumentation[] | undefined,
-): ResumeCoachDocumentation[] {
+): Array<{
+  name: string;
+  category: "project" | "experience";
+  documents: Array<{ text: string; contentDigest: string }>;
+}> {
   return (documentation ?? [])
     .map((group) => {
       const context = group.documents.find((document) =>
@@ -124,231 +124,16 @@ function resumeGenerationDocumentation(
             ? { ...evidence, text: evidence.text.slice(0, 3_000) }
             : undefined;
       return document
-        ? { ...group, documents: [document] }
-        : { ...group, documents: [] };
+        ? {
+            name: group.name,
+            category: group.category,
+            documents: [
+              { text: document.text, contentDigest: document.contentDigest },
+            ],
+          }
+        : { name: group.name, category: group.category, documents: [] };
     })
     .filter((group) => group.documents.length > 0);
-}
-function restoreOriginalEvidenceIndexes(
-  value: Record<string, unknown>,
-  selected: Array<{
-    index: number;
-    factualText: string;
-    contentDigest: string;
-  }>,
-  evidence: ResumeCoachRequest["evidence"],
-): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
-  const item = value as Record<string, unknown>;
-  if (!Array.isArray(item.claims)) return value;
-  return {
-    ...item,
-    claims: item.claims.map((claim) => {
-      if (!claim || typeof claim !== "object") return claim;
-      const claimRecord = claim as Record<string, unknown>;
-      const indexes = claimRecord.evidenceIndexes;
-      if (!Array.isArray(indexes)) return claim;
-      const referenced = indexes.flatMap((index) => {
-        // A digest is an unambiguous reference to a model-visible fact.
-        if (typeof index === "string")
-          return selected.find(
-            (item) =>
-              item.contentDigest === index ||
-              item.contentDigest === `sha256:${index}`,
-          )?.index;
-        if (!Number.isInteger(index) || (index as number) < 0) return [];
-        // Older responses used a model-packet position. Newer Qwen responses
-        // invent numeric values despite never receiving positions. Consider
-        // both possible meanings, but validate them against the claim below.
-        const numeric = index as number;
-        return [
-          ...new Set(
-            [selected[numeric]?.index, numeric].filter(
-              (candidate): candidate is number =>
-                candidate !== undefined && candidate < evidence.length,
-            ),
-          ),
-        ];
-      });
-      const text = typeof claimRecord.text === "string" ? claimRecord.text : "";
-      const directlySupported = (index: number) =>
-        supports(text, [evidence[index]?.factualText ?? ""]);
-      const resolved = [
-        ...new Set(
-          referenced.filter(
-            (index): index is number =>
-              typeof index === "number" && directlySupported(index),
-          ),
-        ),
-      ];
-      // Do not let an arbitrary number from the model invalidate an otherwise
-      // grounded bullet. This uses the same conservative lexical-support rule
-      // as the normal claim inference path, over evidence the user supplied.
-      const inferred = resolved.length
-        ? resolved
-        : evidence
-            .flatMap((_item, index) =>
-              directlySupported(index) ? [index] : [],
-            )
-            .slice(0, 4);
-      return { ...claimRecord, evidenceIndexes: inferred };
-    }),
-  };
-}
-function normalizeGeneratedResume(
-  value: Record<string, unknown>,
-  documentedProjectNames: string[] = [],
-): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
-  const item = value as Record<string, unknown>;
-  const sections: unknown[] = Array.isArray(item.sections)
-    ? item.sections.map((section) => {
-        if (!section || typeof section !== "object") return section;
-        const record = section as Record<string, unknown>;
-        const heading = String(record.heading ?? "").trim();
-        if (!/^projects?$/i.test(heading) || typeof record.text !== "string")
-          return { ...record, heading };
-        const lines = record.text.split(/\r?\n/).filter(Boolean);
-        const title = lines.shift()?.replace(resumeBulletMarker, "").trim();
-        const documentedName =
-          documentedProjectNames.length === 1
-            ? documentedProjectNames[0]
-            : documentedProjectNames.find((name) =>
-                new RegExp(
-                  `^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*(?:\\||$)`,
-                  "i",
-                ).test(title ?? ""),
-              );
-        const descriptorWords = title?.includes("|")
-          ? title.split("|").slice(1).join("|").trim().split(/\s+/).slice(0, 12)
-          : [];
-        while (
-          (descriptorWords.length &&
-            /^(?:and|or|for|to|with|of|in|into|on|at|by)$/i.test(
-              descriptorWords.at(-1) ?? "",
-            )) ||
-          /ing[.,;:]?$/i.test(descriptorWords.at(-1) ?? "")
-        )
-          descriptorWords.pop();
-        const descriptor = descriptorWords.join(" ");
-        const normalizedTitle = documentedName
-          ? `${documentedName}${descriptor ? ` | ${descriptor}` : ""}`
-          : title;
-        const bullets = lines
-          .filter(
-            (line) =>
-              resumeBulletMarker.test(line) &&
-              !containsUnsafeResumeContent(
-                line.replace(resumeBulletMarker, ""),
-              ),
-          )
-          .slice(0, 4);
-        return normalizedTitle
-          ? {
-              ...record,
-              heading: "Projects",
-              text: [normalizedTitle, ...bullets].join("\n"),
-            }
-          : { ...record, heading };
-      })
-    : [];
-  const visibleProjectBullets = (sections ?? [])
-    .filter(
-      (section) =>
-        section &&
-        typeof section === "object" &&
-        /^projects?$/i.test(
-          String((section as Record<string, unknown>).heading ?? "").trim(),
-        ),
-    )
-    .flatMap((section) =>
-      String((section as Record<string, unknown>).text ?? "")
-        .split(/\r?\n/)
-        .filter((line) => resumeBulletMarker.test(line))
-        .map((line) => line.replace(resumeBulletMarker, "").trim()),
-    );
-  const normalizedClaims = Array.isArray(item.claims)
-    ? item.claims.map((claim) =>
-        claim && typeof claim === "object"
-          ? {
-              ...(claim as Record<string, unknown>),
-              text:
-                typeof (claim as Record<string, unknown>).text === "string"
-                  ? String((claim as Record<string, unknown>).text)
-                      .replace(resumeBulletMarker, "")
-                      .trim()
-                  : (claim as Record<string, unknown>).text,
-            }
-          : claim,
-      )
-    : item.claims;
-  const claims =
-    Array.isArray(normalizedClaims) && visibleProjectBullets.length
-      ? visibleProjectBullets.flatMap((bullet) => {
-          const comparableBullet = comparableResumeText(bullet);
-          const matching = normalizedClaims.find(
-            (claim) =>
-              claim &&
-              typeof claim === "object" &&
-              typeof (claim as Record<string, unknown>).text === "string" &&
-              (() => {
-                const comparableClaim = comparableResumeText(
-                  String((claim as Record<string, unknown>).text),
-                );
-                return (
-                  comparableBullet.startsWith(comparableClaim) ||
-                  comparableClaim.startsWith(comparableBullet)
-                );
-              })() &&
-              Array.isArray(
-                (claim as Record<string, unknown>).evidenceIndexes,
-              ) &&
-              (claim as { evidenceIndexes: unknown[] }).evidenceIndexes.length >
-                0,
-          );
-          return matching
-            ? [{ ...(matching as Record<string, unknown>), text: bullet }]
-            : [];
-        })
-      : normalizedClaims;
-  const hasClaimEntries =
-    Array.isArray(normalizedClaims) && normalizedClaims.length > 0;
-  const claimedProjectBullets = new Set(
-    Array.isArray(claims)
-      ? claims
-          .filter((claim) => claim && typeof claim === "object")
-          .map((claim) => String((claim as Record<string, unknown>).text ?? ""))
-      : [],
-  );
-  const claimedSections = hasClaimEntries
-    ? sections.map((section) => {
-        if (
-          !section ||
-          typeof section !== "object" ||
-          !/^projects?$/i.test(
-            String((section as Record<string, unknown>).heading ?? "").trim(),
-          )
-        )
-          return section;
-        const lines = String(
-          (section as Record<string, unknown>).text ?? "",
-        ).split(/\r?\n/);
-        return {
-          ...(section as Record<string, unknown>),
-          text: lines
-            .filter(
-              (line, index) =>
-                index === 0 ||
-                !resumeBulletMarker.test(line) ||
-                claimedProjectBullets.has(
-                  line.replace(resumeBulletMarker, "").trim(),
-                ),
-            )
-            .join("\n"),
-        };
-      })
-    : sections;
-  return { ...item, sections: claimedSections, claims };
 }
 function parseModelJson(content: string): Record<string, unknown> {
   const fenced = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(content.trim());
@@ -379,11 +164,36 @@ function parseModelJson(content: string): Record<string, unknown> {
     // Qwen occasionally emits its supplied SHA references as bare hexadecimal
     // tokens. Repair only those tokens within evidenceIndexes arrays; never
     // relax the envelope or accept arbitrary JavaScript syntax.
-    repaired = repaired.replace(
-      /("evidenceIndexes"\s*:\s*\[)([^\]]*)(\])/g,
-      (_match, opening, indexes, closing) =>
-        `${opening}${indexes.replace(/(^|,)(\s*)([a-f0-9]{64})(\s*)(?=,|$)/gi, '$1$2"$3"$4')}${closing}`,
-    );
+    repaired = repaired
+      .replace(
+        /("evidenceIndexes"\s*:\s*\[)([^\]]*)(\])/g,
+        (_match, opening, indexes, closing) =>
+          `${opening}${indexes.replace(/(^|,)(\s*)([a-f0-9]{64})(\s*)(?=,|$)/gi, '$1$2"$3"$4')}${closing}`,
+      )
+      // Qwen can place an empty per-edit unknowns property between edit
+      // objects. Removing only that empty malformed fragment restores JSON
+      // without adding model content or weakening the response schema.
+      .replace(
+        /,\s*"unknowns"\s*:\s*\[\s*(?:""\s*)?\]\s*}(?=\s*,\s*\{\s*"sectionIndex")/g,
+        "",
+      )
+      // At end-of-response Qwen can close the dangling member before the
+      // edits array, yielding `…}]` instead of the required `…]}`.
+      .replace(
+        /(?<=})\s*,\s*"unknowns"\s*:\s*\[\s*(?:""\s*)?\]\s*}\s*](?=\s*$)/g,
+        "]}",
+      )
+      // A dangling member can also appear before an already valid root close.
+      .replace(
+        /(?<=})\s*,\s*"unknowns"\s*:\s*\[\s*(?:""\s*)?\]\s*}(?=\s*\])/g,
+        "",
+      )
+      // Or it can be the final property within an edit. Preserve that edit's
+      // closing brace while removing the empty non-contract property.
+      .replace(
+        /(?<=])\s*,\s*"unknowns"\s*:\s*\[\s*(?:""\s*)?\](?=\s*}\s*\])/g,
+        "",
+      );
     try {
       return JSON.parse(repaired);
     } catch {
@@ -417,6 +227,13 @@ export type ResumeCoachDocumentation = {
   category: "project" | "experience";
   documents: Array<{ path: string; text: string; contentDigest: string }>;
 };
+export type ResumeCandidateClarification = {
+  itemName: string;
+  itemCategory: "project" | "experience";
+  category: string;
+  text: string;
+  provenance: "candidate_interview_answer";
+};
 export type ResumeCoachRequest = {
   connection: LocalModelConnection;
   profileRevisionId: string;
@@ -426,16 +243,24 @@ export type ResumeCoachRequest = {
   templateDigest: string;
   evidence: ResumeCoachEvidence[];
   documentation?: ResumeCoachDocumentation[];
+  baseline?: ResumeTemplateContract;
+  clarifications?: ResumeCandidateClarification[];
   opportunity?: ResumeCoachOpportunity;
   currentResumeSections?: Array<{ heading: string; text: string }>;
   userRequest: string;
   consentNonce: string;
   consentFingerprint: string;
+  fileReadSession?: ResumeFileReadSession;
 };
 export type ResumeCoachResponse = {
   schemaVersion: 1;
   sections: Array<{ heading: string; text: string }>;
-  claims: Array<{ text: string; evidenceIndexes: number[] }>;
+  claims: Array<{
+    text: string;
+    evidenceIndexes: number[];
+    clarificationIndexes?: number[];
+  }>;
+  candidateClarifications?: ResumeCandidateClarification[];
   unknowns: string[];
   selectionEcho: string;
 };
@@ -502,7 +327,7 @@ export const resumeCoachSystemInstruction = resumeGeneratorSystemInstruction;
 
 export function localModelCapabilityVersion(capability: string): string {
   if (capability === "resume-coach" || capability === "resume-generator")
-    return "resume-coach-v6";
+    return "resume-coach-v8";
   if (capability === "resume-interview-coach")
     return "resume-interview-coach-v3";
   if (capability === "opportunity-assessment")
@@ -559,6 +384,23 @@ export function resumeCoachConsentFingerprint(
                 `${b.category}/${b.name}`,
               ),
             ) ?? null,
+        baseline: input.baseline
+          ? {
+              id: input.baseline.baselineId,
+              digest: input.baseline.baselineDigest,
+              sections: input.baseline.sections,
+            }
+          : null,
+        clarifications:
+          input.clarifications?.map(
+            ({ itemName, itemCategory, category, text, provenance }) => ({
+              itemName,
+              itemCategory,
+              category,
+              text,
+              provenance,
+            }),
+          ) ?? null,
         opportunity: input.opportunity
           ? {
               revisionId: input.opportunity.revisionId,
@@ -629,6 +471,26 @@ function validCoach(request: ResumeCoachRequest) {
       opportunity.requirements.length <= 20 &&
       opportunity.requirements.every((item) => plain(item, 1_000)));
   const documentation = request.documentation ?? [];
+  const baseline = request.baseline;
+  const clarifications = request.clarifications ?? [];
+  const validBaseline =
+    !baseline ||
+    (uuid(baseline.baselineId) &&
+      sha(baseline.baselineDigest) &&
+      baseline.sections.length >= 2 &&
+      baseline.sections.length <= 8 &&
+      new Set(baseline.sections.map((section) => section.tag)).size ===
+        baseline.sections.length &&
+      baseline.sections.every(
+        (section) =>
+          plain(section.heading, 120) &&
+          /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(section.tag) &&
+          typeof section.existingDetail === "string" &&
+          section.existingDetail.length <= 900 &&
+          !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/.test(
+            section.existingDetail,
+          ),
+      ));
   if (
     !validConnection(request.connection) ||
     !plain(request.userRequest, 2_000) ||
@@ -666,6 +528,24 @@ function validCoach(request: ResumeCoachRequest) {
             !sha(document.contentDigest),
         ),
     ) ||
+    !validBaseline ||
+    clarifications.length > 24 ||
+    clarifications.some(
+      (clarification) =>
+        !exactKeys(clarification as Record<string, unknown>, [
+          "itemName",
+          "itemCategory",
+          "category",
+          "text",
+          "provenance",
+        ]) ||
+        !plain(clarification.itemName, 240) ||
+        (clarification.itemCategory !== "project" &&
+          clarification.itemCategory !== "experience") ||
+        !plain(clarification.category, 120) ||
+        !plain(clarification.text, 2_400) ||
+        clarification.provenance !== "candidate_interview_answer",
+    ) ||
     (request.currentResumeSections !== undefined &&
       (!request.currentResumeSections.length ||
         request.currentResumeSections.length > 8 ||
@@ -682,15 +562,30 @@ function validCoach(request: ResumeCoachRequest) {
       "Review the disclosure and submit the request again.",
     );
 }
+function isWorkSection(heading: string): boolean {
+  return /(?:experience|employment|\bwork\b|project)/i.test(heading);
+}
+
+function isExactEmptyBaselineSection(
+  section: Record<string, unknown>,
+  baseline: ResumeTemplateContract | undefined,
+): boolean {
+  return (
+    Boolean(baseline) &&
+    typeof section.text === "string" &&
+    !section.text.trim() &&
+    baseline!.sections.some(
+      (baselineSection) =>
+        baselineSection.heading === String(section.heading) &&
+        !baselineSection.existingDetail.trim(),
+    )
+  );
+}
 function visibleWorkBullets(
   sections: Array<{ heading: string; text: string }>,
 ): string[] {
   return sections
-    .filter((section) =>
-      /^(?:experience|employment|work history|projects?)$/i.test(
-        section.heading.trim(),
-      ),
-    )
+    .filter((section) => isWorkSection(section.heading))
     .flatMap((section) =>
       section.text
         .split("\n")
@@ -713,21 +608,84 @@ function everyVisibleWorkBulletIsClaimed(
 function inferVisibleWorkClaims(
   sections: Array<{ heading: string; text: string }>,
   evidence: ResumeCoachRequest["evidence"],
-): Array<{ text: string; evidenceIndexes: number[] }> {
-  return visibleWorkBullets(sections).map((text) => ({
-    text,
-    evidenceIndexes: evidence
-      .flatMap((item, index) =>
-        supports(text, [item.factualText]) ? [index] : [],
-      )
-      .slice(0, 4),
-  }));
+  clarifications: ResumeCandidateClarification[],
+): ResumeCoachResponse["claims"] {
+  return visibleWorkBullets(sections).map((text) => {
+    const clarificationIndexes = clarifications
+      .flatMap((item, index) => (supports(text, [item.text]) ? [index] : []))
+      .slice(0, 4);
+    return {
+      text,
+      evidenceIndexes: evidence
+        .flatMap((item, index) =>
+          supports(text, [item.factualText]) ? [index] : [],
+        )
+        .slice(0, 4),
+      ...(clarificationIndexes.length ? { clarificationIndexes } : {}),
+    };
+  });
+}
+function specialistStructureIsValid(
+  response: ResumeCoachResponse,
+  baseline: ResumeTemplateContract | undefined,
+): boolean {
+  if (!baseline) return true;
+  if (
+    response.sections.length !== baseline.sections.length ||
+    response.sections.some(
+      (section, index) =>
+        section.heading !== baseline.sections[index]?.heading ||
+        containsUnsafeResumeContent(section.text) ||
+        isInternalResumeManifest(section.text),
+    )
+  )
+    return false;
+  const actionLed =
+    /^(?:Addressed|Built|Created|Developed|Designed|Implemented|Integrated|Led|Delivered|Improved|Automated|Produced|Configured|Established|Validated|Collaborated|Supported)\b/;
+  return response.sections.every((section, index) => {
+    const work = isWorkSection(section.heading);
+    const baselineSection = baseline.sections[index]!;
+    if (!work) return section.text === baselineSection.existingDetail;
+    const bullets = section.text
+      .split(/\r?\n/)
+      .filter((line) => resumeBulletMarker.test(line))
+      .map((line) => line.replace(resumeBulletMarker, "").trim());
+    if (!bullets.length) return section.text === baselineSection.existingDetail;
+    if (bullets.some((bullet) => !actionLed.test(bullet))) return false;
+    if (/project/i.test(section.heading)) {
+      const entries = section.text.split(/\n\s*\n/);
+      return (
+        entries.length <= 4 &&
+        entries.every((entry) => {
+          const lines = entry.split(/\r?\n/).filter(Boolean);
+          const title = lines.find(Boolean)?.trim() ?? "";
+          const projectBullets = lines.filter((line) =>
+            resumeBulletMarker.test(line),
+          );
+          return (
+            !resumeBulletMarker.test(title) &&
+            title.includes("|") &&
+            title.split("|")[1]!.trim().split(/\s+/).length <= 12 &&
+            projectBullets.length <= 3 &&
+            projectBullets.every(
+              (bullet) =>
+                bullet.replace(resumeBulletMarker, "").trim().split(/\s+/)
+                  .length <= 30,
+            )
+          );
+        })
+      );
+    }
+    return true;
+  });
 }
 function coachResponse(
   value: unknown,
-  evidence: ResumeCoachRequest["evidence"],
-  fingerprint: string,
+  request: ResumeCoachRequest,
 ): ResumeCoachResponse {
+  const evidence = request.evidence;
+  const fingerprint = request.consentFingerprint;
+  const clarifications = request.clarifications ?? [];
   if (!value || typeof value !== "object" || Array.isArray(value))
     invalid("The local model returned an unusable response.");
   const item = value as Record<string, unknown>;
@@ -764,68 +722,124 @@ function coachResponse(
   // A project-only workspace has no employment entry. Accept an intentionally
   // blank Experience section as an omitted section instead of discarding an
   // otherwise useful employer-facing project description.
-  const populatedSections = sections.filter(
-    (section) =>
-      !(
-        section &&
-        typeof section === "object" &&
-        /^experience$/i.test(
-          String((section as Record<string, unknown>).heading ?? "").trim(),
-        ) &&
-        typeof (section as Record<string, unknown>).text === "string" &&
-        !String((section as Record<string, unknown>).text).trim()
-      ),
-  );
+  const populatedSections = request.baseline
+    ? sections
+    : sections.filter(
+        (section) =>
+          !(
+            section &&
+            typeof section === "object" &&
+            /^experience$/i.test(
+              String((section as Record<string, unknown>).heading ?? "").trim(),
+            ) &&
+            typeof (section as Record<string, unknown>).text === "string" &&
+            !String((section as Record<string, unknown>).text).trim()
+          ),
+      );
   // Section text is intentionally multiline: the renderer turns its entry
   // title and bullets into the Resume.pdf-derived layout. `plain` rejects
   // newlines, which previously discarded well-formed model resumes and
   // forced the raw-fact fallback instead.
   if (
     !populatedSections.length ||
-    populatedSections.some(
-      (section) =>
-        !section ||
-        typeof section !== "object" ||
-        !exactKeys(section as Record<string, unknown>, ["heading", "text"]) ||
-        !plain((section as Record<string, unknown>).heading, 120) ||
-        !boundedText((section as Record<string, unknown>).text, 2_000),
-    ) ||
+    populatedSections.some((section) => {
+      if (!section || typeof section !== "object") return true;
+      const candidate = section as Record<string, unknown>;
+      return (
+        !exactKeys(candidate, ["heading", "text"]) ||
+        !plain(candidate.heading, 120) ||
+        (!boundedText(candidate.text, 2_000) &&
+          !isExactEmptyBaselineSection(candidate, request.baseline))
+      );
+    }) ||
     claims.some(
       (claim) =>
         !claim ||
         typeof claim !== "object" ||
-        !exactKeys(claim as Record<string, unknown>, [
+        (!exactKeys(claim as Record<string, unknown>, [
           "text",
           "evidenceIndexes",
-        ]) ||
+        ]) &&
+          !exactKeys(claim as Record<string, unknown>, [
+            "text",
+            "evidenceIndexes",
+            "clarificationIndexes",
+          ])) ||
         !plain((claim as Record<string, unknown>).text, 1_000) ||
         !Array.isArray((claim as Record<string, unknown>).evidenceIndexes) ||
-        !(claim as { evidenceIndexes: unknown[] }).evidenceIndexes.length ||
+        (!Array.isArray(
+          (claim as Record<string, unknown>).clarificationIndexes,
+        ) &&
+          (claim as Record<string, unknown>).clarificationIndexes !==
+            undefined) ||
+        (!(
+          claim as {
+            evidenceIndexes: unknown[];
+            clarificationIndexes?: unknown[];
+          }
+        ).evidenceIndexes.length &&
+          !(claim as { clarificationIndexes?: unknown[] }).clarificationIndexes
+            ?.length) ||
         new Set((claim as { evidenceIndexes: unknown[] }).evidenceIndexes)
           .size !==
           (claim as { evidenceIndexes: unknown[] }).evidenceIndexes.length ||
+        new Set(
+          (claim as { clarificationIndexes?: unknown[] })
+            .clarificationIndexes ?? [],
+        ).size !==
+          (
+            (claim as { clarificationIndexes?: unknown[] })
+              .clarificationIndexes ?? []
+          ).length ||
         (claim as { evidenceIndexes: unknown[] }).evidenceIndexes.some(
           (index) =>
             !Number.isInteger(index) ||
             (index as number) < 0 ||
             (index as number) >= evidence.length,
         ) ||
-        !(
-          claim as { text: string; evidenceIndexes: number[] }
-        ).evidenceIndexes.every((index) =>
-          supports((claim as { text: string }).text, [
-            evidence[index]!.factualText,
-          ]),
+        (
+          claim as { clarificationIndexes?: unknown[] }
+        ).clarificationIndexes?.some(
+          (index) =>
+            !Number.isInteger(index) ||
+            (index as number) < 0 ||
+            (index as number) >= clarifications.length,
         ),
     ) ||
     unknowns.some((unknown) => !plain(unknown, 500))
   )
     invalid("The local model returned unsupported guidance.");
+  // A concise bullet may combine multiple supported clauses. Keep only the
+  // citations that independently overlap the visible bullet, then reject the
+  // claim entirely if no evidence or eligible clarification remains.
+  const groundedClaims = (claims as ResumeCoachResponse["claims"]).map(
+    (claim) => {
+      const evidenceIndexes = claim.evidenceIndexes.filter((index) =>
+        supports(claim.text, [evidence[index]?.factualText ?? ""]),
+      );
+      const clarificationIndexes = (claim.clarificationIndexes ?? []).filter(
+        (index) => supports(claim.text, [clarifications[index]?.text ?? ""]),
+      );
+      return {
+        text: claim.text,
+        evidenceIndexes,
+        ...(clarificationIndexes.length ? { clarificationIndexes } : {}),
+      };
+    },
+  );
+  if (
+    groundedClaims.some(
+      (claim) =>
+        !claim.evidenceIndexes.length && !claim.clarificationIndexes?.length,
+    )
+  )
+    invalid("The local model returned unsupported guidance.");
   const inferredClaims = claims.length
-    ? (claims as ResumeCoachResponse["claims"])
+    ? groundedClaims
     : inferVisibleWorkClaims(
         populatedSections as ResumeCoachResponse["sections"],
         evidence,
+        clarifications,
       );
   const result = {
     schemaVersion: 1 as const,
@@ -835,11 +849,15 @@ function coachResponse(
     selectionEcho: fingerprint,
   };
   if (
-    !inferredClaims.every((claim) => claim.evidenceIndexes.length) ||
-    !everyVisibleWorkBulletIsClaimed(result.sections, result.claims)
+    !inferredClaims.every(
+      (claim) =>
+        claim.evidenceIndexes.length || claim.clarificationIndexes?.length,
+    ) ||
+    !everyVisibleWorkBulletIsClaimed(result.sections, result.claims) ||
+    !specialistStructureIsValid(result, request.baseline)
   )
     invalid(
-      "The local model returned a work bullet without direct evidence support.",
+      "The local model returned a draft that does not follow the supported resume contract.",
     );
   if (JSON.stringify(result).length > maxResponse)
     invalid("The local model response is too large to review safely.");
@@ -856,6 +874,7 @@ async function nativeText(
     | "OPPORTUNITY_ASSESSMENT_UNAVAILABLE"
     | "EVIDENCE_DOCUMENTER_INVALID",
   responseLimit = maxResponse,
+  reasoning: "off" | "on" = "off",
 ): Promise<string> {
   const controller = new AbortController();
   const timeout = setTimeout(
@@ -869,7 +888,7 @@ async function nativeText(
       system_prompt: systemPrompt,
       stream: false,
       store: false,
-      reasoning: "off",
+      reasoning,
       temperature: 0.2,
       max_output_tokens: maximumTokens,
     });
@@ -965,6 +984,7 @@ async function native(
     | "OPPORTUNITY_ASSESSMENT_UNAVAILABLE"
     | "EVIDENCE_DOCUMENTER_INVALID",
   responseLimit = maxResponse,
+  reasoning: "off" | "on" = "off",
 ): Promise<Record<string, unknown>> {
   const content = await nativeText(
     connection,
@@ -974,6 +994,7 @@ async function native(
     fetcher,
     code,
     responseLimit,
+    reasoning,
   );
   try {
     return parseModelJson(content);
@@ -985,6 +1006,194 @@ async function native(
     );
   }
 }
+async function requestFileAgentResume(
+  request: ResumeCoachRequest,
+  session: ResumeFileReadSession,
+  fetcher: FetchLike,
+): Promise<ResumeCoachResponse> {
+  const baseline = request.baseline;
+  if (!baseline) throw new Error("missing resume baseline");
+  const slots = baseline.sections
+    .map((section, index) => ({
+      slotId: section.tag,
+      heading: section.heading,
+      index,
+    }))
+    .filter((slot) => isWorkSection(slot.heading));
+  if (!slots.length) throw new Error("missing editable resume slots");
+  const observations: unknown[] = [];
+  for (let turn = 0; turn < 12; turn += 1) {
+    const value = await native(
+      request.connection,
+      resumeFileAgentInstruction,
+      {
+        roots: session.roots,
+        slots: slots.map(({ slotId, heading }) => ({ slotId, heading })),
+        profile: request.profileSnapshot,
+        request: request.userRequest,
+        observations,
+      },
+      900,
+      fetcher,
+      "RESUME_COACH_UNAVAILABLE",
+      maxResponse,
+      "off",
+    );
+    if (value.kind === "tool" && exactKeys(value, ["kind", "action"])) {
+      const action = value.action;
+      if (!action || typeof action !== "object" || Array.isArray(action))
+        throw new Error("invalid file tool action");
+      const candidate = action as Record<string, unknown>;
+      const validList =
+        candidate.action === "list" &&
+        exactKeys(candidate, ["action", "rootId", "path"]) &&
+        plain(candidate.rootId, 80) &&
+        (candidate.path === undefined || typeof candidate.path === "string");
+      const validRead =
+        candidate.action === "read" &&
+        exactKeys(candidate, [
+          "action",
+          "rootId",
+          "path",
+          "startLine",
+          "endLine",
+        ]) &&
+        plain(candidate.rootId, 80) &&
+        plain(candidate.path, 600) &&
+        (candidate.startLine === undefined ||
+          Number.isInteger(candidate.startLine)) &&
+        (candidate.endLine === undefined ||
+          Number.isInteger(candidate.endLine));
+      if (!validList && !validRead) throw new Error("invalid file tool action");
+      const result = await session.execute(candidate as ResumeFileToolAction);
+      observations.push({ action: candidate, result });
+      if (JSON.stringify(observations).length > 48_000)
+        throw new Error("file tool budget exhausted");
+      continue;
+    }
+    if (
+      value.kind !== "final" ||
+      !exactKeys(value, ["kind", "edits", "unknowns"]) ||
+      !Array.isArray(value.edits) ||
+      !Array.isArray(value.unknowns) ||
+      value.edits.length > slots.length ||
+      value.unknowns.length > 12 ||
+      !value.unknowns.every(
+        (item) =>
+          typeof item === "string" && (!item.trim() || plain(item, 500)),
+      )
+    )
+      throw new Error("invalid file agent final response");
+    const seenSlots = new Set<string>();
+    const claims: ResumeCoachResponse["claims"] = [];
+    const edits = value.edits.map((item) => {
+      if (!item || typeof item !== "object" || Array.isArray(item))
+        throw new Error("invalid file agent edit");
+      const edit = item as Record<string, unknown>;
+      if (
+        !exactKeys(edit, ["slotId", "text", "claims"]) ||
+        !plain(edit.slotId, 120) ||
+        !boundedText(edit.text, 2_000) ||
+        !Array.isArray(edit.claims) ||
+        edit.claims.length > 4
+      )
+        throw new Error("invalid file agent edit");
+      const slotId = String(edit.slotId);
+      if (seenSlots.has(slotId)) throw new Error("duplicate file agent slot");
+      const slot = slots.find((candidate) => candidate.slotId === slotId);
+      if (!slot) throw new Error("unplanned file agent slot");
+      seenSlots.add(slotId);
+      const bulletTexts = String(edit.text)
+        .split(/\r?\n/)
+        .flatMap((line) =>
+          line.match(/^\s*[-•]\s+(.+)$/)
+            ? [line.replace(/^\s*[-•]\s+/, "").trim()]
+            : [],
+        );
+      const editClaims = edit.claims.map((item) => {
+        if (!item || typeof item !== "object" || Array.isArray(item))
+          throw new Error("invalid file agent claim");
+        const claim = item as Record<string, unknown>;
+        if (
+          !exactKeys(claim, ["text", "citations"]) ||
+          !plain(claim.text, 1_000) ||
+          !Array.isArray(claim.citations) ||
+          !claim.citations.length ||
+          claim.citations.length > 12
+        )
+          throw new Error("invalid file agent claim");
+        claim.citations.forEach((item) => {
+          if (
+            !item ||
+            typeof item !== "object" ||
+            Array.isArray(item) ||
+            !exactKeys(item as Record<string, unknown>, [
+              "citationId",
+              "path",
+              "startLine",
+              "endLine",
+              "contentDigest",
+            ])
+          )
+            throw new Error("invalid file citation");
+          const citation = item as ResumeFileCitation;
+          if (
+            !plain(citation.citationId, 80) ||
+            !plain(citation.path, 600) ||
+            !Number.isInteger(citation.startLine) ||
+            !Number.isInteger(citation.endLine) ||
+            citation.startLine < 1 ||
+            citation.endLine < citation.startLine ||
+            !sha(citation.contentDigest) ||
+            !session.validateCitation(citation)
+          )
+            throw new Error("unverified file citation");
+        });
+        const evidenceIndexes = request.evidence.flatMap((evidence, index) =>
+          supports(String(claim.text), [evidence.factualText]) ? [index] : [],
+        );
+        const clarificationIndexes = (request.clarifications ?? []).flatMap(
+          (clarification, index) =>
+            supports(String(claim.text), [clarification.text]) ? [index] : [],
+        );
+        if (!evidenceIndexes.length && !clarificationIndexes.length)
+          throw new Error("file claim lacks supported evidence");
+        const normalized = {
+          text: String(claim.text),
+          evidenceIndexes,
+          ...(clarificationIndexes.length ? { clarificationIndexes } : {}),
+        };
+        claims.push(normalized);
+        return normalized;
+      });
+      if (
+        !bulletTexts.length ||
+        bulletTexts.some(
+          (text) => !editClaims.some((claim) => claim.text === text),
+        )
+      )
+        throw new Error("uncited file agent bullet");
+      return { slot, text: String(edit.text) };
+    });
+    const response = {
+      schemaVersion: 1 as const,
+      selectionEcho: request.consentFingerprint,
+      sections: baseline.sections.map((section, index) => ({
+        heading: section.heading,
+        text:
+          edits.find((edit) => edit.slot.index === index)?.text ??
+          section.existingDetail,
+      })),
+      claims,
+      unknowns: value.unknowns
+        .map((item) => String(item).trim())
+        .filter(Boolean),
+    };
+    return coachResponse(response, request);
+  }
+  throw new Error("file agent exceeded turn budget");
+}
+
 function validResumeInterviewCoachRequest(
   request: ResumeInterviewCoachRequest,
 ): void {
@@ -1033,13 +1242,23 @@ function interviewDecision(
       "answerSource",
     ]) &&
     (decision.answerSource === "latest" || decision.answerSource === "prior")
-  )
+  ) {
+    if (content.includes("?"))
+      invalid(
+        "The local model asked a follow-up while marking the answer complete.",
+      );
     return { disposition: "complete", answerSource: decision.answerSource };
+  }
   if (
     decision.disposition === "unknown" &&
     exactKeys(decision, ["schemaVersion", "selectionEcho", "disposition"])
-  )
+  ) {
+    if (content.includes("?"))
+      invalid(
+        "The local model asked a follow-up while marking the answer unknown.",
+      );
     return { disposition: "unknown" };
+  }
   const missingDetail = decision.missingDetail;
   if (
     decision.disposition === "clarify" &&
@@ -1051,6 +1270,8 @@ function interviewDecision(
     ]) &&
     typeof missingDetail === "string" &&
     plain(missingDetail, 240) &&
+    plain(content, 240) &&
+    /^\s*[^?]*\?\s*$/.test(content) &&
     content.toLocaleLowerCase().includes(missingDetail.toLocaleLowerCase())
   )
     return { disposition: "clarify", missingDetail };
@@ -1062,9 +1283,9 @@ function streamedInterviewResponse(
   rawContent: string,
 ): ResumeInterviewCoachStreamResponse {
   if (request.opening) {
-    if (!boundedText(rawContent, 1_800))
-      invalid("The local model returned unsupported interview guidance.");
-    return { content: rawContent };
+    if (rawContent.trim() !== request.question)
+      invalid("The local model returned an unsupported interview opening.");
+    return { content: request.question };
   }
   const start = rawContent.indexOf(interviewDecisionStart);
   const end = rawContent.indexOf(interviewDecisionEnd);
@@ -1133,8 +1354,8 @@ export async function* streamResumeInterviewCoach(
         latestCandidateMessage: latestCandidateMessage ?? null,
         clarificationUsed: request.clarificationUsed === true,
         responseShape: opening
-          ? "Initiate the conversation yourself. In two or three concise sentences, briefly explain that you will clarify documented experience for an accurate resume without inventing claims, introduce the exact saved question, and invite a natural answer. Reply with no JSON, labels, tools, or actions."
-          : `Respond naturally to latestCandidateMessage, then append exactly one machine-only decision with no text after it: ${interviewDecisionStart}{"schemaVersion":1,"selectionEcho":"${request.consentFingerprint}","disposition":"complete","answerSource":"latest"}${interviewDecisionEnd}. The visible reply comes before the tag and must not mention the tag or decision. Choose complete/latest for an adequate answer. Choose complete/prior only when the newest message directly declines after a prior substantive candidate answer. Choose unknown when the candidate cannot provide the requested information. Choose clarify only for one necessary, specific missing detail; include that exact missingDetail phrase in the visible targeted question. ${request.clarificationUsed ? "A clarification has already been used, so do not choose clarify." : ""} Never ask a generic question about anything else.`,
+          ? "Ask the exact saved question directly. Reply with that question only: no preamble, explanation, labels, tools, or actions."
+          : `Respond naturally to latestCandidateMessage, then append exactly one machine-only decision with no text after it: ${interviewDecisionStart}{"schemaVersion":1,"selectionEcho":"${request.consentFingerprint}","disposition":"complete","answerSource":"latest"}${interviewDecisionEnd}. The visible reply comes before the tag and must not mention the tag or decision. For complete or unknown, use one brief acknowledgement with no question. Choose complete/latest for an adequate answer. Choose complete/prior only when the newest message directly declines after a prior substantive candidate answer. Choose unknown when the candidate cannot provide the requested information. Choose clarify only for one necessary, specific missing detail; the visible reply must be one direct question of 240 characters or fewer and include that exact missingDetail phrase. ${request.clarificationUsed ? "A clarification has already been used, so do not choose clarify." : ""} Never ask a generic question about anything else.`,
       }),
       system_prompt: [
         "You are Coach Resume in a live, evidence-grounded resume clarification conversation.",
@@ -1142,7 +1363,7 @@ export async function* streamResumeInterviewCoach(
         "Never act as a general-purpose assistant or discuss another project. Do not mention an application, framework, API, database, file, technology, or plan unless it is supplied in the saved question, documented context, or the candidate's own message.",
         "Use supplied evidence only as context; do not invent claims. Never create tasks, claims, evidence, drafts, PDFs, tools, filesystem, or network actions.",
         opening
-          ? "Begin by briefly explaining this resume-only scope, state the exact saved question, and invite a natural answer."
+          ? "Ask the exact saved question directly and nothing else."
           : "Make only the bounded complete, unknown, or clarify decision requested in the response shape. Do not infer facts from a candidate message; the host alone decides how an accepted answer is persisted.",
       ].join("\n"),
       stream: true,
@@ -1345,12 +1566,32 @@ function resumeProjectName(sourceDocument?: string): string {
   );
   return match?.[1]?.replace(/[-_]+/g, " ").trim() || "Documented work";
 }
+function isInternalResumeManifest(text: string): boolean {
+  return [
+    /\b(?:os[- ]account|full[- ]disk encryption|device encryption|application-level encryption|credential vault|credential-boundary)\b/i,
+    /\b(?:tokens? remain out of|private (?:per-user|os-user) app-data|sqlite.{0,100}\b(?:authoritative|local authority))\b/i,
+    /\b(?:host-controlled (?:local )?(?:workflow|orchestration)|model-callable tools?|application contracts?)\b/i,
+    /\bauthority to access\b.*\b(?:folder|skill file|shell|network|arbitrary tool)\b/i,
+    /\b(?:evidence mining, candidate positioning|candidate positioning, recruiter judgement|writer or coach input)\b/i,
+    /^(?:the )?(?:architecture|system design)\s+(?:follows|uses|is)\b/i,
+    /^(?:the host (?:runs|validates|provides|persists)|resume writing follows|a project is described through|skills are extracted from|a workspace owns)\b/i,
+    /^(?:ats-compatible base resume|credibility review, and resume copywriting)\b/i,
+    /^(?:importing and preserving|managing a reviewed|maintaining a versioned|configuring role, country|recording permitted job-discovery|running explicit, bounded|preserving source-level)\b/i,
+    /^(?:career workbench|resume architect)\s+(?:is|combines)\b/i,
+    /^(?:the )?(?:application|product|workspace|system)\s+(?:is|runs|operates|addresses|manages)\b/i,
+    /^(?:the )?(?:application|product|workspace|system)\s+provides\s+(?:a|an|the)\s+(?:private )?(?:workspace|platform|system)\b/i,
+    /^(?:it|this)\s+(?:is designed|combines)\b/i,
+  ].some((pattern) => pattern.test(text));
+}
 function readableEvidenceFact(factualText: string): string | undefined {
   const text = factualText.trim();
   const sourceLine = text.replace(/^[\s>*-]+/, "").trim();
   if (!text || isBoilerplateEvidence(text)) return undefined;
   // Folder documentation is useful source material, but never resume copy.
   // Keep only candidate-facing prose in the deterministic fallback.
+  // Security policy, model-control doctrine, architecture, and product
+  // manifests describe operating constraints rather than candidate work.
+  if (isInternalResumeManifest(sourceLine)) return undefined;
   if (
     /(?:^|\s)(?:docs|src|tests|node_modules|scripts|config)[\\/]\S+/i.test(
       sourceLine,
@@ -1372,6 +1613,9 @@ function readableEvidenceFact(factualText: string): string | undefined {
   if (/^(?:[\w.-]+[\\/])+[\w.-]+\.[a-z0-9]+$/i.test(sourceLine))
     return undefined;
   if (
+    /^\**(?:purpose|user or workflow|design rationale|directly stated outcome|explicit gaps|architecture or workflow|meaningful capabilities)\**\s*:/i.test(
+      sourceLine,
+    ) ||
     /^(?:name|description|repository shape|workflow version)\s*:/i.test(
       sourceLine,
     ) ||
@@ -1386,10 +1630,13 @@ function readableEvidenceFact(factualText: string): string | undefined {
   )
     return undefined;
   if (
-    /^(?:waitress|gunicorn|uvicorn)\b/i.test(sourceLine) ||
-    /^(?:create|return)\s+(?:a\s+)?durable\s+run\s+record\b/i.test(
+    /^(?:create(?:d)?|return(?:ed)?)\s+(?:a\s+)?durable\s+run\s+records?\b/i.test(
       sourceLine,
-    ) ||
+    )
+  )
+    return "Implemented durable run-state management for the documented analysis workflow.";
+  if (
+    /^(?:waitress|gunicorn|uvicorn)\b/i.test(sourceLine) ||
     /\b(?:no raw \w+ storage|via a JSON API|for development and runtime instructions)\b/i.test(
       sourceLine,
     )
@@ -1483,6 +1730,14 @@ function readableEvidenceFact(factualText: string): string | undefined {
 function deterministicResumeCoachResponse(
   request: ResumeCoachRequest,
 ): ResumeCoachResponse {
+  if (request.baseline) {
+    const specialist = specialistFallback(request);
+    if (specialist) return specialist;
+    invalid(
+      "A concise draft cannot be composed from the imported resume contract and supported work.",
+      "Restore the initial resume baseline or add directly supported work, then try again.",
+    );
+  }
   let profile: ResumeProfileSnapshot = {};
   try {
     const parsed = JSON.parse(request.profileSnapshot);
@@ -1645,6 +1900,129 @@ function deterministicResumeCoachResponse(
     ],
   };
 }
+function specialistFallback(
+  request: ResumeCoachRequest,
+): ResumeCoachResponse | undefined {
+  const baseline = request.baseline;
+  if (!baseline) return undefined;
+  const action = (value: string) => {
+    const fact = readableEvidenceFact(value);
+    if (!fact) return undefined;
+    const rewritten = fact
+      .replace(/^I\s+/i, "")
+      .replace(/^built\b/i, "Developed")
+      .replace(/^created\b/i, "Developed")
+      .replace(/^added\b/i, "Implemented")
+      .replace(/^configured\b/i, "Established")
+      .replace(/[.]+$/, "");
+    if (
+      !/^(?:Developed|Designed|Implemented|Integrated|Led|Delivered|Improved|Automated|Produced|Established|Validated|Collaborated|Supported)\b/.test(
+        rewritten,
+      )
+    )
+      return undefined;
+    const words = rewritten.split(/\s+/);
+    return words.length > 30 ? words.slice(0, 30).join(" ") : rewritten;
+  };
+  const grouped = new Map<
+    "project" | "experience",
+    Array<
+      | { name: string; text: string; evidenceIndex: number }
+      | { name: string; text: string; clarificationIndex: number }
+    >
+  >([
+    ["project", []],
+    ["experience", []],
+  ]);
+  request.evidence.forEach((evidence, index) => {
+    const text = action(evidence.factualText);
+    if (!text) return;
+    const category = /resume-evidence\/experiences\//i.test(
+      evidence.sourceDocument ?? "",
+    )
+      ? "experience"
+      : "project";
+    grouped.get(category)!.push({
+      name: resumeProjectName(evidence.sourceDocument),
+      text,
+      evidenceIndex: index,
+    });
+  });
+  request.clarifications?.forEach((clarification, index) => {
+    const text = action(clarification.text);
+    if (!text) return;
+    grouped.get(clarification.itemCategory)!.push({
+      name: clarification.itemName,
+      text,
+      clarificationIndex: index,
+    });
+  });
+  const claims: ResumeCoachResponse["claims"] = [];
+  const sections = baseline.sections.map((section) => {
+    const category = /(?:experience|employment|work)/i.test(section.heading)
+      ? "experience"
+      : /project/i.test(section.heading)
+        ? "project"
+        : undefined;
+    if (!category)
+      return { heading: section.heading, text: section.existingDetail };
+    const entries = grouped.get(category)!;
+    const byName = new Map<
+      string,
+      Array<
+        | { text: string; evidenceIndex: number }
+        | { text: string; clarificationIndex: number }
+      >
+    >();
+    for (const entry of entries) {
+      const current = byName.get(entry.name) ?? [];
+      if (current.length < 3) current.push(entry);
+      byName.set(entry.name, current);
+    }
+    const text = [...byName.entries()]
+      .slice(0, 4)
+      .map(([name, facts]) => {
+        for (const fact of facts)
+          claims.push(
+            "evidenceIndex" in fact
+              ? { text: fact.text, evidenceIndexes: [fact.evidenceIndex] }
+              : {
+                  text: fact.text,
+                  evidenceIndexes: [],
+                  clarificationIndexes: [fact.clarificationIndex],
+                },
+          );
+        const candidateProvided = facts.some(
+          (fact) => "clarificationIndex" in fact,
+        );
+        const title =
+          category === "project"
+            ? `${name} | ${candidateProvided ? "Candidate-provided" : "Documented"} workflow`
+            : `${name} | ${candidateProvided ? "Candidate-provided" : "Documented"} contribution`;
+        return `${title}\n${facts.map((fact) => `- ${fact.text}`).join("\n")}`;
+      })
+      .join("\n\n");
+    return {
+      heading: section.heading,
+      text: text || section.existingDetail,
+    };
+  });
+  if (!claims.length) return undefined;
+  const response: ResumeCoachResponse = {
+    schemaVersion: 1,
+    sections,
+    claims,
+    unknowns: [
+      "Candidate ownership, metrics, users, outcomes, dates, and technologies remain limited to supplied provenance.",
+    ],
+    selectionEcho: request.consentFingerprint,
+  };
+  try {
+    return coachResponse(response, request);
+  } catch {
+    return undefined;
+  }
+}
 function containsResumeSourceLeak(
   response: ResumeCoachResponse,
   request: ResumeCoachRequest,
@@ -1682,6 +2060,14 @@ function containsResumeSourceLeak(
     )
   );
 }
+function retainCandidateClarificationProvenance(
+  response: ResumeCoachResponse,
+  request: ResumeCoachRequest,
+): ResumeCoachResponse {
+  return request.clarifications?.length
+    ? { ...response, candidateClarifications: request.clarifications }
+    : response;
+}
 export async function requestBaseResumeGeneration(
   request: ResumeCoachRequest,
   fetcher: FetchLike = fetch,
@@ -1692,10 +2078,17 @@ export async function requestBaseResumeGeneration(
   // use the same provenance-linked local composer rather than silently dropping
   // findings or surfacing a generic model-input error.
   if (JSON.stringify(request).length > maxRequest)
-    return deterministicResumeCoachResponse(request);
+    return retainCandidateClarificationProvenance(
+      deterministicResumeCoachResponse(request),
+      request,
+    );
   try {
     const modelEvidence = resumeRelevantModelEvidence(request.evidence);
-    if (!modelEvidence.length) return deterministicResumeCoachResponse(request);
+    if (!modelEvidence.length)
+      return retainCandidateClarificationProvenance(
+        deterministicResumeCoachResponse(request),
+        request,
+      );
     const packetEvidence = modelEvidence.map(
       ({ index, factualText, contentDigest }) => ({
         evidenceIndex: index,
@@ -1709,62 +2102,76 @@ export async function requestBaseResumeGeneration(
     const projectIdentities = (request.documentation ?? [])
       .filter((group) => group.category === "project")
       .map((group) => group.name);
-    const generated = await native(
-      request.connection,
-      `${resumeGeneratorSystemInstruction} ${resumeGeneratorEditorialInstruction} ${resumeGeneratorEvidenceIntelligenceInstruction} ${resumeGeneratorProjectIdentityInstruction} ${resumeGeneratorEvidenceCitationInstruction}`,
-      {
-        schemaVersion: 1,
-        selectionEcho: request.consentFingerprint,
-        profile: request.profileSnapshot,
-        templateDigest: request.templateDigest,
-        projectIdentities,
-        documentation: packetDocumentation,
-        evidence: packetEvidence,
-        opportunity: request.opportunity
-          ? {
-              title: request.opportunity.title,
-              company: request.opportunity.company,
-              requirements: request.opportunity.requirements,
-              copiedDescription: request.opportunity.copiedDescription,
-              contentDigest: request.opportunity.contentDigest,
-            }
-          : null,
-        request: request.userRequest,
-        responseShape: {
-          schemaVersion: 1,
-          sections: [{ heading: "string", text: "string" }],
-          claims: [{ text: "string", evidenceIndexes: [0] }],
-          unknowns: ["string"],
-          selectionEcho: request.consentFingerprint,
-        },
-      },
-      1_400,
-      fetcher,
-      "RESUME_COACH_UNAVAILABLE",
+    const baseline = request.baseline;
+    if (!baseline)
+      return retainCandidateClarificationProvenance(
+        deterministicResumeCoachResponse(request),
+        request,
+      );
+    const candidateClarifications = (request.clarifications ?? []).map(
+      ({ itemName, itemCategory, category, text, provenance }, index) => ({
+        clarificationIndex: index,
+        itemName,
+        itemCategory,
+        category,
+        text,
+        provenance,
+      }),
     );
-    const response = coachResponse(
-      normalizeGeneratedResume(
-        restoreOriginalEvidenceIndexes(
-          generated,
-          modelEvidence,
-          request.evidence,
-        ),
-        projectIdentities,
-      ),
-      request.evidence,
-      request.consentFingerprint,
-    );
-    return containsResumeSourceLeak(response, request)
-      ? deterministicResumeCoachResponse(request)
-      : response;
+    const generated = request.fileReadSession
+      ? await requestFileAgentResume(request, request.fileReadSession, fetcher)
+      : await orchestrateResumeGeneration(
+          {
+            baseline,
+            selectionEcho: request.consentFingerprint,
+            profile: request.profileSnapshot,
+            evidence: packetEvidence,
+            candidateClarifications,
+            documentation: packetDocumentation,
+            projectIdentities,
+            opportunity: request.opportunity
+              ? {
+                  title: request.opportunity.title,
+                  company: request.opportunity.company,
+                  requirements: request.opportunity.requirements,
+                  copiedDescription: request.opportunity.copiedDescription,
+                  contentDigest: request.opportunity.contentDigest,
+                }
+              : null,
+            request: request.userRequest,
+          },
+          (instruction, packet, maximumTokens) =>
+            native(
+              request.connection,
+              instruction,
+              packet,
+              maximumTokens,
+              fetcher,
+              "RESUME_COACH_UNAVAILABLE",
+              maxResponse,
+              "off",
+            ),
+        );
+    const response = coachResponse(generated, request);
+    if (containsResumeSourceLeak(response, request)) {
+      if (process.env.NODE_ENV === "development")
+        console.error("[resume-generation] fallback: source-leak guard");
+      return retainCandidateClarificationProvenance(
+        deterministicResumeCoachResponse(request),
+        request,
+      );
+    }
+    return retainCandidateClarificationProvenance(response, request);
   } catch (error) {
-    if (
-      error instanceof WorkspaceError &&
-      (error.code === "RESUME_COACH_UNAVAILABLE" ||
-        error.code === "RESUME_COACH_INVALID")
-    )
-      return deterministicResumeCoachResponse(request);
-    throw error;
+    let reason = "unknown failure";
+    if (error instanceof WorkspaceError) reason = error.code;
+    else if (error instanceof Error) reason = error.message;
+    if (process.env.NODE_ENV === "development")
+      console.error(`[resume-generation] fallback: ${reason}`);
+    return retainCandidateClarificationProvenance(
+      deterministicResumeCoachResponse(request),
+      request,
+    );
   }
 }
 // Existing callers and persisted tests can migrate gradually. This is a base
