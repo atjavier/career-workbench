@@ -5,6 +5,7 @@ import {
   open,
   readFile,
   readdir,
+  realpath,
   rm,
   writeFile,
 } from "node:fs/promises";
@@ -1113,12 +1114,15 @@ export type ResumeFileReadSession = Readonly<{
   roots: Array<{ rootId: string; label: "application" | "managed-work" }>;
   execute: (action: ResumeFileToolAction) => Promise<ResumeFileToolResult>;
   validateCitation: (citation: ResumeFileCitation) => boolean;
+  validateCitationStability?: (citation: ResumeFileCitation) => Promise<boolean>;
 }>;
 
 type ResumeFileRoot = {
   rootId: string;
   root: string;
   label: "application" | "managed-work";
+  dev: number;
+  ino: number;
 };
 const fileToolLimits = {
   maxCalls: 24,
@@ -1173,9 +1177,9 @@ export async function createResumeFileReadSession(input: {
     const info = await lstat(candidate.root).catch(() => undefined);
     const canonical =
       info?.isDirectory() && !info.isSymbolicLink()
-        ? await resolve(candidate.root)
+        ? await realpath(candidate.root).catch(() => undefined)
         : undefined;
-    if (!canonical)
+    if (!canonical || !info)
       throw new WorkspaceError(
         "EVIDENCE_LIBRARY_INVALID",
         "An approved local source folder is unavailable or unsafe.",
@@ -1186,9 +1190,14 @@ export async function createResumeFileReadSession(input: {
       rootId: `root-${roots.length + 1}`,
       root: canonical,
       label: candidate.label,
+      dev: info.dev,
+      ino: info.ino,
     });
   }
-  const reads = new Map<string, ResumeFileCitation>();
+  const reads = new Map<
+    string,
+    { citation: ResumeFileCitation; root: ResumeFileRoot }
+  >();
   let calls = 0;
   let files = 0;
   let bytes = 0;
@@ -1202,6 +1211,22 @@ export async function createResumeFileReadSession(input: {
   const targetFor = async (root: ResumeFileRoot, path: string) => {
     const target = resolve(root.root, path);
     if (!withinRoot(root.root, target)) return undefined;
+    const currentRoot = await lstat(root.root).catch(() => undefined);
+    if (
+      !currentRoot?.isDirectory() ||
+      currentRoot.isSymbolicLink() ||
+      currentRoot.dev !== root.dev ||
+      currentRoot.ino !== root.ino
+    )
+      return undefined;
+    // lstat every requested component before accessing the target. lstat only
+    // at the final path would follow a linked intermediate directory.
+    let current = root.root;
+    for (const segment of path ? path.split("/") : []) {
+      current = join(current, segment);
+      const ancestor = await lstat(current).catch(() => undefined);
+      if (!ancestor || ancestor.isSymbolicLink()) return undefined;
+    }
     const info = await lstat(target).catch(() => undefined);
     if (!info || info.isSymbolicLink()) return undefined;
     return { target, info };
@@ -1216,13 +1241,12 @@ export async function createResumeFileReadSession(input: {
     const path = toolPath(action.path);
     if (!root || path === undefined) return { ok: false, error: "unsafe_path" };
     calls += 1;
+    if (path && path.split("/").length > fileToolLimits.maxDepth)
+      return { ok: false, error: "invalid_request" };
     const found = await targetFor(root, path);
     if (!found) return { ok: false, error: "unsafe_path" };
     if (action.action === "list") {
-      if (
-        !found.info.isDirectory() ||
-        (path && path.split("/").length > fileToolLimits.maxDepth)
-      )
+      if (!found.info.isDirectory())
         return { ok: false, error: "invalid_request" };
       const entries: Array<{ path: string; kind: "file" | "directory" }> = [];
       for (const entry of (
@@ -1255,7 +1279,23 @@ export async function createResumeFileReadSession(input: {
       bytes + found.info.size > fileToolLimits.maxBytes
     )
       return { ok: false, error: "budget_exhausted" };
-    const content = await readFile(found.target);
+    let content: Uint8Array;
+    let handle;
+    try {
+      handle = await open(found.target, "r");
+      const opened = await handle.stat();
+      if (
+        !opened.isFile() ||
+        opened.dev !== found.info.dev ||
+        opened.ino !== found.info.ino
+      )
+        return { ok: false, error: "unsafe_path" };
+      content = await handle.readFile();
+    } catch {
+      return { ok: false, error: "unsafe_path" };
+    } finally {
+      await handle?.close();
+    }
     let text: string;
     try {
       text = decoder.decode(content);
@@ -1270,6 +1310,7 @@ export async function createResumeFileReadSession(input: {
       !Number.isInteger(endLine) ||
       startLine < 1 ||
       endLine < startLine ||
+      endLine > lines.length ||
       endLine - startLine + 1 > fileToolLimits.maxReadLines
     )
       return { ok: false, error: "invalid_request" };
@@ -1289,7 +1330,7 @@ export async function createResumeFileReadSession(input: {
       endLine,
       contentDigest: digest(content),
     };
-    reads.set(citation.citationId, citation);
+    reads.set(citation.citationId, { citation, root });
     return {
       ok: true,
       type: "read",
@@ -1303,7 +1344,40 @@ export async function createResumeFileReadSession(input: {
     roots: roots.map(({ rootId, label }) => ({ rootId, label })),
     execute,
     validateCitation: (citation) =>
-      JSON.stringify(reads.get(citation.citationId)) ===
+      JSON.stringify(reads.get(citation.citationId)?.citation) ===
       JSON.stringify(citation),
+    validateCitationStability: async (citation) => {
+      const read = reads.get(citation.citationId);
+      if (
+        !read ||
+        JSON.stringify(read.citation) !== JSON.stringify(citation)
+      )
+        return false;
+      const found = await targetFor(read.root, citation.path);
+      if (!found?.info.isFile()) return false;
+      let content: Uint8Array;
+      let handle;
+      try {
+        handle = await open(found.target, "r");
+        const opened = await handle.stat();
+        if (
+          !opened.isFile() ||
+          opened.dev !== found.info.dev ||
+          opened.ino !== found.info.ino
+        )
+          return false;
+        content = await handle.readFile();
+      } catch {
+        return false;
+      } finally {
+        await handle?.close();
+      }
+      if (digest(content) !== citation.contentDigest) return false;
+      try {
+        return citation.endLine <= decoder.decode(content).split(/\r?\n/).length;
+      } catch {
+        return false;
+      }
+    },
   };
 }

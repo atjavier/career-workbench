@@ -22,21 +22,15 @@ model-callable tools and not Codex or CLI skills.
    application and active managed work folders. It can only list/read bounded
    relative files through a short-lived host session; absolute paths, traversal,
    links, writes, shell, network, and unrestricted roots are rejected.
-3. **Legacy staged generation** — the host retains the bounded staged flow as a
-   bounded local-model calls with Qwen-compatible `reasoning: "off"`:
-   - **Resume Evidence Analyst** extracts only indexed, supported findings and
-     unknowns; it never writes resume content.
-   - **Resume Strategist** selects only host-defined editable work slots using
-     the accepted findings; it cannot alter headings or template order.
-   - **Resume Writer** supplies cited text only for those approved slots; it
-     cannot return a full resume, headings, or immutable content.
-   - **Resume Integrity Reviewer** returns a bounded accept/reject verdict on
-     the host-reconstructed result; it never rewrites the resume.
-
-   Every agent is stateless and has no filesystem, shell, network, database,
-   skill, or arbitrary-tool access. The host validates each handoff, inserts
-   accepted Writer slot edits into the imported baseline, validates the final
-   structure again, and uses the deterministic fallback on any stage failure.
+3. **Base-resume file session** — each stateless Qwen turn returns either one
+   strict JSON list/read action or a final draft. The host validates every
+   action, executes it under the scoped reader, records bounded read spans and
+   digests, and accepts final work bullets only when their copied relative-path
+   and one-based-line citations match those records. Host-issued opaque slot
+   IDs identify editable work sections; no model-facing numeric evidence or
+   section indexes are used. The host reconstructs the imported baseline and
+   uses the deterministic fallback on malformed actions, exhausted budgets, or
+   invalid citations.
 
 4. **Resume Coach / revision** — the host gives the independent coach the saved
    ordered draft and the same curated handoffs. The coach critiques clarity,
@@ -45,7 +39,8 @@ model-callable tools and not Codex or CLI skills.
    not silently regenerate a resume merely because the Resume page is opened.
 
 The host validates model output before persistence. Every visible Experience or
-Projects bullet must correspond to supported evidence. Unsupported claims,
+Projects bullet must correspond to a host-read relative path and line span,
+then to the workspace's provenance-backed evidence. Unsupported claims,
 metrics, scope, seniority, technologies, source leakage, generic filler, and
 hiring predictions are rejected rather than presented as candidate facts.
 

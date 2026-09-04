@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
+import { promisify } from "node:util";
 import test from "node:test";
+
+const execFileAsync = promisify(execFile);
 
 test("Base Resume server action enforces upload limits before materializing bytes and refreshes the profile", async () => {
   const action = await readFile(
@@ -17,6 +21,19 @@ test("Base Resume server action enforces upload limits before materializing byte
     /file\.size === 0 \|\| file\.size > maximumBaseResumeFileSize/,
   );
   assert.match(action, /revalidatePath\("\/"\)/);
+});
+
+test("Base Resume generation creates and passes a session scoped to active workspace-managed roots", async () => {
+  await execFileAsync(
+    process.execPath,
+    [
+      "--experimental-test-module-mocks",
+      "--import",
+      "tsx",
+      "tests/fixtures/generate-base-resume-action-session.mts",
+    ],
+    { cwd: process.cwd() },
+  );
 });
 
 test("Base Resume generation sends only eligible candidate clarifications", async () => {

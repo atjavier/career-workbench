@@ -1,6 +1,6 @@
 "use server";
 
-import { join } from "node:path";
+import { dirname } from "node:path";
 import { initializeWorkspace } from "@/domain/workspace/initialize-workspace";
 import {
   importBaseResume,
@@ -129,7 +129,6 @@ import {
 import { chooseLocalEvidenceFolder } from "@/files/local-folder-picker";
 import {
   createResumeFileReadSession,
-  evidenceLibraryRoot,
   readManagedDocumentedArtifacts,
 } from "@/files/evidence-library";
 import { getResumeAgentSkill } from "@/domain/resume-agent/skill-registry";
@@ -479,7 +478,7 @@ export async function generateBaseResumeAction(
     if (
       !skill.requiresConsent ||
       !skill.workflow.includes(
-        "make every visible Experience or Projects bullet candidate-facing, outcome-oriented, and linked to a documented finding",
+        "make every visible Experience or Projects bullet candidate-facing, outcome-oriented, and linked to a host-validated file citation",
       )
     )
       throw new WorkspaceError(
@@ -613,19 +612,31 @@ export async function generateBaseResumeAction(
         "Choose at least one currently documented Experience or Projects finding.",
         "Review the documented material selection and try again.",
       );
-    // The complete documentation set remains available in Experience &
-    // Projects. Resume generation receives every provenance-locked finding
-    // plus only the two curated resume handoff documents, so architecture,
-    // source-tree, configuration, and setup notes cannot distract the
-    // employer-side writer or be mistaken for resume copy.
-    const documentation: ResumeCoachDocumentation[] = (
-      await readManagedDocumentedArtifacts().catch(() => [])
-    )
-      .filter((group) =>
-        group.documents.some((document) =>
-          ownedDocumentPaths.has(document.libraryPath),
+    // Authorize only complete, active workspace-owned managed item folders.
+    // Their document text remains host-side for file-tool generation; the
+    // metadata below stays in the consent fingerprint and safe fallback path.
+    const managedGroups = (await readManagedDocumentedArtifacts().catch(() => []))
+      .filter(
+        (group) =>
+          group.documents.length > 0 &&
+          group.documents.every((document) =>
+            ownedDocumentPaths.has(document.libraryPath),
+          ),
+      );
+    const managedRoots = [
+      ...new Set(
+        managedGroups.flatMap((group) =>
+          group.documents.map((document) => dirname(document.absolutePath)),
         ),
-      )
+      ),
+    ];
+    if (!managedRoots.length)
+      throw new WorkspaceError(
+        "RESUME_COACH_INVALID",
+        "The active resume workspace has no authorized managed source folders.",
+        "Refresh Experience & Projects and try generating the resume again.",
+      );
+    const documentation: ResumeCoachDocumentation[] = managedGroups
       .map((group) => ({
         name: group.name,
         category: group.category,
@@ -699,9 +710,7 @@ export async function generateBaseResumeAction(
       auditDb.close();
     }
     const fileReadSession = await createResumeFileReadSession({
-      managedRoots: [
-        join(evidenceLibraryRoot(paths.root), "workspaces", workspaceId!),
-      ],
+      managedRoots,
     });
     const response = await requestBaseResumeGeneration({
       connection,

@@ -189,7 +189,7 @@ export const resumeAgentSkillRegistry: readonly ResumeAgentSkillDefinition[] =
         "host-issued-application-root",
         "host-issued-managed-work-root",
       ],
-      writableRoots: ["private-staging-output"],
+      writableRoots: [],
     },
     {
       ...common,

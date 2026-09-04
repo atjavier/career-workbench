@@ -21,6 +21,7 @@ import { resumeCoachSystemInstruction as resumeCoachReviewSystemInstruction } fr
 const endpoint = "http://127.0.0.1:1234/api/v1/chat";
 const maxRequest = 72_000;
 const maxResponse = 12_000;
+const maxFileAgentElapsedMs = 90_000;
 const maxStreamFrame = 8_192;
 // The documentation skill can produce many atomic findings for a real source
 // tree. Keep the application contract aligned with its 2,000-candidate import
@@ -259,6 +260,7 @@ export type ResumeCoachResponse = {
     text: string;
     evidenceIndexes: number[];
     clarificationIndexes?: number[];
+    fileCitations?: ResumeFileCitation[];
   }>;
   candidateClarifications?: ResumeCandidateClarification[];
   unknowns: string[];
@@ -756,15 +758,24 @@ function coachResponse(
       (claim) =>
         !claim ||
         typeof claim !== "object" ||
-        (!exactKeys(claim as Record<string, unknown>, [
+        ![
           "text",
           "evidenceIndexes",
-        ]) &&
-          !exactKeys(claim as Record<string, unknown>, [
-            "text",
-            "evidenceIndexes",
-            "clarificationIndexes",
-          ])) ||
+          "clarificationIndexes",
+          "fileCitations",
+        ].includes(
+          Object.keys(claim as Record<string, unknown>).find(
+            (key) =>
+              ![
+                "text",
+                "evidenceIndexes",
+                "clarificationIndexes",
+                "fileCitations",
+              ].includes(key),
+          ) ?? "text",
+        ) ||
+        !("text" in (claim as Record<string, unknown>)) ||
+        !("evidenceIndexes" in (claim as Record<string, unknown>)) ||
         !plain((claim as Record<string, unknown>).text, 1_000) ||
         !Array.isArray((claim as Record<string, unknown>).evidenceIndexes) ||
         (!Array.isArray(
@@ -824,6 +835,9 @@ function coachResponse(
         text: claim.text,
         evidenceIndexes,
         ...(clarificationIndexes.length ? { clarificationIndexes } : {}),
+        ...(claim.fileCitations?.length
+          ? { fileCitations: claim.fileCitations }
+          : {}),
       };
     },
   );
@@ -875,11 +889,18 @@ async function nativeText(
     | "EVIDENCE_DOCUMENTER_INVALID",
   responseLimit = maxResponse,
   reasoning: "off" | "on" = "off",
+  timeoutMs?: number,
 ): Promise<string> {
   const controller = new AbortController();
   const timeout = setTimeout(
     () => controller.abort(),
-    Math.max(30_000, Math.min(300_000, 30_000 + maximumTokens * 200)),
+    Math.max(
+      1_000,
+      Math.min(
+        300_000,
+        timeoutMs ?? Math.max(30_000, 30_000 + maximumTokens * 200),
+      ),
+    ),
   );
   try {
     const body = JSON.stringify({
@@ -985,6 +1006,7 @@ async function native(
     | "EVIDENCE_DOCUMENTER_INVALID",
   responseLimit = maxResponse,
   reasoning: "off" | "on" = "off",
+  timeoutMs?: number,
 ): Promise<Record<string, unknown>> {
   const content = await nativeText(
     connection,
@@ -995,6 +1017,7 @@ async function native(
     code,
     responseLimit,
     reasoning,
+    timeoutMs,
   );
   try {
     return parseModelJson(content);
@@ -1022,7 +1045,12 @@ async function requestFileAgentResume(
     .filter((slot) => isWorkSection(slot.heading));
   if (!slots.length) throw new Error("missing editable resume slots");
   const observations: unknown[] = [];
+  const readCitationText = new Map<string, string>();
+  const executedActions = new Set<string>();
+  const started = Date.now();
   for (let turn = 0; turn < 12; turn += 1) {
+    const remainingMs = maxFileAgentElapsedMs - (Date.now() - started);
+    if (remainingMs <= 0) throw new Error("file agent time budget exhausted");
     const value = await native(
       request.connection,
       resumeFileAgentInstruction,
@@ -1038,6 +1066,7 @@ async function requestFileAgentResume(
       "RESUME_COACH_UNAVAILABLE",
       maxResponse,
       "off",
+      remainingMs,
     );
     if (value.kind === "tool" && exactKeys(value, ["kind", "action"])) {
       const action = value.action;
@@ -1065,7 +1094,13 @@ async function requestFileAgentResume(
         (candidate.endLine === undefined ||
           Number.isInteger(candidate.endLine));
       if (!validList && !validRead) throw new Error("invalid file tool action");
+      const actionKey = JSON.stringify(candidate);
+      if (executedActions.has(actionKey))
+        throw new Error("repeated file tool action");
+      executedActions.add(actionKey);
       const result = await session.execute(candidate as ResumeFileToolAction);
+      if (result.ok && result.type === "read")
+        readCitationText.set(result.citation.citationId, result.text);
       observations.push({ action: candidate, result });
       if (JSON.stringify(observations).length > 48_000)
         throw new Error("file tool budget exhausted");
@@ -1086,6 +1121,7 @@ async function requestFileAgentResume(
       throw new Error("invalid file agent final response");
     const seenSlots = new Set<string>();
     const claims: ResumeCoachResponse["claims"] = [];
+    const finalCitations: ResumeFileCitation[] = [];
     const edits = value.edits.map((item) => {
       if (!item || typeof item !== "object" || Array.isArray(item))
         throw new Error("invalid file agent edit");
@@ -1122,7 +1158,7 @@ async function requestFileAgentResume(
           claim.citations.length > 12
         )
           throw new Error("invalid file agent claim");
-        claim.citations.forEach((item) => {
+        const fileCitations = claim.citations.map((item) => {
           if (
             !item ||
             typeof item !== "object" ||
@@ -1148,6 +1184,11 @@ async function requestFileAgentResume(
             !session.validateCitation(citation)
           )
             throw new Error("unverified file citation");
+          const citedText = readCitationText.get(citation.citationId);
+          if (!citedText || !supports(String(claim.text), [citedText]))
+            throw new Error("file citation does not support claim");
+          finalCitations.push(citation);
+          return citation;
         });
         const evidenceIndexes = request.evidence.flatMap((evidence, index) =>
           supports(String(claim.text), [evidence.factualText]) ? [index] : [],
@@ -1162,6 +1203,7 @@ async function requestFileAgentResume(
           text: String(claim.text),
           evidenceIndexes,
           ...(clarificationIndexes.length ? { clarificationIndexes } : {}),
+          fileCitations,
         };
         claims.push(normalized);
         return normalized;
@@ -1175,6 +1217,11 @@ async function requestFileAgentResume(
         throw new Error("uncited file agent bullet");
       return { slot, text: String(edit.text) };
     });
+    if (session.validateCitationStability) {
+      for (const citation of finalCitations)
+        if (!(await session.validateCitationStability(citation)))
+          throw new Error("file source changed before final validation");
+    }
     const response = {
       schemaVersion: 1 as const,
       selectionEcho: request.consentFingerprint,

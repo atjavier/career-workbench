@@ -800,6 +800,60 @@ test("Resume Architect reads host-authorized files and maps citations without mo
   assert.deepEqual(result.claims[0]?.evidenceIndexes, [0]);
 });
 
+test("Resume Architect fails closed on repeated actions without retaining tool data", async () => {
+  const session: ResumeFileReadSession = {
+    roots: [{ rootId: "root-1", label: "managed-work" }],
+    execute: async () => ({
+      ok: true,
+      type: "list",
+      rootId: "root-1",
+      path: "",
+      entries: [{ path: "README.md", kind: "file" }],
+    }),
+    validateCitation: () => false,
+  };
+  const base = { ...requestBase, baseline, fileReadSession: session };
+  const value = {
+    ...base,
+    consentFingerprint: resumeCoachConsentFingerprint(base),
+  };
+  let calls = 0;
+  const result = await requestResumeCoach(value, async () => {
+    calls += 1;
+    return native({
+      kind: "tool",
+      action: { action: "list", rootId: "root-1", path: "" },
+    });
+  });
+  assert.equal(calls, 2);
+  assert.match(result.claims[0]?.text ?? "", /accessible TypeScript interfaces/i);
+  assert.doesNotMatch(JSON.stringify(result), /README\.md|root-1/);
+});
+
+test("Resume Architect falls back when LM Studio emits an unsupported native tool response", async () => {
+  const session: ResumeFileReadSession = {
+    roots: [{ rootId: "root-1", label: "managed-work" }],
+    execute: async () => {
+      throw new Error("native tools must not execute");
+    },
+    validateCitation: () => false,
+  };
+  const base = { ...requestBase, baseline, fileReadSession: session };
+  const value = {
+    ...base,
+    consentFingerprint: resumeCoachConsentFingerprint(base),
+  };
+  const result = await requestResumeCoach(
+    value,
+    async () =>
+      new Response(
+        JSON.stringify({ output: [{ type: "tool_call", content: "{}" }] }),
+        { status: 200 },
+      ),
+  );
+  assert.match(result.claims[0]?.text ?? "", /accessible TypeScript interfaces/i);
+});
+
 test("Resume Architect treats Work Experience as an editable staged slot", async () => {
   const workBaseline = {
     ...baseline,
