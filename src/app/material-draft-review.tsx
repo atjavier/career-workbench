@@ -10,8 +10,8 @@ export function MaterialDraftReview({ draft }: { draft: MaterialDraftView }) {
           <p className="eyebrow">Local draft review</p>
           <h1>Review local AI guidance</h1>
           <p>
-            This is a read-only local projection of the saved draft. It is not approved,
-            rendered, exported, or a hiring prediction.
+            This is a read-only local projection of the saved draft. It is not
+            approved, rendered, exported, or a hiring prediction.
           </p>
         </div>
         <Link href="/resume">Back to Resume</Link>

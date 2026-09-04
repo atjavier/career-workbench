@@ -14,6 +14,6 @@ test("Resume Coach presents the generated PDF and does not regenerate on page vi
 test("review route awaits async params and renders only a safe local read projection", async () => {
   const [page, review] = await Promise.all([readFile(new URL("../src/app/resume/drafts/[draftId]/page.tsx", import.meta.url), "utf8"), readFile(new URL("../src/app/material-draft-review.tsx", import.meta.url), "utf8")]);
   assert.match(page, /params: Promise/); assert.match(page, /await params/); assert.match(page, /readMaterialDraft\(\{ draftId, requireHandoff: true \}\)/); assert.match(page, /unavailable/);
-  for (const token of ["Local draft review", "not approved", "Material Version", "rendered", "exported", "draft.profileLabel", "Resume template"]) assert.ok(review.includes(token));
+  for (const token of [/Local draft review/, /not\s+approved/, /Material Version/, /rendered/, /exported/, /draft\.profileLabel/, /Resume template/]) assert.match(review, token);
   assert.doesNotMatch(`${page}\n${review}`, /fetch\s*\(|requestResumeCoach|handOffMaterialDraft|contentDigest|provenanceDigest|originalUrl|\.pdf|export.*button/i);
 });
