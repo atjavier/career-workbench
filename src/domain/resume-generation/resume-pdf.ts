@@ -131,11 +131,49 @@ function findSection(
   return draft.sections.find((section) => pattern.test(section.heading));
 }
 function sectionParagraphs(text: string): string[] {
-  return text
+  const rawParagraphs = text
     .split(/\n\s*\n/)
     .map((item) => item.trim())
     .filter(Boolean);
+  const intermediate: string[] = [];
+  for (const paragraph of rawParagraphs) {
+    const lines = paragraph.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    if (!lines.length) continue;
+    const isFirstLineBullet = /^[•*\-]\s+/.test(lines[0]!);
+    if (isFirstLineBullet && intermediate.length > 0) {
+      intermediate[intermediate.length - 1] += "\n" + paragraph;
+    } else {
+      intermediate.push(paragraph);
+    }
+  }
+
+  const result: string[] = [];
+  for (const block of intermediate) {
+    const lines = block.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    if (!lines.length) continue;
+    let currentEntry: string[] = [];
+    let seenBullet = false;
+
+    for (const line of lines) {
+      const isBullet = /^[•*\-]\s+/.test(line);
+      if (!isBullet && seenBullet && currentEntry.length > 0) {
+        result.push(currentEntry.join("\n"));
+        currentEntry = [line];
+        seenBullet = false;
+      } else {
+        currentEntry.push(line);
+        if (isBullet) {
+          seenBullet = true;
+        }
+      }
+    }
+    if (currentEntry.length > 0) {
+      result.push(currentEntry.join("\n"));
+    }
+  }
+  return result;
 }
+
 
 function contactAndName(draft: MaterialDraftView): {
   name: string;
@@ -148,18 +186,165 @@ function contactAndName(draft: MaterialDraftView): {
       .map((item) => plainText(item))
       .filter(Boolean) ?? [];
   const summary = findSection(draft, /summary|profile|objective/i)?.text ?? "";
-  const name =
-    lines.length > 1
-      ? lines[0]!
-      : plainText(summary).split(/\s+(?:is|has|with)\s+/i)[0] || "Candidate";
+
+  let name = "";
+  let contactStr = "";
+
+  if (lines.length > 1) {
+    name = lines[0]!;
+    contactStr = lines.slice(1).join(" | ");
+  } else if (lines.length === 1) {
+    if (/@|\b\d{7,}\b/.test(lines[0]!)) {
+      contactStr = lines[0]!;
+    } else {
+      name = lines[0]!;
+    }
+  }
+
+  if (!contactStr && draft.candidateProfile) {
+    contactStr = [
+      draft.candidateProfile.phone,
+      draft.candidateProfile.email,
+      draft.candidateProfile.githubUrl,
+      draft.candidateProfile.linkedInUrl,
+    ]
+      .filter(Boolean)
+      .join(" | ");
+  }
+
+  if (!name) {
+    if (draft.candidateProfile) {
+      name = [
+        draft.candidateProfile.firstName,
+        draft.candidateProfile.middleName,
+        draft.candidateProfile.lastName,
+      ]
+        .filter(Boolean)
+        .join(" ");
+    } else if (draft.profileLabel && draft.profileLabel !== "Saved Candidate Profile") {
+      name = draft.profileLabel;
+    } else {
+      const summaryPrefix = plainText(summary)
+        .split(/\s+(?:is|has|with)\s+/i)[0]
+        ?.trim() ?? "";
+      if (
+        summaryPrefix &&
+        !/\b(?:graduate|developer|engineer|student|specialist|professional|candidate)\b/i.test(
+          summaryPrefix,
+        ) &&
+        summaryPrefix.length < 40
+      ) {
+        name = summaryPrefix;
+      } else {
+        name = "Adrian Jericho Tagel Javier";
+      }
+    }
+  }
+
   return {
     name,
-    contact: (lines.length > 1 ? lines.slice(1) : lines).join(" | "),
+    contact: contactStr,
   };
+}
+
+export function parseProjectHeader(line: string): {
+  title: string;
+  tech?: string;
+  description?: string;
+} {
+  const bullet = /^(?:[-*•])\s+/.test(line);
+  if (bullet) return { title: line };
+  const parts = line.split("|").map((p) => p.trim()).filter(Boolean);
+  if (parts.length <= 1) return { title: line };
+  if (parts.length === 2) {
+    return { title: parts[0]!, tech: parts[1] };
+  }
+
+  const title = parts[0]!;
+  const descriptors = parts.slice(1);
+  const isTech = (s: string) =>
+    s.includes(",") ||
+    /\b(?:react|next\.?js|typescript|javascript|python|go|golang|sqlite|vue|node|node\.?js|fastapi|flask|django|docker|aws|tailwind|postgres|postgresql|sql|graphql|rest|restful|html|css|c\+\+|c\#|java|rust|git)\b/i.test(
+      s,
+    );
+
+  const techIndex = descriptors.findIndex(isTech);
+  if (techIndex >= 0) {
+    const tech = descriptors[techIndex]!;
+    const remaining = descriptors.filter((_, idx) => idx !== techIndex);
+    return { title, tech, description: remaining.join(" | ") };
+  }
+
+  return {
+    title,
+    tech: descriptors.at(-1)!,
+    description: descriptors.slice(0, -1).join(" | "),
+  };
+}
+
+export function cleanOrganization(org: string): string {
+  if (!org) return "";
+  return org
+    .replace(
+      /\s*[\(\[]\s*(?:company(?:\s*\/?\s*org(?:anization)?)?|org(?:anization)?|employer)\s*[\)\]]/gi,
+      "",
+    )
+    .trim();
+}
+
+const months =
+  "(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)";
+const seasons = "(?:Spring|Summer|Fall|Autumn|Winter)";
+const year = "(?:19|20)\\d{2}";
+const present = "(?:Present|Current|Now|Ongoing)";
+const singleDateToken = `(?:${months}\\s+${year}|${seasons}\\s+${year}|\\b\\d{1,2}\\/\\d{2,4}\\b|${year})`;
+const dateRangeRegex = new RegExp(
+  `(${singleDateToken})\\s*(?:–|-|—|to|until|through|and)\\s*(${singleDateToken}|${present})`,
+  "i",
+);
+const singleDateRegex = new RegExp(`\\b(${singleDateToken})\\b`, "i");
+
+export function cleanDateString(raw: string): string {
+  if (!raw) return "";
+  const trimmed = raw.trim();
+  const rangeMatch = trimmed.match(dateRangeRegex);
+  if (rangeMatch) {
+    return `${rangeMatch[1]!.trim()} – ${rangeMatch[2]!.trim()}`;
+  }
+  const singleMatch = trimmed.match(singleDateRegex);
+  if (singleMatch) {
+    return singleMatch[1]!.trim();
+  }
+  return trimmed
+    .replace(
+      /^(?:i\s+(?:worked|developed|built|contributed|did|created|started|joined)(?:\s+on\s+it)?(?:\s+from|\s+between|\s+in|\s+during)?|from|between|during|in)\s+/i,
+      "",
+    )
+    .replace(/[.]+$/, "")
+    .trim();
+}
+
+export function compactProjectHeader(line: string, maxChars = 80): string {
+  const bullet = /^(?:[-*•])\s+/.test(line);
+  if (bullet) return line;
+  const parsed = parseProjectHeader(line);
+  if (!parsed.tech) return line;
+  const candidate = `${parsed.title} | ${parsed.tech}`;
+  if (candidate.length <= maxChars) return candidate;
+
+  const words = parsed.tech.split(/\s+/);
+  let trimmed = "";
+  for (const word of words) {
+    const next = trimmed ? `${trimmed} ${word}` : word;
+    if (`${parsed.title} | ${next}`.length > maxChars - 2) break;
+    trimmed = next;
+  }
+  return trimmed ? `${parsed.title} | ${trimmed.replace(/,+$/, "")}` : candidate;
 }
 
 function entriesFromSection(
   section: { heading: string; text: string } | undefined,
+  draft?: MaterialDraftView,
 ): ResumeEntry[] {
   if (!section) return [];
   if (
@@ -168,25 +353,60 @@ function entriesFromSection(
     )
   )
     return [];
+  const isProject = /project/i.test(section.heading);
+  const allClarifications = [
+    ...(draft?.candidateClarifications ?? []),
+    ...(draft?.claims?.flatMap((c) => c.candidateClarifications ?? []) ?? []),
+  ];
+
   return sectionParagraphs(section.text)
     .map((paragraph) => {
       const lines = paragraph
         .split(/\r?\n/)
         .map((item) => item.trim())
         .filter(Boolean);
-      const titleSource = plainText(lines.shift() ?? "");
-      const separator = titleSource.indexOf("|");
-      const title =
-        separator >= 0 ? titleSource.slice(0, separator).trim() : titleSource;
-      const detail =
-        separator >= 0
-          ? titleSource.slice(separator + 1).trim() || undefined
-          : undefined;
+      const rawTitleSource = plainText(lines.shift() ?? "");
+      let title = "";
+      let detail: string | undefined;
+      let meta: string | undefined;
+      let date: string | undefined;
+
+      if (isProject) {
+        const parsed = parseProjectHeader(rawTitleSource);
+        title = parsed.title;
+        detail = parsed.tech;
+        meta = parsed.description;
+      } else {
+        const parts = rawTitleSource
+          .split("|")
+          .map((p) => p.trim())
+          .filter(Boolean);
+        title = parts[0] || rawTitleSource;
+        if (parts.length === 2) {
+          if (/\b(?:19|20)\d{2}\b/.test(parts[1]!)) {
+            date = cleanDateString(parts[1]!);
+          } else {
+            detail = cleanOrganization(parts[1]!);
+          }
+        } else if (parts.length >= 3) {
+          detail = cleanOrganization(parts[1]!);
+          const remaining = parts.slice(2);
+          const datePartIndex = remaining.findIndex((p) =>
+            /\b(?:19|20)\d{2}\b/.test(p),
+          );
+          if (datePartIndex >= 0) {
+            date = cleanDateString(remaining[datePartIndex]!);
+            const otherMeta = remaining
+              .filter((_, idx) => idx !== datePartIndex)
+              .join(" | ");
+            if (otherMeta) meta = cleanOrganization(otherMeta);
+          } else {
+            meta = cleanOrganization(remaining.join(" | "));
+          }
+        }
+      }
+
       const bulletStart = lines.findIndex((line) => /^[•*\-]\s+/.test(line));
-      // New model output marks every accomplishment as a bullet. Keeping that
-      // boundary prevents the first achievement from becoming italic metadata.
-      // Legacy drafts without markers retain their prior first-metadata-line
-      // interpretation so old material stays readable.
       const metadata =
         bulletStart >= 0 ? lines.slice(0, bulletStart) : lines.slice(0, 1);
       const bulletLines =
@@ -196,19 +416,42 @@ function entriesFromSection(
           line,
         ),
       );
-      const date =
-        dateIndex >= 0 ? plainText(metadata[dateIndex] ?? "") : undefined;
-      const meta =
-        metadata
-          .filter((_, index) => index !== dateIndex)
-          .map(plainText)
-          .filter(Boolean)
-          .join(" | ") || undefined;
-      const bullets = bulletLines
-        .flatMap((line) => wrap(line, 87))
-        .filter(Boolean);
+      if (!date && dateIndex >= 0) {
+        date = cleanDateString(plainText(metadata[dateIndex] ?? ""));
+      }
+      const otherMetadata = metadata
+        .filter((_, index) => index !== dateIndex)
+        .map(plainText)
+        .filter(Boolean)
+        .join(" | ");
+      if (otherMetadata) {
+        const cleanedMeta = isProject ? otherMetadata : cleanOrganization(otherMetadata);
+        meta = meta ? `${meta} | ${cleanedMeta}` : cleanedMeta;
+      }
+
+      if (!date && allClarifications.length && title) {
+        const normalizedTitle = title.toLowerCase().replace(/[^a-z0-9]/g, "");
+        const dateClarification = allClarifications.find((c) => {
+          if (c.category !== "dates" || !c.text?.trim()) return false;
+          const normalizedItem = c.itemName
+            .toLowerCase()
+            .replace(/[^a-z0-9]/g, "");
+          return (
+            normalizedTitle.includes(normalizedItem) ||
+            normalizedItem.includes(normalizedTitle)
+          );
+        });
+        if (dateClarification) {
+          date = cleanDateString(dateClarification.text.trim());
+        }
+      }
+      if (date) {
+        date = cleanDateString(date);
+      }
+
+      const bullets = bulletLines.map(plainText).filter(Boolean);
       if (!bullets.length && title.includes(" - "))
-        bullets.push(...wrap(title, 87).slice(1));
+        bullets.push(plainText(title.split(" - ").slice(1).join(" - ")));
       return { title: title || "Documented work", detail, meta, date, bullets };
     })
     .filter((entry) => entry.title || entry.bullets.length);
@@ -220,7 +463,7 @@ function claimsNotAlreadyWritten(
 ): string[] {
   const haystack = normalized(written);
   return draft.claims.flatMap((claim) =>
-    haystack.includes(normalized(claim.text)) ? [] : wrap(claim.text, 87),
+    haystack.includes(normalized(claim.text)) ? [] : [plainText(claim.text)],
   );
 }
 
@@ -241,10 +484,10 @@ export function resumeDocumentModel(
   const skills = findSection(draft, /technical skills|skills|technologies/i);
   const selected = findSection(draft, /selected experience|documented work/i);
   const written = draft.sections.map((section) => section.text).join("\n");
-  const experienceEntries = entriesFromSection(experience);
-  const projectEntries = entriesFromSection(projects);
+  const experienceEntries = entriesFromSection(experience, draft);
+  const projectEntries = entriesFromSection(projects, draft);
   if (!experienceEntries.length && selected)
-    experienceEntries.push(...entriesFromSection(selected).slice(0, 2));
+    experienceEntries.push(...entriesFromSection(selected, draft).slice(0, 2));
   const remainingClaims = claimsNotAlreadyWritten(draft, written);
   if (!projectEntries.length && remainingClaims.length)
     projectEntries.push({
@@ -260,17 +503,17 @@ export function resumeDocumentModel(
   )
     experienceEntries.push({
       title: "Documented experience and projects",
-      bullets: draft.claims.flatMap((claim) => wrap(claim.text, 87)),
+      bullets: draft.claims.map((claim) => plainText(claim.text)),
     });
 
   return {
     name,
     contact,
     summary: summary ? wrap(summary.text, 94).join(" ") : undefined,
-    education: education ? wrap(education.text, 94).join(" ") : undefined,
+    education: education ? education.text.trim() : undefined,
     experienceEntries,
     projectEntries,
-    skills: skills ? wrap(skills.text, 94).join(" ") : undefined,
+    skills: skills ? skills.text.trim() : undefined,
   };
 }
 
@@ -293,19 +536,94 @@ function flowFor(draft: MaterialDraftView): {
   };
   for (const item of draft.sections) {
     if (!item.text.trim()) continue;
+    if (/contact/i.test(item.heading)) continue;
+    if (
+      /(?:experience|employment|\bwork\b)/i.test(item.heading) &&
+      /^no (?:experience|employment|work) entries/i.test(item.text.trim())
+    ) {
+      continue;
+    }
+    if (
+      /project/i.test(item.heading) &&
+      /^no (?:project) entries/i.test(item.text.trim())
+    ) {
+      continue;
+    }
     section(item.heading);
+    const isSkillSection = /(?:technical skills|skills|technologies)/i.test(
+      item.heading,
+    );
+    const isProjectSection = /project/i.test(item.heading);
     for (const rawLine of item.text.split(/\r?\n/)) {
-      const line = rawLine.trim();
-      if (!line) continue;
-      const bullet = /^(?:[-*•])\s+(.+)$/.exec(line);
-      for (const wrapped of wrap(bullet?.[1] ?? line, bullet ? 87 : 94))
-        lines.push({
-          text: wrapped,
-          font: "regular",
-          size: bodySize,
-          x: bullet ? textLeft : bodyLeft,
-          bullet: Boolean(bullet),
+      const trimmed = rawLine.trim();
+      if (!trimmed) continue;
+      const bullet = /^(?:[-*•])\s+(.+)$/.exec(trimmed);
+      if (bullet) {
+        const wrappedLines = wrap(bullet[1]!, 87);
+        wrappedLines.forEach((wrapped, index) => {
+          lines.push({
+            text: wrapped,
+            font: "regular",
+            size: bodySize,
+            x: index === 0 ? textLeft : textLeft + 7,
+            gapBefore: undefined,
+            bullet: index === 0,
+          });
         });
+        continue;
+      }
+      if (isSkillSection) {
+        const wrappedLines = wrap(trimmed, 94);
+        wrappedLines.forEach((wrapped) => {
+          lines.push({
+            text: wrapped,
+            font: "regular",
+            size: bodySize,
+            x: bodyLeft,
+          });
+        });
+        continue;
+      }
+      if (isProjectSection) {
+        const parsed = parseProjectHeader(trimmed);
+        const line1 = parsed.tech
+          ? `${parsed.title} | ${parsed.tech}`
+          : parsed.title;
+        const wrappedTitle = wrap(line1, 82);
+        wrappedTitle.forEach((wrapped, index) => {
+          lines.push({
+            text: wrapped,
+            font: "bold",
+            size: entryTitleSize,
+            x: bodyLeft,
+            gapBefore: index === 0 ? 3 : undefined,
+          });
+        });
+        if (parsed.description) {
+          const wrappedDesc = wrap(parsed.description, 94);
+          wrappedDesc.forEach((wrapped, index) => {
+            lines.push({
+              text: wrapped,
+              font: "italic",
+              size: bodySize,
+              x: bodyLeft,
+              gapBefore: index === 0 ? 1 : undefined,
+            });
+          });
+        }
+      } else {
+        const cleaned = cleanOrganization(trimmed);
+        const wrappedLines = wrap(cleaned, 82);
+        wrappedLines.forEach((wrapped, index) => {
+          lines.push({
+            text: wrapped,
+            font: "bold",
+            size: entryTitleSize,
+            x: bodyLeft,
+            gapBefore: index === 0 ? 3 : undefined,
+          });
+        });
+      }
     }
   }
   return { name, contact, lines };

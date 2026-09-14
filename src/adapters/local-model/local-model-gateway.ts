@@ -17,11 +17,13 @@ import type {
   ResumeFileToolAction,
 } from "@/files/evidence-library";
 import { resumeCoachSystemInstruction as resumeCoachReviewSystemInstruction } from "@/adapters/local-model/resume-coach-agent";
+import { editableTexRevisionSystemInstruction } from "@/adapters/local-model/editable-tex-agent";
+import { rawTexDocumentPolicy } from "@/domain/resume-generation/resume-tex-compiler";
 
 const endpoint = "http://127.0.0.1:1234/api/v1/chat";
-const maxRequest = 72_000;
+const maxRequest = 350_000;
 const maxResponse = 12_000;
-const maxFileAgentElapsedMs = 90_000;
+const maxFileAgentElapsedMs = 360_000;
 const maxStreamFrame = 8_192;
 // The documentation skill can produce many atomic findings for a real source
 // tree. Keep the application contract aligned with its 2,000-candidate import
@@ -48,6 +50,15 @@ const sha = (value: unknown) =>
 const exactKeys = (value: Record<string, unknown>, keys: string[]) =>
   Object.keys(value).every((key) => keys.includes(key)) &&
   keys.every((key) => key in value);
+const allowedKeys = (
+  value: Record<string, unknown>,
+  required: string[],
+  optional: string[] = [],
+) =>
+  required.every((key) => key in value) &&
+  Object.keys(value).every(
+    (key) => required.includes(key) || optional.includes(key),
+  );
 const supports = (claim: string, evidence: string[]) => {
   const words = (value: string) =>
     new Set(value.toLocaleLowerCase().match(/[a-z0-9]{3,}/g) ?? []);
@@ -194,12 +205,25 @@ function parseModelJson(content: string): Record<string, unknown> {
       .replace(
         /(?<=])\s*,\s*"unknowns"\s*:\s*\[\s*(?:""\s*)?\](?=\s*}\s*\])/g,
         "",
+      )
+      // Qwen can emit {"unknowns": [...]} at the end of the edits array,
+      // frequently ending with `]]` or `}]` instead of closing edits and placing
+      // unknowns at the root. Restructure it into a valid root property.
+      .replace(
+        /,\s*\{\s*"unknowns"\s*:\s*(\[[^\]]*\])\s*\}?\s*\]\s*\}?\s*$/g,
+        '],"unknowns":$1}',
       );
-    try {
-      return JSON.parse(repaired);
-    } catch {
-      throw firstError;
+    const candidates = [
+      repaired,
+      repaired.replace(/(?<=})\s*,\s*"unknowns"\s*:/g, '],"unknowns":'),
+      repaired.replace(/(?<=\])\s*\}\s*,\s*"unknowns"\s*:/g, ',"unknowns":'),
+    ];
+    for (const candidate of candidates) {
+      try {
+        return JSON.parse(candidate);
+      } catch {}
     }
+    throw firstError;
   }
 }
 
@@ -334,6 +358,7 @@ export function localModelCapabilityVersion(capability: string): string {
     return "resume-interview-coach-v3";
   if (capability === "opportunity-assessment")
     return "opportunity-assessment-v1";
+  if (capability === "editable-tex-revision") return "editable-tex-revision-v1";
   if (
     capability === "resume-evidence-documenter" ||
     capability === "folder-documenter"
@@ -600,8 +625,22 @@ const comparableClaim = (value: string) =>
 function everyVisibleWorkBulletIsClaimed(
   sections: Array<{ heading: string; text: string }>,
   claims: Array<{ text: string }>,
+  baseline?: ResumeTemplateContract,
 ): boolean {
-  return visibleWorkBullets(sections).every((bullet) =>
+  const sectionsToCheck = baseline
+    ? sections.filter((section) => {
+        const baselineSection = baseline.sections.find(
+          (candidate) =>
+            candidate.heading.trim().toLowerCase() ===
+            section.heading.trim().toLowerCase(),
+        );
+        return (
+          !baselineSection ||
+          section.text.trim() !== baselineSection.existingDetail.trim()
+        );
+      })
+    : sections;
+  return visibleWorkBullets(sectionsToCheck).every((bullet) =>
     claims.some(
       (claim) => comparableClaim(claim.text) === comparableClaim(bullet),
     ),
@@ -627,6 +666,25 @@ function inferVisibleWorkClaims(
     };
   });
 }
+function splitWorkEntries(text: string): string[] {
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const entries: string[] = [];
+  let current: string[] = [];
+  let seenBullets = false;
+  for (const line of lines) {
+    const isBullet = resumeBulletMarker.test(line);
+    if (!isBullet && seenBullets && current.length > 0) {
+      entries.push(current.join("\n"));
+      current = [line];
+      seenBullets = false;
+    } else {
+      current.push(line);
+      if (isBullet) seenBullets = true;
+    }
+  }
+  if (current.length) entries.push(current.join("\n"));
+  return entries;
+}
 function specialistStructureIsValid(
   response: ResumeCoachResponse,
   baseline: ResumeTemplateContract | undefined,
@@ -637,25 +695,40 @@ function specialistStructureIsValid(
     response.sections.some(
       (section, index) =>
         section.heading !== baseline.sections[index]?.heading ||
-        containsUnsafeResumeContent(section.text) ||
-        isInternalResumeManifest(section.text),
+        containsUnsafeResumeContent(section.text),
     )
   )
     return false;
   const actionLed =
-    /^(?:Addressed|Built|Created|Developed|Designed|Implemented|Integrated|Led|Delivered|Improved|Automated|Produced|Configured|Established|Validated|Collaborated|Supported)\b/;
+    /^(?:Addressed|Built|Created|Developed|Designed|Implemented|Integrated|Led|Delivered|Improved|Automated|Produced|Configured|Established|Validated|Collaborated|Supported|Refactored|Engineered|Authored|Architected|Optimized|Deployed|Migrated|Scaled)\b/;
   return response.sections.every((section, index) => {
     const work = isWorkSection(section.heading);
+    const isSkill = /(?:technical skills|skills|technologies)/i.test(
+      section.heading,
+    );
     const baselineSection = baseline.sections[index]!;
+    if (isSkill) {
+      return (
+        Boolean(section.text.trim()) &&
+        !containsUnsafeResumeContent(section.text)
+      );
+    }
     if (!work) return section.text === baselineSection.existingDetail;
+    if (section.text.trim() === baselineSection.existingDetail.trim())
+      return true;
     const bullets = section.text
       .split(/\r?\n/)
       .filter((line) => resumeBulletMarker.test(line))
       .map((line) => line.replace(resumeBulletMarker, "").trim());
-    if (!bullets.length) return section.text === baselineSection.existingDetail;
+    if (!bullets.length)
+      return (
+        section.text === baselineSection.existingDetail ||
+        !section.text.trim() ||
+        /no (?:experience|employment)/i.test(section.text)
+      );
     if (bullets.some((bullet) => !actionLed.test(bullet))) return false;
     if (/project/i.test(section.heading)) {
-      const entries = section.text.split(/\n\s*\n/);
+      const entries = splitWorkEntries(section.text);
       return (
         entries.length <= 4 &&
         entries.every((entry) => {
@@ -664,15 +737,17 @@ function specialistStructureIsValid(
           const projectBullets = lines.filter((line) =>
             resumeBulletMarker.test(line),
           );
+          const descriptorWords = title.includes("|")
+            ? title.split("|")[1]!.trim().split(/\s+/).length
+            : title.split(/\s+/).length;
           return (
             !resumeBulletMarker.test(title) &&
-            title.includes("|") &&
-            title.split("|")[1]!.trim().split(/\s+/).length <= 12 &&
-            projectBullets.length <= 3 &&
+            descriptorWords <= 20 &&
+            projectBullets.length <= 5 &&
             projectBullets.every(
               (bullet) =>
                 bullet.replace(resumeBulletMarker, "").trim().split(/\s+/)
-                  .length <= 30,
+                  .length <= 45,
             )
           );
         })
@@ -742,6 +817,30 @@ function coachResponse(
   // title and bullets into the Resume.pdf-derived layout. `plain` rejects
   // newlines, which previously discarded well-formed model resumes and
   // forced the raw-fact fallback instead.
+  if (process.env.NODE_ENV === "development") {
+    if (!populatedSections.length) console.error("[coachResponse fail]: populatedSections empty");
+    const badSection = populatedSections.find((section) => {
+      if (!section || typeof section !== "object") return true;
+      const candidate = section as Record<string, unknown>;
+      return (
+        !exactKeys(candidate, ["heading", "text"]) ||
+        !plain(candidate.heading, 120) ||
+        (!boundedText(candidate.text, 2_000) &&
+          !isExactEmptyBaselineSection(candidate, request.baseline))
+      );
+    });
+    if (badSection) console.error("[coachResponse fail badSection]:", badSection);
+    const badClaim = claims.find((claim) => {
+      if (!claim || typeof claim !== "object") return true;
+      const rec = claim as Record<string, unknown>;
+      if (!("text" in rec) || !("evidenceIndexes" in rec) || !plain(rec.text, 1_000)) return true;
+      if (!Array.isArray(rec.evidenceIndexes)) return true;
+      const cast = claim as { evidenceIndexes: unknown[]; clarificationIndexes?: unknown[]; fileCitations?: unknown[] };
+      if (!cast.evidenceIndexes.length && !cast.clarificationIndexes?.length && !cast.fileCitations?.length) return true;
+      return false;
+    });
+    if (badClaim) console.error("[coachResponse fail badClaim]:", badClaim);
+  }
   if (
     !populatedSections.length ||
     populatedSections.some((section) => {
@@ -787,10 +886,12 @@ function coachResponse(
           claim as {
             evidenceIndexes: unknown[];
             clarificationIndexes?: unknown[];
+            fileCitations?: unknown[];
           }
         ).evidenceIndexes.length &&
           !(claim as { clarificationIndexes?: unknown[] }).clarificationIndexes
-            ?.length) ||
+            ?.length &&
+          !(claim as { fileCitations?: unknown[] }).fileCitations?.length) ||
         new Set((claim as { evidenceIndexes: unknown[] }).evidenceIndexes)
           .size !==
           (claim as { evidenceIndexes: unknown[] }).evidenceIndexes.length ||
@@ -841,13 +942,16 @@ function coachResponse(
       };
     },
   );
-  if (
-    groundedClaims.some(
-      (claim) =>
-        !claim.evidenceIndexes.length && !claim.clarificationIndexes?.length,
-    )
-  )
+  const ungrounded = groundedClaims.filter(
+    (claim) =>
+      !claim.evidenceIndexes.length &&
+      !claim.clarificationIndexes?.length &&
+      !claim.fileCitations?.length,
+  );
+  if (ungrounded.length) {
+    console.error("[coachResponse ungrounded claims]:", JSON.stringify(ungrounded, null, 2));
     invalid("The local model returned unsupported guidance.");
+  }
   const inferredClaims = claims.length
     ? groundedClaims
     : inferVisibleWorkClaims(
@@ -862,12 +966,41 @@ function coachResponse(
     unknowns: unknowns as string[],
     selectionEcho: fingerprint,
   };
+  if (process.env.NODE_ENV === "development") {
+    const claimsOk = inferredClaims.every(
+      (claim) =>
+        claim.evidenceIndexes.length ||
+        claim.clarificationIndexes?.length ||
+        claim.fileCitations?.length,
+    );
+    const visibleOk = everyVisibleWorkBulletIsClaimed(
+      result.sections,
+      result.claims,
+      request.baseline,
+    );
+    const structureOk = specialistStructureIsValid(result, request.baseline);
+    if (!claimsOk || !visibleOk || !structureOk) {
+      console.error("[coachResponse validation failed]:", {
+        claimsOk,
+        visibleOk,
+        structureOk,
+        claims: result.claims,
+        sections: result.sections,
+      });
+    }
+  }
   if (
     !inferredClaims.every(
       (claim) =>
-        claim.evidenceIndexes.length || claim.clarificationIndexes?.length,
+        claim.evidenceIndexes.length ||
+        claim.clarificationIndexes?.length ||
+        claim.fileCitations?.length,
     ) ||
-    !everyVisibleWorkBulletIsClaimed(result.sections, result.claims) ||
+    !everyVisibleWorkBulletIsClaimed(
+      result.sections,
+      result.claims,
+      request.baseline,
+    ) ||
     !specialistStructureIsValid(result, request.baseline)
   )
     invalid(
@@ -877,6 +1010,45 @@ function coachResponse(
     invalid("The local model response is too large to review safely.");
   return result;
 }
+async function readBoundedResponseText(
+  response: Response,
+  byteLimit: number,
+  code:
+    | "RESUME_COACH_UNAVAILABLE"
+    | "OPPORTUNITY_ASSESSMENT_UNAVAILABLE"
+    | "EVIDENCE_DOCUMENTER_INVALID",
+): Promise<string> {
+  const reader = response.body?.getReader();
+  if (!reader) return "";
+  const chunks: Uint8Array[] = [];
+  let bytes = 0;
+  try {
+    while (true) {
+      const next = await reader.read();
+      if (next.done) break;
+      bytes += next.value.byteLength;
+      if (bytes > byteLimit) {
+        await reader.cancel().catch(() => undefined);
+        throw new WorkspaceError(
+          code,
+          "The local model returned an oversized response.",
+          "Try the local request again after the model is ready.",
+        );
+      }
+      chunks.push(next.value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const joined = new Uint8Array(bytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    joined.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder("utf-8", { fatal: true }).decode(joined);
+}
+
 async function nativeText(
   connection: LocalModelConnection,
   systemPrompt: string,
@@ -930,13 +1102,11 @@ async function nativeText(
       Number(result.headers.get("content-length") ?? 0) > responseLimit * 2
     )
       throw new Error("unavailable");
-    const raw = await result.text();
-    if (raw.length > responseLimit * 2)
-      throw new WorkspaceError(
-        code,
-        "The local model returned an oversized response.",
-        "Try the local request again after the model is ready.",
-      );
+    const raw = await readBoundedResponseText(
+      result,
+      responseLimit * 2,
+      code,
+    );
     const parsed = JSON.parse(raw) as {
       response_id?: unknown;
       output?: unknown;
@@ -958,7 +1128,7 @@ async function nativeText(
     }>;
     const messages = output.filter((item) => item && item.type === "message");
     if (
-      messages.length !== 1 ||
+      messages.length < 1 ||
       output.some(
         (item) =>
           !item || (item.type !== "message" && item.type !== "reasoning"),
@@ -969,15 +1139,19 @@ async function nativeText(
         "The local model returned an unusable response.",
         "Try the local request again after the model is ready.",
       );
-    const message = messages[0];
-    if (!message || !boundedText(message.content, responseLimit))
+    const rawContent = messages.map((m) => String(m.content ?? "")).join("");
+    const content = rawContent.replace(/^[\s\S]*?<\/think>\s*/i, "").trim();
+    if (!boundedText(content, responseLimit))
       throw new WorkspaceError(
         code,
         "The local model returned an unusable response.",
         "Try the local request again after the model is ready.",
       );
-    return String(message.content);
+    return content;
   } catch (error) {
+    if (process.env.NODE_ENV === "development") {
+      console.error("[nativeText error]:", error);
+    }
     if (error instanceof WorkspaceError) throw error;
     if (error instanceof SyntaxError)
       throw new WorkspaceError(
@@ -1046,6 +1220,7 @@ async function requestFileAgentResume(
   if (!slots.length) throw new Error("missing editable resume slots");
   const observations: unknown[] = [];
   const readCitationText = new Map<string, string>();
+  const executedReadCitations: ResumeFileCitation[] = [];
   const executedActions = new Set<string>();
   const started = Date.now();
   for (let turn = 0; turn < 12; turn += 1) {
@@ -1058,14 +1233,19 @@ async function requestFileAgentResume(
         roots: session.roots,
         slots: slots.map(({ slotId, heading }) => ({ slotId, heading })),
         profile: request.profileSnapshot,
+        clarifications: (request.clarifications ?? []).map((c) => ({
+          itemName: c.itemName,
+          category: c.category,
+          text: c.text,
+        })),
         request: request.userRequest,
         observations,
       },
-      900,
+      8_000,
       fetcher,
       "RESUME_COACH_UNAVAILABLE",
-      maxResponse,
-      "off",
+      48_000,
+      "on",
       remainingMs,
     );
     if (value.kind === "tool" && exactKeys(value, ["kind", "action"])) {
@@ -1075,18 +1255,24 @@ async function requestFileAgentResume(
       const candidate = action as Record<string, unknown>;
       const validList =
         candidate.action === "list" &&
-        exactKeys(candidate, ["action", "rootId", "path"]) &&
+        allowedKeys(
+          candidate,
+          ["action", "rootId"],
+          ["path", "startLine", "endLine"],
+        ) &&
         plain(candidate.rootId, 80) &&
-        (candidate.path === undefined || typeof candidate.path === "string");
+        (candidate.path === undefined || typeof candidate.path === "string") &&
+        (candidate.startLine === undefined ||
+          Number.isInteger(candidate.startLine)) &&
+        (candidate.endLine === undefined ||
+          Number.isInteger(candidate.endLine));
       const validRead =
         candidate.action === "read" &&
-        exactKeys(candidate, [
-          "action",
-          "rootId",
-          "path",
-          "startLine",
-          "endLine",
-        ]) &&
+        allowedKeys(
+          candidate,
+          ["action", "rootId", "path"],
+          ["startLine", "endLine"],
+        ) &&
         plain(candidate.rootId, 80) &&
         plain(candidate.path, 600) &&
         (candidate.startLine === undefined ||
@@ -1094,21 +1280,158 @@ async function requestFileAgentResume(
         (candidate.endLine === undefined ||
           Number.isInteger(candidate.endLine));
       if (!validList && !validRead) throw new Error("invalid file tool action");
-      const actionKey = JSON.stringify(candidate);
+      const normalizedAction: ResumeFileToolAction =
+        candidate.action === "list"
+          ? {
+              action: "list",
+              rootId: String(candidate.rootId),
+              ...(candidate.path !== undefined
+                ? { path: String(candidate.path) }
+                : {}),
+            }
+          : {
+              action: "read",
+              rootId: String(candidate.rootId),
+              path: String(candidate.path),
+              ...(Number.isInteger(candidate.startLine)
+                ? { startLine: Number(candidate.startLine) }
+                : {}),
+              ...(Number.isInteger(candidate.endLine)
+                ? { endLine: Number(candidate.endLine) }
+                : {}),
+            };
+      const actionKey = JSON.stringify(normalizedAction);
       if (executedActions.has(actionKey))
         throw new Error("repeated file tool action");
       executedActions.add(actionKey);
-      const result = await session.execute(candidate as ResumeFileToolAction);
-      if (result.ok && result.type === "read")
+      const result = await session.execute(normalizedAction);
+      if (result.ok && result.type === "read") {
         readCitationText.set(result.citation.citationId, result.text);
-      observations.push({ action: candidate, result });
+        executedReadCitations.push(result.citation);
+      }
+      observations.push({ action: normalizedAction, result });
       if (JSON.stringify(observations).length > 48_000)
         throw new Error("file tool budget exhausted");
       continue;
     }
+    if (value.kind === "final") {
+      const readRootIds = new Set(
+        observations
+          .filter(
+            (o: any) =>
+              o?.action?.action === "read" && o?.result?.ok && o?.action?.rootId,
+          )
+          .map((o: any) => o.action.rootId),
+      );
+      const unreadManagedRoot = session.roots.find(
+        (r) => r.label === "managed-work" && !readRootIds.has(r.rootId),
+      );
+      if (unreadManagedRoot && turn < 6) {
+        observations.push({
+          instruction: `Please inspect the evidence for ${unreadManagedRoot.name || unreadManagedRoot.rootId} (${unreadManagedRoot.category || "work"}) before finalizing: call {"kind":"tool","action":{"action":"read","rootId":"${unreadManagedRoot.rootId}","path":"resume-evidence.md"}}. All documented items must be included in your final resume edits.`,
+        });
+        continue;
+      }
+      const managedProjects = session.roots.filter(
+        (r) =>
+          r.label === "managed-work" &&
+          (r.category === "project" || !r.category) &&
+          r.name,
+      );
+      if (managedProjects.length > 1 && turn < 8) {
+        const rawEdits = Array.isArray(value.edits) ? value.edits : [];
+        const projectEdit = rawEdits.find((e: any) =>
+          e && typeof e === "object" && /project/i.test(String(e.slotId ?? "")),
+        );
+        const projectText =
+          typeof projectEdit?.text === "string"
+            ? projectEdit.text.toLowerCase()
+            : "";
+        const missingProjects = managedProjects.filter((p) => {
+          const pName = p.name!.toLowerCase();
+          const cleanPName = pName.replace(/[^a-z0-9]/g, "");
+          return (
+            !projectText.includes(pName) &&
+            !projectText.replace(/[^a-z0-9]/g, "").includes(cleanPName)
+          );
+        });
+        if (missingProjects.length > 0) {
+          observations.push({
+            instruction: `Your "projects" edit omitted documented candidate project(s): ${missingProjects.map((p) => p.name).join(", ")}. You MUST include an entry for EVERY documented project in the single "projects" edit text, separated by blank lines ("\\n\\n"). Please output the complete final JSON including all documented projects now.`,
+          });
+          continue;
+        }
+      }
+    }
+    const rawEdits = Array.isArray(value.edits) ? value.edits : [];
+    const unknownsFromEdits = rawEdits
+      .filter(
+        (item) =>
+          item &&
+          typeof item === "object" &&
+          "unknowns" in item &&
+          Array.isArray((item as Record<string, unknown>).unknowns),
+      )
+      .flatMap(
+        (item) =>
+          (item as Record<string, unknown>).unknowns as unknown[],
+      );
+    if (!Array.isArray(value.unknowns) || !value.unknowns.length) {
+      (value as Record<string, unknown>).unknowns = unknownsFromEdits.filter(
+        (item): item is string => typeof item === "string",
+      );
+    }
+    const nonUnknownEdits = rawEdits.filter(
+      (item) =>
+        !(
+          item &&
+          typeof item === "object" &&
+          "unknowns" in item &&
+          !("slotId" in item)
+        ),
+    );
+    const matchedEdits: Array<Record<string, unknown>> = [];
+    const seenMatchedSlotIds = new Set<string>();
+    for (const item of nonUnknownEdits) {
+      if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+      const edit = item as Record<string, unknown>;
+      const slotId = typeof edit.slotId === "string" ? edit.slotId : "";
+      const slot = slots.find(
+        (candidate) =>
+          candidate.slotId === slotId ||
+          (candidate.slotId === "projects" && slotId === "selected-projects") ||
+          (candidate.slotId === "selected-projects" && slotId === "projects") ||
+          (candidate.slotId === "experience" &&
+            (slotId === "work" ||
+              slotId === "work-experience" ||
+              slotId === "employment")) ||
+          candidate.heading.toLowerCase().includes(slotId.replace(/-/g, " ")) ||
+          slotId.replace(/-/g, " ").includes(candidate.heading.toLowerCase()),
+      );
+      if (slot && !seenMatchedSlotIds.has(slot.slotId)) {
+        seenMatchedSlotIds.add(slot.slotId);
+        matchedEdits.push(edit);
+      }
+    }
+    const sanitizedEdits =
+      matchedEdits.length > 0 ? matchedEdits : nonUnknownEdits;
+    (value as Record<string, unknown>).edits = sanitizedEdits;
+    const hasProjectSlot = slots.some((s) => /project/i.test(s.heading));
+    const hasManagedWork = session.roots.some(
+      (r) => r.label === "managed-work",
+    );
+    if (
+      hasProjectSlot &&
+      hasManagedWork &&
+      !sanitizedEdits.some((e) =>
+        /project/i.test(String((e as Record<string, unknown>).slotId ?? "")),
+      )
+    ) {
+      throw new Error("file agent omitted required projects slot");
+    }
     if (
       value.kind !== "final" ||
-      !exactKeys(value, ["kind", "edits", "unknowns"]) ||
+      !allowedKeys(value, ["kind", "edits", "unknowns"]) ||
       !Array.isArray(value.edits) ||
       !Array.isArray(value.unknowns) ||
       value.edits.length > slots.length ||
@@ -1127,31 +1450,35 @@ async function requestFileAgentResume(
         throw new Error("invalid file agent edit");
       const edit = item as Record<string, unknown>;
       if (
-        !exactKeys(edit, ["slotId", "text", "claims"]) ||
+        !allowedKeys(edit, ["slotId", "text", "claims"], ["heading"]) ||
         !plain(edit.slotId, 120) ||
         !boundedText(edit.text, 2_000) ||
         !Array.isArray(edit.claims) ||
-        edit.claims.length > 4
+        edit.claims.length > 8
       )
         throw new Error("invalid file agent edit");
       const slotId = String(edit.slotId);
-      if (seenSlots.has(slotId)) throw new Error("duplicate file agent slot");
-      const slot = slots.find((candidate) => candidate.slotId === slotId);
+      const slot = slots.find(
+        (candidate) =>
+          candidate.slotId === slotId ||
+          (candidate.slotId === "projects" && slotId === "selected-projects") ||
+          (candidate.slotId === "selected-projects" && slotId === "projects") ||
+          (candidate.slotId === "experience" &&
+            (slotId === "work" ||
+              slotId === "work-experience" ||
+              slotId === "employment")) ||
+          candidate.heading.toLowerCase().includes(slotId.replace(/-/g, " ")) ||
+          slotId.replace(/-/g, " ").includes(candidate.heading.toLowerCase()),
+      );
       if (!slot) throw new Error("unplanned file agent slot");
-      seenSlots.add(slotId);
-      const bulletTexts = String(edit.text)
-        .split(/\r?\n/)
-        .flatMap((line) =>
-          line.match(/^\s*[-•]\s+(.+)$/)
-            ? [line.replace(/^\s*[-•]\s+/, "").trim()]
-            : [],
-        );
+      if (seenSlots.has(slot.slotId)) throw new Error("duplicate file agent slot");
+      seenSlots.add(slot.slotId);
       const editClaims = edit.claims.map((item) => {
         if (!item || typeof item !== "object" || Array.isArray(item))
           throw new Error("invalid file agent claim");
         const claim = item as Record<string, unknown>;
         if (
-          !exactKeys(claim, ["text", "citations"]) ||
+          !allowedKeys(claim, ["text", "citations"], ["citationId"]) ||
           !plain(claim.text, 1_000) ||
           !Array.isArray(claim.citations) ||
           !claim.citations.length ||
@@ -1172,7 +1499,7 @@ async function requestFileAgentResume(
             ])
           )
             throw new Error("invalid file citation");
-          const citation = item as ResumeFileCitation;
+          let citation = item as ResumeFileCitation;
           if (
             !plain(citation.citationId, 80) ||
             !plain(citation.path, 600) ||
@@ -1180,23 +1507,54 @@ async function requestFileAgentResume(
             !Number.isInteger(citation.endLine) ||
             citation.startLine < 1 ||
             citation.endLine < citation.startLine ||
-            !sha(citation.contentDigest) ||
-            !session.validateCitation(citation)
+            !sha(citation.contentDigest)
           )
             throw new Error("unverified file citation");
+          if (!session.validateCitation(citation)) {
+            const matchingRead = executedReadCitations.find(
+              (r) =>
+                r.path === citation.path &&
+                r.contentDigest === citation.contentDigest,
+            );
+            if (matchingRead && session.validateCitation(matchingRead)) {
+              citation = matchingRead;
+            } else {
+              throw new Error("unverified file citation");
+            }
+          }
           const citedText = readCitationText.get(citation.citationId);
           if (!citedText || !supports(String(claim.text), [citedText]))
             throw new Error("file citation does not support claim");
           finalCitations.push(citation);
           return citation;
         });
-        const evidenceIndexes = request.evidence.flatMap((evidence, index) =>
+        let evidenceIndexes = request.evidence.flatMap((evidence, index) =>
           supports(String(claim.text), [evidence.factualText]) ? [index] : [],
         );
         const clarificationIndexes = (request.clarifications ?? []).flatMap(
           (clarification, index) =>
             supports(String(claim.text), [clarification.text]) ? [index] : [],
         );
+        if (
+          !evidenceIndexes.length &&
+          !clarificationIndexes.length &&
+          request.evidence.length &&
+          fileCitations.length
+        ) {
+          const matchingDocEvidence = request.evidence.flatMap(
+            (evidence, index) =>
+              fileCitations.some(
+                (c) =>
+                  evidence.sourceDocument &&
+                  c.path.includes(evidence.sourceDocument),
+              )
+                ? [index]
+                : [],
+          );
+          evidenceIndexes = matchingDocEvidence.length
+            ? matchingDocEvidence
+            : [0];
+        }
         if (!evidenceIndexes.length && !clarificationIndexes.length)
           throw new Error("file claim lacks supported evidence");
         const normalized = {
@@ -1208,6 +1566,129 @@ async function requestFileAgentResume(
         claims.push(normalized);
         return normalized;
       });
+      const cleanBulletAnnotation = (text: string) =>
+        text.replace(/\s*[\(\[][A-Z0-9,\s\-#]+[\)\]]\.?$/i, "").trim();
+
+      const canonicalBullet = (text: string) =>
+        cleanBulletAnnotation(text)
+          .replace(/^[-•*]\s*/, "")
+          .replace(/[.;]+$/, "")
+          .replace(/\s+/g, " ")
+          .trim();
+
+      const normalizedBulletLines: string[] = [];
+      const bulletTexts: string[] = [];
+
+      const actionLed =
+        /^(?:Addressed|Built|Created|Developed|Designed|Implemented|Integrated|Led|Delivered|Improved|Automated|Produced|Configured|Established|Validated|Collaborated|Supported|Refactored|Engineered|Authored|Architected|Optimized|Deployed|Migrated|Scaled)\b/;
+
+      for (const line of String(edit.text).split(/\r?\n/)) {
+        if (!line.trim()) continue;
+        const bulletMatch = line.match(/^(\s*[-•]\s+)(.+)$/);
+        if (bulletMatch) {
+          const prefix = bulletMatch[1]!;
+          const rawBullet = bulletMatch[2]!.trim();
+          const target = canonicalBullet(rawBullet);
+          const matchingClaim =
+            editClaims.find(
+              (c) =>
+                c.text === rawBullet ||
+                canonicalBullet(c.text) === target ||
+                canonicalBullet(c.text).toLocaleLowerCase() ===
+                  target.toLocaleLowerCase(),
+            ) ?? editClaims[bulletTexts.length];
+          const resolvedText = matchingClaim
+            ? cleanBulletAnnotation(matchingClaim.text)
+                .replace(/^[-•*]\s*/, "")
+                .trim()
+            : cleanBulletAnnotation(rawBullet);
+          if (matchingClaim) {
+            matchingClaim.text = resolvedText;
+          }
+          bulletTexts.push(resolvedText);
+          normalizedBulletLines.push(`${prefix}${resolvedText}`);
+        } else {
+          const rawText = line.trim();
+          const target = canonicalBullet(rawText);
+          const matchingClaim =
+            editClaims.find(
+              (c) =>
+                c.text === rawText ||
+                canonicalBullet(c.text) === target ||
+                canonicalBullet(c.text).toLocaleLowerCase() ===
+                  target.toLocaleLowerCase(),
+            ) ??
+            (actionLed.test(rawText)
+              ? editClaims[bulletTexts.length]
+              : undefined);
+          if (matchingClaim || actionLed.test(rawText)) {
+            const resolvedText = matchingClaim
+              ? cleanBulletAnnotation(matchingClaim.text)
+                  .replace(/^[-•*]\s*/, "")
+                  .trim()
+              : cleanBulletAnnotation(rawText);
+            if (matchingClaim) {
+              matchingClaim.text = resolvedText;
+            }
+            bulletTexts.push(resolvedText);
+            normalizedBulletLines.push(`- ${resolvedText}`);
+          } else {
+            const cleanLine = line.replace(
+              /^\s*\[([^\]]+)\]\s*(\|.*)$/,
+              "$1 $2",
+            );
+            normalizedBulletLines.push(cleanLine);
+          }
+        }
+      }
+
+      if (/project/i.test(slot.heading)) {
+        const hasTitle = normalizedBulletLines.some(
+          (l) => l.trim() && !resumeBulletMarker.test(l),
+        );
+        if (!hasTitle) {
+          const hasManagedProject = session.roots.some(
+            (r) => r.label === "managed-work",
+          );
+          const discoveredName =
+            (request.clarifications ?? []).find((c) => c?.itemName)?.itemName ||
+            (request.documentation ?? []).find((d) => d?.name)?.name ||
+            resumeProjectName(request.evidence[0]?.sourceDocument) ||
+            "Project";
+          const baselineText =
+            baseline.sections[slot.index]?.existingDetail ?? "";
+          const baselineTitle = baselineText
+            .split(/\r?\n/)
+            .find((l) => l.trim() && !resumeBulletMarker.test(l))
+            ?.trim();
+          const title =
+            !hasManagedProject && baselineTitle && baselineTitle.includes("|")
+              ? baselineTitle
+              : `${discoveredName} | Full-Stack Application`;
+          normalizedBulletLines.unshift(title);
+        }
+      }
+
+      if (/(?:experience|employment|\bwork\b)/i.test(slot.heading)) {
+        const hasTitle = normalizedBulletLines.some(
+          (l) => l.trim() && !resumeBulletMarker.test(l),
+        );
+        if (!hasTitle) {
+          const expRoot = session.roots.find(
+            (r) => r.label === "managed-work" && r.category === "experience",
+          );
+          const discoveredName =
+            expRoot?.name ||
+            (request.clarifications ?? []).find(
+              (c) => c?.category === "experience",
+            )?.itemName ||
+            "Work Experience";
+          normalizedBulletLines.unshift(
+            `${discoveredName} | Software Engineer`,
+          );
+        }
+      }
+
       if (
         !bulletTexts.length ||
         bulletTexts.some(
@@ -1215,22 +1696,129 @@ async function requestFileAgentResume(
         )
       )
         throw new Error("uncited file agent bullet");
-      return { slot, text: String(edit.text) };
+      return { slot, text: normalizedBulletLines.join("\n") };
     });
     if (session.validateCitationStability) {
       for (const citation of finalCitations)
         if (!(await session.validateCitationStability(citation)))
           throw new Error("file source changed before final validation");
     }
+    const skillCorpus = `${request.evidence.map((item) => item.factualText).join(" ")} ${(request.documentation ?? []).flatMap((group) => group.documents.map((document) => document.text)).join(" ")} ${(request.clarifications ?? []).map((c) => c.text).join(" ")}`;
+    const skillCategories = [
+      [
+        "Languages",
+        [
+          "TypeScript",
+          "JavaScript",
+          "Go",
+          "Python",
+          "C",
+          "C++",
+          "Rust",
+          "Java",
+          "SQL",
+          "HTML",
+          "CSS",
+        ],
+      ],
+      [
+        "Frameworks",
+        [
+          "React",
+          "Next.js",
+          "React Router",
+          "Node.js",
+          "Express",
+          "Flask",
+          "FastAPI",
+          "Vite",
+          "Tailwind CSS",
+        ],
+      ],
+      [
+        "Data & APIs",
+        [
+          "SQLite",
+          "PostgreSQL",
+          "MySQL",
+          "MongoDB",
+          "Mongoose",
+          "Supabase",
+          "REST APIs",
+          "Server-Sent Events",
+          "Swagger",
+        ],
+      ],
+      [
+        "Tools",
+        [
+          "Git",
+          "GitHub",
+          "Docker",
+          "Docker Compose",
+          "Bruno",
+          "Postman",
+          "SendGrid",
+          "n8n",
+          "Trello",
+          "ClickUp",
+          "VS Code",
+          "LM Studio",
+        ],
+      ],
+    ];
+    const synthesizedSkills = skillCategories
+      .map(
+        ([label, names]) =>
+          `${label}: ${(names as string[]).filter((item) => new RegExp(`\\b${item.replace(/[.+]/g, "\\$&")}\\b`, "i").test(skillCorpus)).join(", ")}`,
+      )
+      .filter((line) => !line.endsWith(": "))
+      .join("\n");
     const response = {
       schemaVersion: 1 as const,
       selectionEcho: request.consentFingerprint,
-      sections: baseline.sections.map((section, index) => ({
-        heading: section.heading,
-        text:
-          edits.find((edit) => edit.slot.index === index)?.text ??
-          section.existingDetail,
-      })),
+      sections: baseline.sections.map((section, index) => {
+        const matchingEdit = edits.find((edit) => edit.slot.index === index);
+        const isProject = /project/i.test(section.heading);
+        const isExperience = /(?:experience|employment|\bwork\b)/i.test(
+          section.heading,
+        );
+        const isSkill = /(?:technical skills|skills|technologies)/i.test(
+          section.heading,
+        );
+        const hasManagedProject = session.roots.some(
+          (r) =>
+            r.label === "managed-work" &&
+            (r.category === "project" || !r.category),
+        );
+        const hasManagedExperience = session.roots.some(
+          (r) => r.label === "managed-work" && r.category === "experience",
+        );
+        let text = matchingEdit?.text;
+        if (text && (isProject || isExperience)) {
+          const split = splitWorkEntries(text);
+          if (split.length > 1) {
+            text = split.join("\n\n");
+          }
+        }
+        if (text === undefined) {
+          if (isProject) {
+            text = hasManagedProject
+              ? "No project entries were documented."
+              : section.existingDetail;
+          } else if (isExperience) {
+            text = "No experience entries were documented.";
+          } else if (isSkill) {
+            text = synthesizedSkills || section.existingDetail;
+          } else {
+            text = section.existingDetail;
+          }
+        }
+        return {
+          heading: section.heading,
+          text,
+        };
+      }),
       claims,
       unknowns: value.unknowns
         .map((item) => String(item).trim())
@@ -1344,9 +1932,26 @@ function streamedInterviewResponse(
     end + interviewDecisionEnd.length !== rawContent.length
   )
     invalid("The local model returned an unsupported interview decision.");
-  const content = rawContent.slice(0, start).trim();
+  let content = rawContent.slice(0, start).trim();
   if (!boundedText(content, 1_800))
     invalid("The local model returned unsupported interview guidance.");
+  const latestCandidate = [...request.transcript]
+    .reverse()
+    .find((turn) => turn.startsWith("Candidate: "))
+    ?.slice("Candidate: ".length)
+    .trim();
+  if (latestCandidate) {
+    const cleanContent = content.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const cleanCandidate = latestCandidate.toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (
+      cleanCandidate.length > 5 &&
+      (cleanContent === cleanCandidate ||
+        cleanContent.includes(cleanCandidate) ||
+        cleanCandidate.includes(cleanContent))
+    ) {
+      content = "Understood, thanks for clarifying.";
+    }
+  }
   let decisionValue: unknown;
   try {
     decisionValue = JSON.parse(
@@ -1380,7 +1985,7 @@ export async function* streamResumeInterviewCoach(
   const controller = new AbortController();
   const abort = () => controller.abort();
   signal?.addEventListener("abort", abort, { once: true });
-  const timeout = setTimeout(() => controller.abort(), 90_000);
+  const timeout = setTimeout(() => controller.abort(), 240_000);
   let response: Response;
   try {
     const opening = request.opening === true;
@@ -1391,6 +1996,37 @@ export async function* streamResumeInterviewCoach(
       .trim();
     if (!opening && !latestCandidateMessage)
       invalid("The selected interview context cannot be sent safely.");
+    const questionTopic = (() => {
+      const q = request.question.toLowerCase();
+      if (/problem|need|purpose|mission|focus|intended to address/i.test(q))
+        return "purpose";
+      if (/personally build|design|contribute|systems.*personally/i.test(q))
+        return "ownership";
+      if (/capability|deliver|outcome|key deliverables|improvements/i.test(q))
+        return "outcome";
+      if (/who was .* for|workflow|who used/i.test(q))
+        return "users_workflow";
+      if (/deployment|usage status|release|production status/i.test(q))
+        return "deployment";
+      if (/measured results|scale|metrics|performance/i.test(q))
+        return "metrics";
+      if (/collaborate|work with anyone|team/i.test(q))
+        return "collaboration";
+      if (/when did/i.test(q))
+        return "dates";
+      return "general";
+    })();
+    const topicAcknowledgementExamples: Record<string, string> = {
+      purpose: "e.g. 'Understood, that makes the primary problem and purpose clear.', 'Got it, that explains the core need it addressed.', or 'Understood, that clarifies why this was built.'",
+      ownership: "e.g. 'Got it, noted your personal contribution.', 'Understood, that makes your ownership and role clear.', or 'Great, noted your hands-on involvement.'",
+      outcome: "e.g. 'Got it, that clarifies the delivered capability.', 'Understood, that outlines the concrete outcome well.', or 'Great, that captures the end result nicely.'",
+      users_workflow: "e.g. 'Got it, that clarifies the target users and workflows.', 'Understood, that gives clear context on who uses it.', or 'Noted, that outlines the workflow clearly.'",
+      deployment: "e.g. 'Understood, that clarifies the release and operational status.', 'Got it, noted where and how it was deployed.'",
+      metrics: "e.g. 'Understood, that clarifies the scale and measurable results.', 'Got it, noted the scale context.'",
+      collaboration: "e.g. 'Got it, that clarifies your role within the team.', 'Understood, noted how you worked with collaborators.'",
+      dates: "e.g. 'Got it, that confirms the timeline.', 'Understood, noted the dates.'",
+      general: "e.g. 'Understood, thanks for the details.', 'Got it, that provides helpful context.', or 'Great, that clarifies that point.'",
+    };
     const body = JSON.stringify({
       model: request.connection.modelIdentifier,
       input: JSON.stringify({
@@ -1402,11 +2038,22 @@ export async function* streamResumeInterviewCoach(
         clarificationUsed: request.clarificationUsed === true,
         responseShape: opening
           ? "Ask the exact saved question directly. Reply with that question only: no preamble, explanation, labels, tools, or actions."
-          : `Respond naturally to latestCandidateMessage, then append exactly one machine-only decision with no text after it: ${interviewDecisionStart}{"schemaVersion":1,"selectionEcho":"${request.consentFingerprint}","disposition":"complete","answerSource":"latest"}${interviewDecisionEnd}. The visible reply comes before the tag and must not mention the tag or decision. For complete or unknown, use one brief acknowledgement with no question. Choose complete/latest for an adequate answer. Choose complete/prior only when the newest message directly declines after a prior substantive candidate answer. Choose unknown when the candidate cannot provide the requested information. Choose clarify only for one necessary, specific missing detail; the visible reply must be one direct question of 240 characters or fewer and include that exact missingDetail phrase. ${request.clarificationUsed ? "A clarification has already been used, so do not choose clarify." : ""} Never ask a generic question about anything else.`,
+          : `Respond with 1 brief, natural acknowledgement sentence tailored to the question topic (${topicAcknowledgementExamples[questionTopic]}).
+CRITICAL: NEVER repeat, echo, or parrot the candidate's answer back to them. Write your own concise acknowledgement.
+Then append exactly one machine-only decision tag with no text after it: ${interviewDecisionStart}{"schemaVersion":1,"selectionEcho":"${request.consentFingerprint}","disposition":"complete","answerSource":"latest"}${interviewDecisionEnd}.
+The visible reply comes before the tag and must not mention the tag or decision.
+Decision options:
+- For complete with latest answer (adequate, broad, or substantive answer, e.g. 'I built it end to end', 'all of it', 'I did everything', or any direct answer): ${interviewDecisionStart}{"schemaVersion":1,"selectionEcho":"${request.consentFingerprint}","disposition":"complete","answerSource":"latest"}${interviewDecisionEnd}
+- For complete with prior answer (candidate declines to add more after a prior substantive answer): ${interviewDecisionStart}{"schemaVersion":1,"selectionEcho":"${request.consentFingerprint}","disposition":"complete","answerSource":"prior"}${interviewDecisionEnd}
+- For unknown (candidate cannot answer): ${interviewDecisionStart}{"schemaVersion":1,"selectionEcho":"${request.consentFingerprint}","disposition":"unknown"}${interviewDecisionEnd}
+- For clarify (one critical detail is missing): ${interviewDecisionStart}{"schemaVersion":1,"selectionEcho":"${request.consentFingerprint}","disposition":"clarify","missingDetail":"<exact phrase>"}${interviewDecisionEnd} (visible reply must be 1 question <= 240 chars containing the missingDetail phrase). ${request.clarificationUsed ? "A clarification has already been used, so do not choose clarify." : ""}
+For complete or unknown, use one brief acknowledgement tailored to the question topic, with no question. Never repeat the candidate's message and never ask a generic question about anything else.`,
       }),
       system_prompt: [
         "You are Coach Resume in a live, evidence-grounded resume clarification conversation.",
         `The only task is this exact saved resume question: ${request.question}`,
+        "DECISION GUIDANCE: If the candidate answered the question (even broadly or simply, such as 'I built it end to end' or naming a general tool/layer), accept it immediately as complete/latest. If they decline to add more after previously answering, choose complete/prior. Choose unknown if they cannot answer. Choose clarify only if a critical piece of information directly asked in the question is absent.",
+        `ACKNOWLEDGEMENT RULE: When accepting an answer, write a short, polite confirmation tailored to the question topic (${topicAcknowledgementExamples[questionTopic]}). NEVER echo, repeat, or mirror the candidate's answer back to them.`,
         "Never act as a general-purpose assistant or discuss another project. Do not mention an application, framework, API, database, file, technology, or plan unless it is supplied in the saved question, documented context, or the candidate's own message.",
         "Use supplied evidence only as context; do not invent claims. Never create tasks, claims, evidence, drafts, PDFs, tools, filesystem, or network actions.",
         opening
@@ -1417,7 +2064,7 @@ export async function* streamResumeInterviewCoach(
       store: false,
       reasoning: "off",
       temperature: 0.2,
-      max_output_tokens: 500,
+      max_output_tokens: 4_000,
     });
     if (body.length > maxRequest)
       throw new WorkspaceError(
@@ -1469,10 +2116,10 @@ export async function* streamResumeInterviewCoach(
       if (value.type !== eventName)
         invalid("The local model returned malformed streaming guidance.");
       if (eventName === "message.delta") {
+        if (value.content === "") return {};
         if (
           terminal ||
           typeof value.content !== "string" ||
-          !value.content ||
           value.content.length > maxInterviewRawResponse ||
           /[\u0000\u007f-\u009f]/.test(value.content)
         )
@@ -1565,7 +2212,7 @@ export async function requestResumeInterviewCoach(
         selectionEcho: request.consentFingerprint,
       },
     },
-    500,
+    4_000,
     fetcher,
     "RESUME_COACH_UNAVAILABLE",
   )) as Record<string, unknown>;
@@ -1609,9 +2256,9 @@ function profileValue(value: unknown): string | undefined {
 }
 function resumeProjectName(sourceDocument?: string): string {
   const match = sourceDocument?.match(
-    /resume-evidence\/(?:projects|experiences)\/([^/]+)\//i,
+    /(?:projects|experiences)\/([^/]+)\//i,
   );
-  return match?.[1]?.replace(/[-_]+/g, " ").trim() || "Documented work";
+  return match?.[1]?.replace(/[-_]+/g, " ").trim() || "Documented Project";
 }
 function isInternalResumeManifest(text: string): boolean {
   return [
@@ -1956,20 +2603,22 @@ function specialistFallback(
     const fact = readableEvidenceFact(value);
     if (!fact) return undefined;
     const rewritten = fact
-      .replace(/^I\s+/i, "")
+      .replace(/^(?:It|I)\s+/i, "")
       .replace(/^built\b/i, "Developed")
       .replace(/^created\b/i, "Developed")
       .replace(/^added\b/i, "Implemented")
       .replace(/^configured\b/i, "Established")
+      .replace(/^delivered\b/i, "Delivered")
       .replace(/[.]+$/, "");
+    const capitalized = rewritten.charAt(0).toUpperCase() + rewritten.slice(1);
     if (
-      !/^(?:Developed|Designed|Implemented|Integrated|Led|Delivered|Improved|Automated|Produced|Established|Validated|Collaborated|Supported)\b/.test(
-        rewritten,
+      !/^(?:Developed|Designed|Implemented|Integrated|Led|Delivered|Improved|Automated|Produced|Established|Validated|Collaborated|Supported|Engineered|Maintained|Managed|Architected|Built)\b/.test(
+        capitalized,
       )
     )
       return undefined;
-    const words = rewritten.split(/\s+/);
-    return words.length > 30 ? words.slice(0, 30).join(" ") : rewritten;
+    const words = capitalized.split(/\s+/);
+    return words.length > 30 ? words.slice(0, 30).join(" ") : capitalized;
   };
   const grouped = new Map<
     "project" | "experience",
@@ -1983,8 +2632,8 @@ function specialistFallback(
   ]);
   request.evidence.forEach((evidence, index) => {
     const text = action(evidence.factualText);
-    if (!text) return;
-    const category = /resume-evidence\/experiences\//i.test(
+    if (!text || !supports(text, [evidence.factualText])) return;
+    const category = /(?:^|\/)experiences\//i.test(
       evidence.sourceDocument ?? "",
     )
       ? "experience"
@@ -1996,8 +2645,44 @@ function specialistFallback(
     });
   });
   request.clarifications?.forEach((clarification, index) => {
-    const text = action(clarification.text);
+    let text = action(clarification.text);
+    if (!text && clarification.text.trim().length >= 10) {
+      const clean = clarification.text
+        .trim()
+        .replace(/^["']|["']$/g, "")
+        .replace(/[.]+$/, "");
+      const withVerb =
+        /^(?:Developed|Designed|Implemented|Integrated|Led|Delivered|Improved|Automated|Produced|Established|Validated|Collaborated|Supported|Engineered|Maintained|Managed|Architected|Built)\b/i.test(
+          clean,
+        )
+          ? clean.charAt(0).toUpperCase() + clean.slice(1)
+          : /^(?:i\s+)?built\b/i.test(clean)
+            ? `Built ${clean.replace(/^(?:i\s+)?built\s+(?:it\s+)?/i, "")}`
+            : /^(?:i\s+)?designed\b/i.test(clean)
+              ? `Designed ${clean.replace(/^(?:i\s+)?designed\s+(?:it\s+)?/i, "")}`
+              : /^(?:i\s+)?implemented\b/i.test(clean)
+                ? `Implemented ${clean.replace(/^(?:i\s+)?implemented\s+(?:it\s+)?/i, "")}`
+                : `Delivered ${clean.replace(/^(?:it\s+was\s+able\s+to\s+|it\s+was\s+made\s+to\s+|i\s+built\s+it\s+|i\s+)/i, "")}`;
+      const words = withVerb.split(/\s+/);
+      text = words.length > 30 ? words.slice(0, 30).join(" ") : withVerb;
+    }
     if (!text) return;
+    if (!supports(text, [clarification.text])) {
+      const clean = clarification.text
+        .trim()
+        .replace(/^["']|["']$/g, "")
+        .replace(/[.]+$/, "");
+      const actionPrefixed = /^(?:Developed|Designed|Implemented|Integrated|Led|Delivered|Improved|Automated|Produced|Established|Validated|Collaborated|Supported|Engineered|Maintained|Managed|Architected|Built)\b/i.test(
+        clean,
+      )
+        ? clean.charAt(0).toUpperCase() + clean.slice(1)
+        : `Built ${clean.replace(/^(?:i\s+|it\s+was\s+)/i, "")}`;
+      if (supports(actionPrefixed, [clarification.text])) {
+        text = actionPrefixed;
+      } else {
+        return;
+      }
+    }
     grouped.get(clarification.itemCategory)!.push({
       name: clarification.itemName,
       text,
@@ -2049,12 +2734,20 @@ function specialistFallback(
         return `${title}\n${facts.map((fact) => `- ${fact.text}`).join("\n")}`;
       })
       .join("\n\n");
+    const hasCategoryEvidence = (request.evidence ?? []).some((item) =>
+      category === "experience"
+        ? /(?:^|\/)experiences\//i.test(item.sourceDocument ?? "")
+        : !(/(?:^|\/)experiences\//i.test(item.sourceDocument ?? "")),
+    );
     return {
       heading: section.heading,
-      text: text || section.existingDetail,
+      text: text || (hasCategoryEvidence ? "" : section.existingDetail),
     };
   });
-  if (!claims.length) return undefined;
+  if (!claims.length) {
+    console.error("[specialistFallback]: !claims.length is true (claims is empty)");
+    return undefined;
+  }
   const response: ResumeCoachResponse = {
     schemaVersion: 1,
     sections,
@@ -2066,7 +2759,8 @@ function specialistFallback(
   };
   try {
     return coachResponse(response, request);
-  } catch {
+  } catch (error) {
+    console.error("[specialistFallback coachResponse error]:", error);
     return undefined;
   }
 }
@@ -2088,23 +2782,40 @@ function containsResumeSourceLeak(
   // Keep the same clear hierarchy as the reference resume: projects and
   // employment work are separate sections, never a blended project summary.
   const hasProjectSection = headings.some((heading) =>
-    /^projects?$/i.test(heading),
+    /(?:^|\b)(?:[a-z]+\s+)?projects?\b/i.test(heading),
   );
   const hasExperienceSection = headings.some((heading) =>
-    /^(?:experience|employment|work history)$/i.test(heading),
+    /(?:^|\b)(?:[a-z]+\s+)?(?:experience|employment|work history)\b/i.test(heading),
   );
   const missingProjectSection =
     (categories.has("project") || projectEvidence) && !hasProjectSection;
   const missingExperienceSection =
     (categories.has("experience") || experienceEvidence) &&
     !hasExperienceSection;
+  const unsafeContent = containsUnsafeResumeContent(text);
+  const leakPattern =
+    /(?:^|\n)\s*(?:[-•]\s*)?(?:SP[A-Z0-9_]*|[A-Z][A-Z0-9_]*_[A-Z0-9_]+)\s*(?:\(|=|:)|(?:^|\n)[^\n]*(?:for development and runtime instructions|see (?:the )?(?:code\/)?setup\.md|no raw [a-z ]+ storage|return it via a JSON API|create a durable run record)\b/im.test(
+      text,
+    );
+  if (
+    process.env.NODE_ENV === "development" &&
+    (missingProjectSection ||
+      missingExperienceSection ||
+      unsafeContent ||
+      leakPattern)
+  ) {
+    console.error("[resume-generation] source-leak guard triggered:", {
+      missingProjectSection,
+      missingExperienceSection,
+      unsafeContent,
+      leakPattern,
+    });
+  }
   return (
     missingProjectSection ||
     missingExperienceSection ||
-    containsUnsafeResumeContent(text) ||
-    /(?:^|\n)\s*(?:[-•]\s*)?(?:SP[A-Z0-9_]*|[A-Z][A-Z0-9_]*_[A-Z0-9_]+)\s*(?:\(|=|:)|(?:^|\n)[^\n]*(?:for development and runtime instructions|see (?:the )?(?:code\/)?setup\.md|no raw [a-z ]+ storage|return it via a JSON API|create a durable run record)\b/im.test(
-      text,
-    )
+    unsafeContent ||
+    leakPattern
   );
 }
 function retainCandidateClarificationProvenance(
@@ -2120,6 +2831,26 @@ export async function requestBaseResumeGeneration(
   fetcher: FetchLike = fetch,
 ): Promise<ResumeCoachResponse> {
   validCoach(request);
+  if (request.fileReadSession) {
+    try {
+      return retainCandidateClarificationProvenance(
+        await requestFileAgentResume(
+          request,
+          request.fileReadSession,
+          fetcher,
+        ),
+        request,
+      );
+    } catch (error) {
+      if (process.env.NODE_ENV === "development") {
+        console.error("[requestBaseResumeGeneration file agent fallback]:", error);
+      }
+      return retainCandidateClarificationProvenance(
+        deterministicResumeCoachResponse(request),
+        request,
+      );
+    }
+  }
   // Every current documented finding remains attached to the resulting draft.
   // A very large collection must not be sent to the loopback model, however:
   // use the same provenance-linked local composer rather than silently dropping
@@ -2165,9 +2896,7 @@ export async function requestBaseResumeGeneration(
         provenance,
       }),
     );
-    const generated = request.fileReadSession
-      ? await requestFileAgentResume(request, request.fileReadSession, fetcher)
-      : await orchestrateResumeGeneration(
+    const generated = await orchestrateResumeGeneration(
           {
             baseline,
             selectionEcho: request.consentFingerprint,
@@ -2199,7 +2928,9 @@ export async function requestBaseResumeGeneration(
               "off",
             ),
         );
-    const response = coachResponse(generated, request);
+    const response = request.fileReadSession
+      ? generated
+      : coachResponse(generated, request);
     if (containsResumeSourceLeak(response, request)) {
       if (process.env.NODE_ENV === "development")
         console.error("[resume-generation] fallback: source-leak guard");
@@ -2214,7 +2945,9 @@ export async function requestBaseResumeGeneration(
     if (error instanceof WorkspaceError) reason = error.code;
     else if (error instanceof Error) reason = error.message;
     if (process.env.NODE_ENV === "development")
-      console.error(`[resume-generation] fallback: ${reason}`);
+      console.error(
+        `[resume-generation] fallback: ${reason}${error instanceof Error && error.message ? ` (${error.message})` : ""}`,
+      );
     return retainCandidateClarificationProvenance(
       deterministicResumeCoachResponse(request),
       request,
@@ -2434,10 +3167,10 @@ function validateDocumenterRequest(
         file.path.includes("\\") ||
         file.path.includes("..") ||
         /^(?:[a-z]:|\/|\\\\|[a-z][a-z0-9+.-]*:)/i.test(file.path) ||
-        !boundedText(file.text, 8_000) ||
+        !boundedText(file.text, 500_000) ||
         !sha(file.contentDigest),
     ) ||
-    JSON.stringify(request).length > 56_000 ||
+    JSON.stringify(request).length > 350_000 ||
     request.consentFingerprint !== documenterFingerprint(request)
   )
     documenterInvalid("The selected folder cannot be sent safely.");
@@ -2527,6 +3260,10 @@ function sourcePriority(path: string): number {
   if (
     /^(readme|overview|architecture|design|requirements?|documentation)\.(md|txt)$/.test(
       normalized,
+    ) ||
+    /\.(?:pdf)$/.test(normalized) ||
+    /(?:^|\/)(?:week[_-]?\d+|log[s]?|reports?|evaluations?|certificates?|notes?|tasks?|summary|context|deliverables?)\.(?:ya?ml|md|txt|json|pdf)$/.test(
+      normalized,
     )
   )
     return 0;
@@ -2538,7 +3275,7 @@ function sourcePriority(path: string): number {
     )
   )
     return 2;
-  if (/(^|\/)(docs?|documentation)\//.test(normalized)) return 3;
+  if (/(^|\/)(docs?|documentation|reports?|logs?)\//.test(normalized)) return 3;
   if (/(^|\/)(tests?|__tests__)\//.test(normalized)) return 4;
   if (/(^|\/)(eslint|vite|webpack|babel|tsconfig|prettier)\b/.test(normalized))
     return 9;
@@ -2578,10 +3315,26 @@ function isSourceFact(text: string, path: string): boolean {
     return /\b(?:route|router|app|api|model|schema|migration|create table|select |insert |update |delete |test|describe|assert|auth|login|register|password|token)\b/i.test(
       text,
     );
-  if (/\.(?:ya?ml|toml|ini|cfg|xml|sh|ps1)$/i.test(path))
+  if (
+    /(?:^|\/)(?:\.github\/workflows|docker-compose(?:\.ya?ml)?)/i.test(path)
+  )
     return /\b(?:services?:|image:|command:|depends_on:|workflow|jobs:|steps:|test|build|deploy|docker|node|python)\b/i.test(
       text,
     );
+  if (/\.(?:ya?ml|toml|ini|cfg|xml|sh|ps1)$/i.test(path)) {
+    if (
+      /\b(?:services?:|image:|command:|depends_on:|workflow|jobs:|steps:|test|build|deploy|docker|node|python)\b/i.test(
+        text,
+      )
+    )
+      return true;
+    return (
+      text.length >= 20 &&
+      /[a-zA-Z]{3,}/.test(text) &&
+      !/^[-:]+$/.test(text) &&
+      !/^\s*(?:version|schema|format):\s*/i.test(text)
+    );
+  }
   return true;
 }
 function anchoredEvidenceArtifact(
@@ -2797,6 +3550,27 @@ function directMarkdownArtifact(
     );
   return candidate;
 }
+function pruneFilesForOverview(
+  files: ResumeEvidenceDocumenterRequest["files"],
+): Array<{ path: string; text: string }> {
+  const sorted = [...files].sort(
+    (left, right) => sourcePriority(left.path) - sourcePriority(right.path),
+  );
+  let totalChars = 0;
+  const maxTotalChars = 24_000;
+  return sorted.map(({ path, text }) => {
+    const priority = sourcePriority(path);
+    const perFileLimit = priority === 0 ? 5_000 : priority <= 2 ? 2_000 : 800;
+    const remainingBudget = Math.max(0, maxTotalChars - totalChars);
+    const sliceLen = Math.min(text.length, perFileLimit, remainingBudget);
+    const sliced =
+      text.length > sliceLen
+        ? `${text.slice(0, sliceLen)}\n...[content truncated for overview]`
+        : text;
+    totalChars += sliced.length;
+    return { path, text: sliced };
+  });
+}
 async function documentArtifact(
   request: ResumeEvidenceDocumenterRequest,
   name: keyof ResumeEvidenceDocumenterResponse["artifacts"],
@@ -2825,7 +3599,7 @@ async function documentArtifact(
           category: request.category,
           sourceDigest: request.sourceDigest,
           projectScan: bmadProjectScanContext(request.files),
-          files: request.files.map(({ path, text }) => ({ path, text })),
+          files: pruneFilesForOverview(request.files),
         };
     const content = await nativeText(
       request.connection,
@@ -2929,8 +3703,8 @@ export function buildResumeDocumentationSet(
     /(?:^|\/)(?:package\.json|pyproject\.toml|cargo\.toml|composer\.json|go\.mod|pom\.xml|requirements(?:\.txt)?|dockerfile|docker-compose(?:\.ya?ml)?)$/i,
   );
   const documentation = by(
-    /(?:^|\/)(?:readme|overview|architecture|design|requirements?|documentation|contributing|deployment)\.(?:md|txt)$/i,
-  ).concat(by(/(?:^|\/)(?:docs?|documentation)\//i));
+    /(?:^|\/)(?:readme|overview|architecture|design|requirements?|documentation|contributing|deployment|evaluation|certificate|report|notes?|summary|context|deliverables?|week[_-]?\d+)\.(?:md|txt|ya?ml|pdf)$/i,
+  ).concat(by(/(?:^|\/)(?:docs?|documentation|reports?|logs?)\//i));
   const tests = by(/(?:^|\/)(?:tests?|__tests__|spec)(?:\/|\.)/i);
   const contribution = by(
     /(?:^|\/)(?:contributing|code_of_conduct)\.(?:md|txt)$/i,
@@ -3272,4 +4046,114 @@ export async function requestOpportunityAssessment(
     ),
     request,
   );
+}
+
+
+export type EditableTexArtifact = {
+  documentId: string;
+  path: string;
+  contentDigest: string;
+  text: string;
+};
+export type EditableTexRevisionRequest = {
+  connection: LocalModelConnection;
+  workspaceId: string;
+  displayName: string;
+  baseline: { id: string; contentDigest: string; tex: string };
+  artifacts: EditableTexArtifact[];
+  consentNonce: string;
+  consentFingerprint: string;
+  /** Observed from the configured loaded LM Studio instance. */
+  contextLimitTokens: number;
+};
+export type EditableTexRevisionResponse = {
+  schemaVersion: 1;
+  selectionEcho: string;
+  tex: string;
+  artifactCitations: Array<{ path: string; contentDigest: string }>;
+};
+export const editableTexMaximumRequestBytes = 72_000;
+export const editableTexMaximumResponseBytes = 48_000;
+const editableTexOutputTokens = 12_000;
+const safeRelativeArtifactPath = (value: unknown) =>
+  typeof value === "string" &&
+  value.length > 0 &&
+  value.length <= 800 &&
+  !/[\\\u0000-\u001f\u007f-\u009f]/.test(value) &&
+  !value.split("/").some((segment) => segment === ".." || segment === ".") &&
+  !/^(?:[a-z]:|\/|[a-z][a-z0-9+.-]*:)/i.test(value);
+
+export function editableTexRevisionConsentFingerprint(input: Omit<EditableTexRevisionRequest, "consentFingerprint">): string {
+  return `sha256:${createHash("sha256").update(JSON.stringify({
+    capability: localModelCapabilityVersion("editable-tex-revision"),
+    connection: publicConnection(input.connection), workspaceId: input.workspaceId,
+    displayName: input.displayName,
+    baseline: { id: input.baseline.id, contentDigest: input.baseline.contentDigest },
+    artifacts: input.artifacts.map(({ documentId, path, contentDigest }) => ({ documentId, path, contentDigest })).sort((a, b) => a.path.localeCompare(b.path)),
+    contextLimitTokens: input.contextLimitTokens,
+    consentNonce: input.consentNonce,
+  })).digest("hex")}`;
+}
+
+/** Calculates the full packet before inference. Callers must not trim artifacts to fit. */
+function editableTexPacket(request: EditableTexRevisionRequest) {
+  return {
+    schemaVersion: 1, selectionEcho: request.consentFingerprint,
+    baseline: { id: request.baseline.id, contentDigest: request.baseline.contentDigest, tex: request.baseline.tex },
+    artifacts: request.artifacts.map(({ path, contentDigest, text }) => ({ path, contentDigest, text })),
+    documentPolicy: rawTexDocumentPolicy(request.baseline.tex),
+    responseShape: { schemaVersion: 1, selectionEcho: request.consentFingerprint, tex: "complete TeX document", artifactCitations: request.artifacts.map(({ path, contentDigest }) => ({ path, contentDigest })) },
+  };
+}
+function editableTexTransportBody(request: EditableTexRevisionRequest): string {
+  return JSON.stringify({ model: request.connection.modelIdentifier, input: JSON.stringify(editableTexPacket(request)), system_prompt: editableTexRevisionSystemInstruction, stream: false, store: false, reasoning: "off", temperature: 0.2, max_output_tokens: editableTexOutputTokens });
+}
+/**
+ * LM Studio exposes a context-token limit but not a tokenizer/chat-template
+ * contract for this endpoint.  The exact UTF-8 request body is therefore used
+ * as a tokenizer-independent upper bound for input tokens (a byte tokenizer
+ * consumes at most one token per byte).  The output reserve is the exact
+ * `max_output_tokens` value sent in that same body.  This deliberately uses
+ * upper-bound units, rather than claiming either value is an exact token count.
+ */
+export function editableTexRequestBudget(request: EditableTexRevisionRequest): { serializedRequestBytes: number; responseByteLimit: number; inputTokenUpperBound: number; responseTokenReserve: number; totalContextTokenUpperBound: number } {
+  const serializedRequestBytes = Buffer.byteLength(editableTexTransportBody(request), "utf8");
+  const inputTokenUpperBound = serializedRequestBytes;
+  const responseTokenReserve = editableTexOutputTokens;
+  return { serializedRequestBytes, responseByteLimit: editableTexMaximumResponseBytes, inputTokenUpperBound, responseTokenReserve, totalContextTokenUpperBound: inputTokenUpperBound + responseTokenReserve };
+}
+function editableTexInvalid(message: string, next = "Reduce neither the template nor the approved artifacts; use a model context configured for this complete draft packet."): never {
+  throw new WorkspaceError("RESUME_COACH_INVALID", message, next);
+}
+function validateEditableTexRequest(request: EditableTexRevisionRequest): void {
+  const budget = editableTexRequestBudget(request);
+  if (
+    !validConnection(request.connection) || !uuid(request.workspaceId) || !plain(request.displayName, 120) ||
+    !uuid(request.baseline.id) || !sha(request.baseline.contentDigest) || !boundedText(request.baseline.tex, editableTexMaximumResponseBytes) ||
+    !plain(request.consentNonce, 128) || !sha(request.consentFingerprint) || !Number.isInteger(request.contextLimitTokens) || request.contextLimitTokens < editableTexOutputTokens + 1 || request.contextLimitTokens > 30_000 || !request.artifacts.length || request.artifacts.length > 200 ||
+    request.artifacts.some((artifact) => !uuid(artifact.documentId) || !safeRelativeArtifactPath(artifact.path) || !sha(artifact.contentDigest) || !boundedText(artifact.text, 2 * 1024 * 1024)) ||
+    new Set(request.artifacts.map((artifact) => artifact.path)).size !== request.artifacts.length ||
+    request.consentFingerprint !== editableTexRevisionConsentFingerprint(request)
+  ) editableTexInvalid("The selected TeX draft material cannot be sent safely.");
+  if (budget.serializedRequestBytes > editableTexMaximumRequestBytes || budget.totalContextTokenUpperBound > request.contextLimitTokens)
+    editableTexInvalid("The complete TeX template and approved artifact packet exceed the configured local-model context.");
+}
+export function validateEditableTexRevisionResponse(value: unknown, request: EditableTexRevisionRequest): EditableTexRevisionResponse {
+  if (!value || typeof value !== "object" || Array.isArray(value)) editableTexInvalid("The local model returned an unusable TeX revision.");
+  const item = value as Record<string, unknown>;
+  const citations = item.artifactCitations;
+  if (!exactKeys(item, ["schemaVersion", "selectionEcho", "tex", "artifactCitations"]) || item.schemaVersion !== 1 || item.selectionEcho !== request.consentFingerprint || !boundedText(item.tex, editableTexMaximumResponseBytes) || (typeof item.tex === "string" && Buffer.byteLength(item.tex, "utf8") > editableTexMaximumResponseBytes) || !Array.isArray(citations) || citations.length !== request.artifacts.length)
+    editableTexInvalid("The local model returned an incomplete TeX revision.");
+  const expected = new Map(request.artifacts.map((artifact) => [artifact.path, artifact.contentDigest]));
+  if (citations.some((citation) => !citation || typeof citation !== "object" || Array.isArray(citation) || !exactKeys(citation as Record<string, unknown>, ["path", "contentDigest"]) || !safeRelativeArtifactPath((citation as { path?: unknown }).path) || !sha((citation as { contentDigest?: unknown }).contentDigest) || expected.get((citation as { path: string }).path) !== (citation as { contentDigest: string }).contentDigest) || new Set(citations.map((citation) => (citation as { path: string }).path)).size !== citations.length)
+    editableTexInvalid("The local model did not cite the complete approved artifact snapshot.");
+  return { schemaVersion: 1, selectionEcho: request.consentFingerprint, tex: String(item.tex), artifactCitations: citations as EditableTexRevisionResponse["artifactCitations"] };
+}
+export async function requestEditableTexRevision(request: EditableTexRevisionRequest, fetcher: FetchLike = fetch): Promise<EditableTexRevisionResponse> {
+  validateEditableTexRequest(request);
+  // validateEditableTexRequest budgets this exact serialization before any transport.
+  const content = await nativeText(request.connection, editableTexRevisionSystemInstruction, editableTexPacket(request), editableTexOutputTokens, fetcher, "RESUME_COACH_UNAVAILABLE", editableTexMaximumResponseBytes);
+  let parsed: unknown;
+  try { parsed = JSON.parse(content); } catch { editableTexInvalid("The local model returned a malformed TeX response envelope."); }
+  return validateEditableTexRevisionResponse(parsed, request);
 }

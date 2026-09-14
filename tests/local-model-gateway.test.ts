@@ -800,6 +800,391 @@ test("Resume Architect reads host-authorized files and maps citations without mo
   assert.deepEqual(result.claims[0]?.evidenceIndexes, [0]);
 });
 
+test("Resume Architect accepts file agent final response with heading and trailing unknowns array", async () => {
+  const citation: ResumeFileCitation = {
+    citationId: "citation-1",
+    path: "README.md",
+    startLine: 1,
+    endLine: 2,
+    contentDigest: `sha256:${"a".repeat(64)}`,
+  };
+  const session: ResumeFileReadSession = {
+    roots: [
+      { rootId: "root-1", label: "application" },
+      { rootId: "root-2", label: "managed-work" },
+    ],
+    execute: async () => ({
+      ok: true,
+      type: "read",
+      rootId: "root-2",
+      path: "README.md",
+      citation,
+      text: "Built accessible TypeScript interfaces.\nCandidate-facing workflow.",
+    }),
+    validateCitation: (value) =>
+      JSON.stringify(value) === JSON.stringify(citation),
+  };
+  const base = { ...requestBase, baseline, fileReadSession: session };
+  const value = {
+    ...base,
+    consentFingerprint: resumeCoachConsentFingerprint(base),
+  };
+  let calls = 0;
+  const result = await requestResumeCoach(value, async (_url, init) => {
+    calls += 1;
+    if (calls === 1) {
+      return native({
+        kind: "tool",
+        action: {
+          action: "read",
+          rootId: "root-2",
+          path: "README.md",
+          startLine: 1,
+          endLine: 2,
+        },
+      });
+    }
+    const rawMalformation = JSON.stringify({
+      output: [
+        {
+          type: "message",
+          content: `{"kind":"final","edits":[{"slotId":"projects","heading":"Projects","text":"Portfolio | Accessible interface\\n- Built accessible TypeScript interfaces.","claims":[{"text":"Built accessible TypeScript interfaces.","citations":[${JSON.stringify(citation)}]}]},{"unknowns":["Ownership of project components","Specific metrics"]]`,
+        },
+      ],
+    });
+    return new Response(rawMalformation, {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  });
+  assert.equal(calls, 2);
+  assert.match(
+    result.sections.find((section) => section.heading === "Projects")?.text ??
+      "",
+    /Built accessible TypeScript interfaces/,
+  );
+  assert.deepEqual(result.unknowns, [
+    "Ownership of project components",
+    "Specific metrics",
+  ]);
+});
+
+test("Resume Architect repairs premature root close before unknowns and resolves selected-projects slot alias", async () => {
+  const citation: ResumeFileCitation = {
+    citationId: "citation-1",
+    path: "resume-evidence.md",
+    startLine: 1,
+    endLine: 289,
+    contentDigest: `sha256:${"b".repeat(64)}`,
+  };
+  const session: ResumeFileReadSession = {
+    roots: [{ rootId: "root-1", label: "managed-work" }],
+    execute: async () => ({
+      ok: true,
+      type: "read",
+      rootId: "root-1",
+      path: "resume-evidence.md",
+      citation,
+      text: "Implemented VCF file upload validation and run lifecycle management.\nCreated SQLite-backed run records with cancel functionality via guarded state transitions.",
+    }),
+    validateCitation: (value) =>
+      JSON.stringify(value) === JSON.stringify(citation),
+  };
+  const base = { ...requestBase, baseline, fileReadSession: session };
+  const value = {
+    ...base,
+    consentFingerprint: resumeCoachConsentFingerprint(base),
+  };
+  let calls = 0;
+  const result = await requestResumeCoach(value, async () => {
+    calls += 1;
+    if (calls === 1) {
+      return native({
+        kind: "tool",
+        action: {
+          action: "read",
+          rootId: "root-1",
+          path: "resume-evidence.md",
+        },
+      });
+    }
+    const malformed = JSON.stringify({
+      output: [
+        {
+          type: "message",
+          content: `{"kind":"final","edits":[{"slotId":"selected-projects","text":"Implemented VCF file upload validation and run lifecycle management with API endpoints.\\n- Created SQLite-backed run records with cancel functionality via guarded state transitions.","claims":[{"text":"Implemented VCF file upload validation and run lifecycle management with API endpoints.","citations":[${JSON.stringify(citation)}]},{"text":"Created SQLite-backed run records with cancel functionality via guarded state transitions.","citations":[${JSON.stringify(citation)}]}]}]},"unknowns":["Project ownership and team composition","User adoption metrics"]}`,
+        },
+      ],
+    });
+    return new Response(malformed, {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  });
+  assert.equal(calls, 2);
+  assert.match(
+    result.sections.find((section) => section.heading === "Projects")?.text ??
+      "",
+    /Created SQLite-backed run records/,
+  );
+  assert.deepEqual(result.unknowns, [
+    "Project ownership and team composition",
+    "User adoption metrics",
+  ]);
+});
+
+test("Resume Architect repairs missing edits close bracket before unknowns array", async () => {
+  const citation: ResumeFileCitation = {
+    citationId: "citation-1",
+    path: "resume-evidence.md",
+    startLine: 1,
+    endLine: 289,
+    contentDigest: `sha256:${"d".repeat(64)}`,
+  };
+  const session: ResumeFileReadSession = {
+    roots: [{ rootId: "root-1", label: "managed-work" }],
+    execute: async () => ({
+      ok: true,
+      type: "read",
+      rootId: "root-1",
+      path: "resume-evidence.md",
+      citation,
+      text: "Built Flask web application with SQLite backend for run record management and VCF file validation.",
+    }),
+    validateCitation: (value) =>
+      JSON.stringify(value) === JSON.stringify(citation),
+  };
+  const base = { ...requestBase, baseline, fileReadSession: session };
+  const value = {
+    ...base,
+    consentFingerprint: resumeCoachConsentFingerprint(base),
+  };
+  let calls = 0;
+  const result = await requestResumeCoach(value, async () => {
+    calls += 1;
+    if (calls === 1) {
+      return native({
+        kind: "tool",
+        action: {
+          action: "read",
+          rootId: "root-1",
+          path: "resume-evidence.md",
+        },
+      });
+    }
+    // Notice edits array is NOT closed before ,"unknowns": (ends with }] instead of }]])
+    const modelOutput = JSON.stringify({
+      output: [
+        {
+          type: "message",
+          content: `{"kind":"final","edits":[{"slotId":"selected-projects","text":"Flask Pipeline | SQLite\\n- Built Flask web application with SQLite backend for run record management and VCF file validation.","claims":[{"text":"Built Flask web application with SQLite backend for run record management and VCF file validation.","citations":[${JSON.stringify(citation)}]}]},"unknowns":["Ownership of code and project"]}`,
+        },
+      ],
+    });
+    return new Response(modelOutput, {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  });
+  assert.equal(calls, 2);
+  assert.match(
+    result.sections.find((section) => section.heading === "Projects")?.text ??
+      "",
+    /Built Flask web application/,
+  );
+  assert.deepEqual(result.unknowns, ["Ownership of code and project"]);
+});
+
+test("Resume Architect resolves model citation with customized citationId against matching executed read file", async () => {
+  const executedCitation: ResumeFileCitation = {
+    citationId: "citation-1",
+    path: "resume-evidence.md",
+    startLine: 1,
+    endLine: 289,
+    contentDigest: `sha256:${"e".repeat(64)}`,
+  };
+  const session: ResumeFileReadSession = {
+    roots: [{ rootId: "root-1", label: "managed-work" }],
+    execute: async () => ({
+      ok: true,
+      type: "read",
+      rootId: "root-1",
+      path: "resume-evidence.md",
+      citation: executedCitation,
+      text: "Developed Flask-based web application with SQLite backend for run record management and VCF file validation.",
+    }),
+    validateCitation: (value) =>
+      JSON.stringify(value) === JSON.stringify(executedCitation),
+  };
+  const base = { ...requestBase, baseline, fileReadSession: session };
+  const value = {
+    ...base,
+    consentFingerprint: resumeCoachConsentFingerprint(base),
+  };
+  let calls = 0;
+  const result = await requestResumeCoach(value, async () => {
+    calls += 1;
+    if (calls === 1) {
+      return native({
+        kind: "tool",
+        action: {
+          action: "read",
+          rootId: "root-1",
+          path: "resume-evidence.md",
+        },
+      });
+    }
+    // Model emitted "citation-5" with sub-line range 10-12, but same path and hash
+    const modelCustomCitation = {
+      citationId: "citation-5",
+      path: "resume-evidence.md",
+      startLine: 10,
+      endLine: 12,
+      contentDigest: `sha256:${"e".repeat(64)}`,
+    };
+    const modelOutput = JSON.stringify({
+      output: [
+        {
+          type: "message",
+          content: JSON.stringify({
+            kind: "final",
+            edits: [
+              {
+                slotId: "projects",
+                text: "Flask Pipeline | SQLite\n- Developed Flask-based web application with SQLite backend for run record management and VCF file validation.",
+                claims: [
+                  {
+                    text: "Developed Flask-based web application with SQLite backend for run record management and VCF file validation.",
+                    citations: [modelCustomCitation],
+                  },
+                ],
+              },
+            ],
+            unknowns: ["Ownership not established"],
+          }),
+        },
+      ],
+    });
+    return new Response(modelOutput, {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  });
+  assert.equal(calls, 2);
+  assert.match(
+    result.sections.find((section) => section.heading === "Projects")?.text ??
+      "",
+    /Developed Flask-based web application/,
+  );
+  assert.deepEqual(result.unknowns, ["Ownership not established"]);
+});
+
+test("Resume Architect filters out unrequested non-work sections like education and skills from file agent output", async () => {
+  const citation: ResumeFileCitation = {
+    citationId: "citation-1",
+    path: "resume-evidence.md",
+    startLine: 1,
+    endLine: 289,
+    contentDigest: `sha256:${"c".repeat(64)}`,
+  };
+  const session: ResumeFileReadSession = {
+    roots: [{ rootId: "root-1", label: "managed-work" }],
+    execute: async () => ({
+      ok: true,
+      type: "read",
+      rootId: "root-1",
+      path: "resume-evidence.md",
+      citation,
+      text: "Built Flask web application for genomic variant analysis workflows.\nValidated VCF pipeline.",
+    }),
+    validateCitation: (value) =>
+      JSON.stringify(value) === JSON.stringify(citation),
+  };
+  const base = { ...requestBase, baseline, fileReadSession: session };
+  const value = {
+    ...base,
+    consentFingerprint: resumeCoachConsentFingerprint(base),
+  };
+  let calls = 0;
+  const result = await requestResumeCoach(value, async () => {
+    calls += 1;
+    if (calls === 1) {
+      return native({
+        kind: "tool",
+        action: {
+          action: "read",
+          rootId: "root-1",
+          path: "resume-evidence.md",
+        },
+      });
+    }
+    const modelOutput = JSON.stringify({
+      output: [
+        {
+          type: "message",
+          content: JSON.stringify({
+            kind: "final",
+            edits: [
+              {
+                slotId: "selected-projects",
+                text: "Genomic Variant Analysis Platform | Flask pipeline\n- Built Flask web application for genomic variant analysis workflows.",
+                claims: [
+                  {
+                    text: "Built Flask web application for genomic variant analysis workflows.",
+                    citations: [citation],
+                  },
+                ],
+              },
+              {
+                slotId: "education",
+                text: "University of the Philippines - BS Computer Science",
+                claims: [
+                  {
+                    text: "University of the Philippines - BS Computer Science",
+                    citations: [citation],
+                  },
+                ],
+              },
+              {
+                slotId: "skills",
+                text: "Python, Flask, SQLite",
+                claims: [
+                  {
+                    text: "Python, Flask, SQLite",
+                    citations: [citation],
+                  },
+                ],
+              },
+              {
+                slotId: "contact",
+                text: "email@example.com",
+                claims: [
+                  {
+                    text: "email@example.com",
+                    citations: [citation],
+                  },
+                ],
+              },
+            ],
+            unknowns: ["Specific production metrics"],
+          }),
+        },
+      ],
+    });
+    return new Response(modelOutput, {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  });
+  assert.equal(calls, 2);
+  assert.match(
+    result.sections.find((section) => section.heading === "Projects")?.text ??
+      "",
+    /Built Flask web application/,
+  );
+  assert.deepEqual(result.unknowns, ["Specific production metrics"]);
+});
+
 test("Resume Architect fails closed on repeated actions without retaining tool data", async () => {
   const session: ResumeFileReadSession = {
     roots: [{ rootId: "root-1", label: "managed-work" }],
@@ -826,9 +1211,160 @@ test("Resume Architect fails closed on repeated actions without retaining tool d
     });
   });
   assert.equal(calls, 2);
-  assert.match(result.claims[0]?.text ?? "", /accessible TypeScript interfaces/i);
+  assert.match(
+    result.claims[0]?.text ?? "",
+    /accessible TypeScript interfaces/i,
+  );
   assert.doesNotMatch(JSON.stringify(result), /README\.md|root-1/);
 });
+
+test("Resume Architect accepts list tool actions with extra line bounds and read actions with optional bounds", async () => {
+  const citation = {
+    citationId: "citation-bounds-1",
+    path: "README.md",
+    startLine: 1,
+    endLine: 2,
+    contentDigest: `sha256:${"e".repeat(64)}`,
+  };
+  const session: ResumeFileReadSession = {
+    roots: [{ rootId: "root-1", label: "managed-work" }],
+    execute: async (action) => {
+      if (action.action === "list") {
+        return {
+          ok: true,
+          type: "list",
+          rootId: action.rootId,
+          path: action.path ?? "",
+          entries: [{ path: "README.md", kind: "file" }],
+        };
+      }
+      return {
+        ok: true,
+        type: "read",
+        rootId: action.rootId,
+        path: action.path,
+        citation,
+        text: "Built accessible TypeScript interfaces.\nCandidate-facing workflow.",
+      };
+    },
+    validateCitation: (value) =>
+      JSON.stringify(value) === JSON.stringify(citation),
+  };
+  const base = { ...requestBase, baseline, fileReadSession: session };
+  const value = {
+    ...base,
+    consentFingerprint: resumeCoachConsentFingerprint(base),
+  };
+  let calls = 0;
+  const result = await requestResumeCoach(value, async () => {
+    calls += 1;
+    if (calls === 1) {
+      return native({
+        kind: "tool",
+        action: {
+          action: "list",
+          rootId: "root-1",
+          path: "",
+          startLine: 1,
+          endLine: 80,
+        },
+      });
+    }
+    if (calls === 2) {
+      return native({
+        kind: "tool",
+        action: {
+          action: "read",
+          rootId: "root-1",
+          path: "README.md",
+        },
+      });
+    }
+    return native({
+      kind: "final",
+      edits: [
+        {
+          slotId: "projects",
+          text: "Portfolio | Accessible interface\n- Built accessible TypeScript interfaces.",
+          claims: [
+            {
+              text: "Built accessible TypeScript interfaces.",
+              citations: [citation],
+            },
+          ],
+        },
+      ],
+      unknowns: [],
+    });
+  });
+  assert.equal(calls, 3);
+  assert.match(
+    result.sections.find((section) => section.heading === "Projects")?.text ?? "",
+    /Built accessible TypeScript interfaces/,
+  );
+});
+
+test("Resume Architect normalizes evidence parentheticals from bullet text to match claims", async () => {
+  const citation = {
+    citationId: "citation-1",
+    path: "resume-evidence.md",
+    startLine: 1,
+    endLine: 289,
+    contentDigest: `sha256:${"b".repeat(64)}`,
+  };
+  const session: ResumeFileReadSession = {
+    roots: [{ rootId: "root-1", label: "managed-work" }],
+    execute: async (action) => ({
+      ok: true,
+      type: "read",
+      rootId: action.rootId,
+      path: action.path,
+      citation,
+      text: "Built accessible TypeScript interfaces.\nCandidate-facing workflow.",
+    }),
+    validateCitation: (value) =>
+      JSON.stringify(value) === JSON.stringify(citation),
+  };
+  const base = { ...requestBase, baseline, fileReadSession: session };
+  const value = {
+    ...base,
+    consentFingerprint: resumeCoachConsentFingerprint(base),
+  };
+  let calls = 0;
+  const result = await requestResumeCoach(value, async () => {
+    calls += 1;
+    if (calls === 1) {
+      return native({
+        kind: "tool",
+        action: {
+          action: "read",
+          rootId: "root-1",
+          path: "resume-evidence.md",
+        },
+      });
+    }
+    return native({
+      kind: "final",
+      edits: [
+        {
+          slotId: "projects",
+          text: "Portfolio\n- Built accessible TypeScript interfaces (E-003, E-008)",
+          claims: [
+            {
+              text: "Built accessible TypeScript interfaces",
+              citations: [citation],
+            },
+          ],
+        },
+      ],
+      unknowns: [],
+    });
+  });
+  assert.equal(calls, 2);
+  const projectSection = result.sections.find((s) => s.heading === "Projects");
+  assert.match(projectSection?.text ?? "", /- Built accessible TypeScript interfaces$/m);
+});
+
 
 test("Resume Architect falls back when LM Studio emits an unsupported native tool response", async () => {
   const session: ResumeFileReadSession = {
@@ -851,7 +1387,10 @@ test("Resume Architect falls back when LM Studio emits an unsupported native too
         { status: 200 },
       ),
   );
-  assert.match(result.claims[0]?.text ?? "", /accessible TypeScript interfaces/i);
+  assert.match(
+    result.claims[0]?.text ?? "",
+    /accessible TypeScript interfaces/i,
+  );
 });
 
 test("Resume Architect treats Work Experience as an editable staged slot", async () => {
@@ -2391,3 +2930,144 @@ test("local-model capabilities isolate configuration fingerprints and assessment
     value.consentFingerprint,
   );
 });
+
+test("Resume Coach source leak guard recognizes Selected Projects and Work Experience headings", async () => {
+  const customBaseline = {
+    baselineId: "00000000-0000-7000-8000-000000000099",
+    baselineDigest: `sha256:${"9".repeat(64)}`,
+    sections: [
+      {
+        heading: "Work Experience",
+        tag: "experience",
+        existingDetail: "Software Engineer",
+      },
+      {
+        heading: "Selected Projects",
+        tag: "selected-projects",
+        existingDetail: "Personal projects",
+      },
+    ],
+  };
+  const base = {
+    ...requestBase,
+    baseline: customBaseline,
+    documentation: [
+      {
+        name: "BioEvidence",
+        category: "project",
+        documents: [
+          {
+            path: "resume-evidence.md",
+            text: "Built accessible TypeScript interfaces.",
+            contentDigest: `sha256:${"b".repeat(64)}`,
+          },
+        ],
+      },
+    ],
+  };
+  const value = {
+    ...base,
+    consentFingerprint: resumeCoachConsentFingerprint(base),
+  };
+  const response = {
+    schemaVersion: 1,
+    selectionEcho: value.consentFingerprint,
+    sections: [
+      {
+        heading: "Work Experience",
+        text: "- Implemented accessible web features with TypeScript and React.",
+      },
+      {
+        heading: "Selected Projects",
+        text: "- Built accessible TypeScript interfaces.",
+      },
+    ],
+    claims: [
+      {
+        text: "Built accessible TypeScript interfaces.",
+        evidenceIndexes: [0],
+      },
+    ],
+    unknowns: [],
+  };
+  const result = await requestResumeCoach(value, async () =>
+    native(response),
+  );
+  assert.match(
+    result.sections.find((s) => s.heading === "Selected Projects")?.text ?? "",
+    /accessible TypeScript interfaces/,
+  );
+});
+
+test("Resume Coach accepts unedited baseline work sections without requiring unprovided claims", async () => {
+  const customBaseline = {
+    baselineId: "00000000-0000-7000-8000-000000000099",
+    baselineDigest: `sha256:${"9".repeat(64)}`,
+    sections: [
+      {
+        heading: "Experience",
+        tag: "experience",
+        existingDetail:
+          "- Refactored React/TypeScript company dashboard into reusable components.",
+      },
+      {
+        heading: "Selected Projects",
+        tag: "selected-projects",
+        existingDetail: "- Built baseline project.",
+      },
+    ],
+  };
+  const base = {
+    ...requestBase,
+    baseline: customBaseline,
+    documentation: [
+      {
+        name: "BioEvidence",
+        category: "project",
+        documents: [
+          {
+            path: "resume-evidence.md",
+            text: "Built Flask WSGI app with Waitress.",
+            contentDigest: `sha256:${"b".repeat(64)}`,
+          },
+        ],
+      },
+    ],
+  };
+  const value = {
+    ...base,
+    consentFingerprint: resumeCoachConsentFingerprint(base),
+  };
+  const response = {
+    schemaVersion: 1,
+    selectionEcho: value.consentFingerprint,
+    sections: [
+      {
+        heading: "Experience",
+        text: "- Refactored React/TypeScript company dashboard into reusable components.",
+      },
+      {
+        heading: "Selected Projects",
+        text: "BioEvidence | Python & Flask\n- Built Flask WSGI app with Waitress for reliable Windows demo mode.",
+      },
+    ],
+    claims: [
+      {
+        text: "Built Flask WSGI app with Waitress for reliable Windows demo mode.",
+        evidenceIndexes: [0],
+      },
+    ],
+    unknowns: [],
+  };
+  const result = await requestResumeCoach(value, async () => native(response));
+  assert.equal(
+    result.sections.find((s) => s.heading === "Experience")?.text,
+    "- Refactored React/TypeScript company dashboard into reusable components.",
+  );
+  assert.match(
+    result.sections.find((s) => s.heading === "Selected Projects")?.text ?? "",
+    /accessible TypeScript interfaces/,
+  );
+});
+
+

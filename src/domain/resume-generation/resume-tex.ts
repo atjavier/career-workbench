@@ -3,6 +3,9 @@ import { join } from "node:path";
 
 import type { MaterialDraftView } from "@/domain/resume-generation/material-draft-commands";
 import {
+  cleanDateString,
+  cleanOrganization,
+  compactProjectHeader,
   resumeDocumentModel,
   type ResumeDocumentModel,
   type ResumeEntry,
@@ -89,12 +92,36 @@ function bullets(item: ResumeEntry): string {
 }
 
 function experienceEntry(item: ResumeEntry): string {
-  const organization = item.detail ?? item.meta ?? "";
-  return `\\resumeexperience{${latex(item.title)}}{${latex(item.date ?? "")}}{${latex(organization)}}${bullets(item)}`;
+  let organization = "";
+  const detail = cleanOrganization(item.detail ?? "");
+  const meta = cleanOrganization(item.meta ?? "");
+  if (detail && meta) {
+    organization = `${latex(detail)}\\hfill ${latex(meta)}`;
+  } else {
+    const raw = detail || meta;
+    if (raw.includes(" | ")) {
+      const parts = raw.split(" | ").map((p) => p.trim()).filter(Boolean);
+      if (parts.length >= 2) {
+        organization = `${latex(parts[0]!)}\\hfill ${latex(parts.slice(1).join(" | "))}`;
+      } else {
+        organization = latex(raw);
+      }
+    } else {
+      organization = latex(raw);
+    }
+  }
+  const date = cleanDateString(item.date ?? "");
+  return `\\resumeexperience{${latex(item.title)}}{${latex(date)}}{${organization}}${bullets(item)}`;
 }
 
 function projectEntry(item: ResumeEntry): string {
-  return `\\resumeproject{${latex(item.title)}}{${latex(item.detail ?? item.meta ?? "")}}{${latex(item.date ?? "")}}${bullets(item)}`;
+  const tech = item.detail ?? (item.meta && !item.detail ? item.meta : "");
+  const descText = item.detail && item.meta ? item.meta : undefined;
+  const desc = descText
+    ? `\n\\noindent\\hspace*{16pt}\\textit{${latex(descText)}}\\par\\vspace{2pt}`
+    : "";
+  const date = cleanDateString(item.date ?? "");
+  return `\\resumeproject{${latex(item.title)}}{${latex(tech)}}{${latex(date)}}${desc}${bullets(item)}`;
 }
 
 function entriesBody(
@@ -114,28 +141,59 @@ function educationBody(value: string | undefined): string {
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
-  const parts = (lines.shift() ?? "")
-    .split("|")
-    .map((part) => part.trim())
-    .filter(Boolean);
-  const schoolIndex = parts.findIndex((part) =>
-    /\b(?:university|college|institute|school)\b/i.test(part),
-  );
-  const programIndex = parts.findIndex((part) =>
-    /\b(?:b\.?s\.?|bachelor|master|degree|computer science)\b/i.test(part),
-  );
-  const dateIndex = parts.findIndex((part) => /\b(?:19|20)\d{2}\b/.test(part));
-  const school = parts[schoolIndex >= 0 ? schoolIndex : 0] ?? "Saved education";
-  const program =
-    parts[programIndex >= 0 ? programIndex : schoolIndex === 0 ? 1 : 0] ?? "";
-  const date = parts[dateIndex] ?? "";
-  const honours = [
-    ...parts.filter(
-      (_, index) =>
-        index !== schoolIndex && index !== programIndex && index !== dateIndex,
-    ),
-    ...lines,
-  ].join(" | ");
+  const rawHeader = lines.shift() ?? "";
+  const parts = rawHeader.includes("|")
+    ? rawHeader.split("|").map((part) => part.trim()).filter(Boolean)
+    : rawHeader
+        .split(
+          /\s*[-–—]\s*|\s*,\s*(?=(?:BS|MS|BA|Master|Bachelor|Doctor|Degree|Computer Science|\d{4})\b)/i,
+        )
+        .map((part) => part.trim())
+        .filter(Boolean);
+
+  let school = "";
+  let program = "";
+  let date = "";
+  const remainingParts: string[] = [];
+
+  const schoolRegex =
+    /\b(?:university|college|institute|school|polytechnic|academy)\b/i;
+  const programRegex =
+    /\b(?:b\.?s\.?|b\.?a\.?|m\.?s\.?|bachelor|master|degree|computer science|engineering)\b/i;
+  const dateRegex =
+    /\b(?:19|20)\d{2}(?:\s*[-–—]\s*(?:(?:19|20)\d{2}|present))?\b/i;
+
+  for (const part of parts) {
+    if (!school && schoolRegex.test(part)) {
+      school = part;
+    } else if (!program && programRegex.test(part)) {
+      program = part;
+    } else if (!date && dateRegex.test(part)) {
+      date = part;
+    } else {
+      remainingParts.push(part);
+    }
+  }
+
+  if (!school && parts.length > 0) {
+    school = parts[0]!;
+  }
+  if (!program && remainingParts.length > 0) {
+    program = remainingParts.shift()!;
+  }
+  if (
+    !date &&
+    remainingParts.length > 0 &&
+    /\b(?:19|20)\d{2}\b/.test(remainingParts[0]!)
+  ) {
+    date = remainingParts.shift()!;
+  }
+
+  const rawHonours = [
+    ...remainingParts,
+    ...lines.map((line) => line.replace(/^[-*•]\s*/, "").trim()),
+  ].filter(Boolean);
+  const honours = rawHonours.join(" | ");
   return `\\resumeeducation{${latex(school)}}{${latex(program)}}{${latex(date)}}${honours ? `\n\\begin{tightitemize}\n  \\item ${latex(honours)}\n\\end{tightitemize}` : ""}`;
 }
 
@@ -143,7 +201,9 @@ function skillsBody(value: string | undefined): string {
   if (!value)
     return "Skills are listed only when directly supported by documented work.";
   const lines = value
-    .split(/\r?\n|(?=\b(?:Languages|Frameworks|Data\s*&\s*APIs|Tools):)/i)
+    .split(
+      /\r?\n|(?=\b(?:Languages|Frameworks|Data(?:\s*&|\s+and)?\s*APIs|Tools):)/i,
+    )
     .map((line) => line.trim())
     .filter(Boolean);
   const rows = lines
@@ -161,7 +221,7 @@ function skillsBody(value: string | undefined): string {
 
 function renderHeader(model: ResumeDocumentModel): string {
   const lines = [
-    `{\\fontsize{22}{25}\\selectfont ${latex(model.name)}}\\\\[-2pt]`,
+    `{\\fontsize{22}{25}\\selectfont\\textbf{${latex(model.name)}}}\\\\[-2pt]`,
   ];
   if (model.contact) lines.push(`${latex(model.contact)}\\\\`);
   return lines.join("\n");
@@ -188,28 +248,44 @@ function renderedDraftSections(
   return draft.sections
     .filter((item) => item.text.trim())
     .map(({ heading, text }) => {
-      if (
-        /(?:experience|employment|\bwork\b)/i.test(heading) &&
-        model.experienceEntries.length
-      )
+      if (/contact/i.test(heading)) return "";
+      if (/(?:experience|employment|\bwork\b)/i.test(heading)) {
+        if (
+          !model.experienceEntries.length ||
+          /^no (?:experience|employment|work) entries/i.test(text.trim())
+        ) {
+          return "";
+        }
         return section(
           heading,
           entriesBody(model.experienceEntries, "experience"),
         );
+      }
       if (/education/i.test(heading))
         return section(heading, educationBody(model.education));
-      if (/project/i.test(heading) && model.projectEntries.length)
-        return section(heading, entriesBody(model.projectEntries, "project"));
+      if (/project/i.test(heading)) {
+        if (
+          !model.projectEntries.length ||
+          /^no project entries/i.test(text.trim())
+        ) {
+          return "";
+        }
+        return section(
+          /selected/i.test(heading) ? "Projects" : heading,
+          entriesBody(model.projectEntries, "project"),
+        );
+      }
       if (/(?:technical skills|skills|technologies)/i.test(heading))
-        return section(heading, skillsBody(model.skills));
+        return section("Technical Skills", skillsBody(model.skills));
       return section(heading, genericSectionBody(text));
     })
+    .filter(Boolean)
     .join("\n");
 }
 
 /**
  * Produce the canonical TeX representation of a generated base resume.
- * The approved Oboda v22 layout is the immutable visual contract; this source
+ * The approved canonical Resume.pdf layout is the immutable visual contract; this source
  * is intentionally an authoring/export representation and is safe to compile
  * only with a fixed local TeX toolchain chosen by the host application.
  */
