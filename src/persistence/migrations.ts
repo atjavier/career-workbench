@@ -307,4 +307,25 @@ export const migrations = [
       "utf8",
     ),
   },
+  {
+    id: "0044_editable_tex_drafts",
+    sql: readFileSync(
+      join(migrationDirectory, "0044_editable_tex_drafts.sql"),
+      "utf8",
+    ),
+  },
+  {
+    id: "0045_local_model_context_limits",
+    sql: readFileSync(
+      join(migrationDirectory, "0045_local_model_context_limits.sql"),
+      "utf8",
+    ),
+  },
+  {
+    id: "0046_editable_tex_hardening",
+    sql: readFileSync(
+      join(migrationDirectory, "0046_editable_tex_hardening.sql"),
+      "utf8",
+    ),
+  },
 ] as const;

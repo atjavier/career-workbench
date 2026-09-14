@@ -52,6 +52,9 @@ export function applyMigrations(database: DatabaseSync): void {
           "0041_resume_interview_stream_attempts",
           "0042_resume_interview_stream_reservations",
           "0043_resume_interview_stream_request_uuid_compat",
+          "0044_editable_tex_drafts",
+          "0045_local_model_context_limits",
+          "0046_editable_tex_hardening",
         ].includes(migration.id)
       ) {
         // The legacy 0028 compatibility fixture intentionally contains only
