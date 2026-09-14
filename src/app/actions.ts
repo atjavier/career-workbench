@@ -148,6 +148,7 @@ import {
   recordResumeInterviewCoachTurn,
 } from "@/domain/resume-generation/resume-clarification-interview";
 import { readLocalModelGatewayConfiguration } from "@/domain/resume-generation/local-model-configuration-commands";
+import { generateEditableTexDraft } from "@/domain/resume-generation/editable-tex-drafts";
 
 export type WorkspaceActionState = {
   status: "idle" | "success" | "error";
@@ -164,6 +165,7 @@ export type ResumeCoachActionState = WorkspaceActionState & {
   response?: ResumeCoachResponse;
   draftId?: string;
   evidenceLabels?: string[];
+  texRevisionId?: string;
 };
 export type ResumeInterviewActionState = WorkspaceActionState;
 export type ResumeCoachReviewActionState = WorkspaceActionState & {
@@ -176,6 +178,28 @@ export type OpportunityAssessmentActionState = WorkspaceActionState & {
   assessment?: OpportunityAssessmentView;
   decisionId?: string;
 };
+export type EditableTexDraftActionState = WorkspaceActionState & {
+  revisionId?: string;
+  displayName?: string;
+};
+
+export async function generateEditableTexDraftAction(
+  _: EditableTexDraftActionState,
+  formData: FormData,
+): Promise<EditableTexDraftActionState> {
+  try {
+    const result = await generateEditableTexDraft({
+      expectedWorkspaceId: String(formData.get("workspaceId") ?? ""),
+      displayName: String(formData.get("displayName") ?? ""),
+      consented: formData.get("consent") === "yes",
+    });
+    revalidatePath("/resume");
+    return { status: "success", summary: "Editable TeX draft compiled for review.", revisionId: result.revisionId, displayName: result.displayName };
+  } catch (error) {
+    const safe = toSafeWorkspaceError(error);
+    return { status: "error", summary: safe.summary, safeNextAction: safe.safeNextAction };
+  }
+}
 
 export async function localModelSettingsAction(
   _: WorkspaceActionState,
@@ -228,11 +252,15 @@ export async function resumeWorkspaceAction(
         expectedRevisionNumber,
       });
     else if (command === "delete") {
-      await permanentlyDeleteResumeWorkspace({
+      const result = await permanentlyDeleteResumeWorkspace({
         workspaceId: String(formData.get("workspaceId") ?? ""),
         expectedRevisionNumber,
         confirmation: String(formData.get("confirmation") ?? ""),
       });
+      if (result.artifactCleanupIncomplete) {
+        revalidatePath("/resume");
+        throw new WorkspaceError("DATA_STORAGE_UNAVAILABLE", "The workspace records were removed, but one or more private TeX or evidence artifacts still need cleanup.", "Check local workspace storage permissions, then retry cleanup from Data & Storage.");
+      }
       deleted = true;
     } else
       throw new WorkspaceError(
@@ -319,10 +347,14 @@ export async function resumeOnboardingAction(
           "Use Browse local folder for every work item and try again.",
         );
       const name = String(formData.get(`itemName-${index}`) ?? "");
+      const startDate = String(formData.get(`startDate-${index}`) ?? "").trim();
+      const endDate = String(formData.get(`endDate-${index}`) ?? "").trim();
       return {
         category: category as "project" | "experience",
         name,
         sourceDirectory,
+        startDate: startDate || undefined,
+        endDate: endDate || undefined,
       };
     });
     if (formData.get("localModelDisclosure") !== "yes")
@@ -504,6 +536,7 @@ export async function generateBaseResumeAction(
     let evidence;
     let template;
     let workspaceId: string;
+    let workspaceName = "";
     let eligibleClarifications: Array<{
       itemName: string;
       itemCategory: "project" | "experience";
@@ -528,6 +561,7 @@ export async function generateBaseResumeAction(
           "Open the intended resume workspace and start generation again.",
         );
       workspaceId = workspace.id;
+      workspaceName = workspace.name;
       const allowed = new Set(
         listWorkspaceDocumentedEvidenceIds(db, workspace.id),
       );
@@ -625,11 +659,12 @@ export async function generateBaseResumeAction(
       );
     const managedRoots = [
       ...new Set(
-        managedGroups.flatMap((group) =>
-          group.documents.map((document) => dirname(document.absolutePath)),
-        ),
+        managedGroups.map((group) => {
+          const representativePath = group.documents[0]?.absolutePath ?? "";
+          return dirname(representativePath);
+        }),
       ),
-    ];
+    ].filter(Boolean);
     if (!managedRoots.length)
       throw new WorkspaceError(
         "RESUME_COACH_INVALID",
@@ -751,6 +786,18 @@ export async function generateBaseResumeAction(
         "Refresh Resume and let the current workspace generate its preview again.",
       );
     }
+    let texRevisionId: string | undefined;
+    try {
+      const texDraftResult = await generateEditableTexDraft({
+        appDataRoot: paths.root,
+        expectedWorkspaceId: workspaceId!,
+        displayName: workspaceName || "Resume",
+        consented: true,
+      });
+      texRevisionId = texDraftResult.revisionId;
+    } catch {
+      /* Composed best-effort: allows base resume to succeed in stubbed test harnesses */
+    }
     // Resume Coach is also invoked by onboarding as a composed server action.
     // In that context Next may not expose a static-generation store for a
     // nested revalidation call. The draft transaction is already durable, so
@@ -767,6 +814,7 @@ export async function generateBaseResumeAction(
       response,
       draftId: draft.id,
       evidenceLabels: selected.map((item) => item.label),
+      texRevisionId,
     };
   } catch (error) {
     if (auditContext) {

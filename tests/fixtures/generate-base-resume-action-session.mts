@@ -128,6 +128,15 @@ mock.module("@/domain/resume-generation/resume-coach-commands", { exports: { per
 mock.module("next/cache", { exports: { revalidatePath: () => undefined } });
 mock.module("next/navigation", { exports: { redirect: () => undefined } });
 mock.module("next/server", { exports: { after: () => undefined } });
+mock.module("@/domain/resume-generation/editable-tex-drafts", {
+  exports: {
+    generateEditableTexDraft: async () => ({
+      draftId: "tex-draft-1",
+      revisionId: "tex-revision-1",
+      displayName: "Platform role",
+    }),
+  },
+});
 
 const { generateBaseResumeAction } = await import("../../src/app/actions.ts");
 const formData = new FormData();

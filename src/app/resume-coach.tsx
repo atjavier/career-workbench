@@ -27,6 +27,7 @@ export function ResumeCoach({
   generationNeeded = false,
   generationMessage,
   workspaceId,
+  latestTexRevisionId,
 }: {
   available: boolean;
   unavailableReason?: string;
@@ -35,6 +36,7 @@ export function ResumeCoach({
   generationNeeded?: boolean;
   generationMessage?: string;
   workspaceId?: string;
+  latestTexRevisionId?: string;
 }) {
   const router = useRouter();
   const [handoffState, handoffAction, handoffPending] = useActionState(materialDraftHandoffAction, initialHandoff);
@@ -42,6 +44,7 @@ export function ResumeCoach({
   const [reviewState, reviewAction, reviewPending] = useActionState(resumeCoachReviewAction, initialReview);
   const [dismissedDraftId, setDismissedDraftId] = useState<string | undefined>();
   const developmentMode = process.env.NODE_ENV === "development";
+  const effectiveTexRevisionId = revisionState.texRevisionId ?? latestTexRevisionId;
 
   useEffect(() => {
     if (!generationMessage) return;
@@ -89,7 +92,7 @@ export function ResumeCoach({
     );
   }
 
-  const activeDraftId = initialDraft?.id;
+  const activeDraftId = revisionState.draftId ?? initialDraft?.id;
   const proposalVisible = Boolean(activeDraftId && activeDraftId !== dismissedDraftId);
   const isGenerating = revisionPending || (Boolean(generationMessage) && !generationMessage?.startsWith("Your resume has not been generated"));
 
@@ -213,6 +216,23 @@ export function ResumeCoach({
                   </button>
                 </form>
               )}
+              {effectiveTexRevisionId ? (
+                <div className="tex-draft-ready-links">
+                  <Link
+                    href={`/api/tex-drafts/${effectiveTexRevisionId}/pdf`}
+                    target="_blank"
+                    className="affirmative-action"
+                  >
+                    Review PDF
+                  </Link>
+                  <a
+                    href={`/api/tex-drafts/${effectiveTexRevisionId}/tex`}
+                    className="affirmative-action"
+                  >
+                    Download TeX
+                  </a>
+                </div>
+              ) : null}
               <form action={revisionAction} aria-busy={revisionPending} className="revision-request-form">
                 <input type="hidden" name="generationCommand" value="revision" />
                 <input type="hidden" name="workspaceId" value={workspaceId ?? ""} />

@@ -624,7 +624,8 @@ test("only one independently finalized clarification persists per pending task",
             "SELECT status FROM resume_interview_stream_reservations WHERE workspace_id = ? AND task_id = ? ORDER BY stream_request_id",
           )
           .all(workspace.workspace.id, taskId)
-          .map((row) => row.status),
+          .map((row) => row.status)
+          .sort(),
         ["completed", "started"],
       );
     } finally {

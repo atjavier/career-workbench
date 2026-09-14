@@ -25,6 +25,9 @@ const restoreDeletionGuards = (db: ReturnType<typeof openDatabase>) => {
   db.exec("CREATE TRIGGER IF NOT EXISTS evidence_records_immutable_delete BEFORE DELETE ON evidence_records BEGIN SELECT RAISE(ABORT, 'evidence records are immutable'); END;");
   db.exec("CREATE TRIGGER IF NOT EXISTS evidence_revisions_immutable_delete BEFORE DELETE ON evidence_revisions BEGIN SELECT RAISE(ABORT, 'evidence revisions are immutable'); END;");
   db.exec("CREATE TRIGGER IF NOT EXISTS evidence_documenter_decisions_immutable_delete BEFORE DELETE ON evidence_documenter_proposal_decisions BEGIN SELECT RAISE(ABORT, 'documenter proposal decisions are immutable'); END;");
+  db.exec("CREATE TRIGGER IF NOT EXISTS tex_drafts_immutable_delete BEFORE DELETE ON tex_drafts BEGIN SELECT RAISE(ABORT, 'tex drafts are immutable'); END;");
+  db.exec("CREATE TRIGGER IF NOT EXISTS tex_draft_revisions_immutable_delete BEFORE DELETE ON tex_draft_revisions BEGIN SELECT RAISE(ABORT, 'tex draft revisions are immutable'); END;");
+  db.exec("CREATE TRIGGER IF NOT EXISTS tex_draft_revision_artifacts_immutable_delete BEFORE DELETE ON tex_draft_revision_artifacts BEGIN SELECT RAISE(ABORT, 'tex draft artifact snapshots are immutable'); END;");
 };
 const nameOf = (value: string) => {
   const name = value.trim().replace(/\s+/g, " ");
@@ -34,7 +37,21 @@ const nameOf = (value: string) => {
 function transaction<T>(root: string, work: (db: ReturnType<typeof openDatabase>) => T): T { const db = openDatabase(`${root}/workspace.sqlite`); try { applyMigrations(db); db.exec("BEGIN IMMEDIATE"); try { const value = work(db); db.exec("COMMIT"); return value; } catch (error) { db.exec("ROLLBACK"); throw error; } } finally { db.close(); } }
 function managedEvidenceDirectory(libraryPath: string): { category: "projects" | "experiences"; name: string } | undefined { const match = /^resume-evidence\/(projects|experiences)\/([A-Za-z0-9._-]+)\//.exec(libraryPath); return match ? { category: match[1] as "projects" | "experiences", name: match[2] } : undefined; }
 function inside(root: string, target: string): boolean { const path = relative(root, target); return Boolean(path) && path !== ".." && !path.startsWith(`..${sep}`) && !path.includes(`${sep}..${sep}`); }
-async function removeManagedDirectory(root: string, target: string): Promise<boolean> { if (!inside(root, target)) return false; const stat = await lstat(target).catch(() => undefined); if (!stat) return true; if (stat.isSymbolicLink() || !stat.isDirectory()) return false; await rm(target, { recursive: true, force: true }); return true; }
+async function managedDirectoryAncestorsAreSafe(root: string, target: string): Promise<boolean> {
+  const resolvedRoot = resolve(root); const resolvedTarget = resolve(target);
+  if (!inside(resolvedRoot, resolvedTarget)) return false;
+  let current = resolvedRoot;
+  const rootStat = await lstat(current).catch(() => undefined);
+  if (!rootStat?.isDirectory() || rootStat.isSymbolicLink()) return false;
+  for (const part of relative(resolvedRoot, resolvedTarget).split(/[\\/]/).filter(Boolean)) {
+    current = join(current, part);
+    const item = await lstat(current).catch(() => undefined);
+    if (!item) return true;
+    if (!item.isDirectory() || item.isSymbolicLink()) return false;
+  }
+  return true;
+}
+async function removeManagedDirectory(root: string, target: string): Promise<boolean> { if (!(await managedDirectoryAncestorsAreSafe(root, target))) return false; const stat = await lstat(target).catch(() => undefined); if (!stat) return true; if (stat.isSymbolicLink() || !stat.isDirectory()) return false; await rm(target, { recursive: true, force: true }); return true; }
 
 export async function readResumeWorkspaceState(input: Options = {}): Promise<{ workspaces: Array<ResumeWorkspace & { journey?: ResumeWorkspaceJourney }>; activeWorkspace?: ResumeWorkspace & { journey?: ResumeWorkspaceJourney }; revisionNumber: number }> {
   const paths = await resolveAppDataPaths(input.appDataRoot);
@@ -59,9 +76,16 @@ export async function permanentlyDeleteResumeWorkspace(input: Options & { worksp
     const active = readActiveResumeWorkspace(db); const exists = db.prepare("SELECT 1 FROM resume_workspaces WHERE id = ?").get(input.workspaceId);
     if (!exists) throw new WorkspaceError("RESUME_WORKSPACE_NOT_FOUND", "That resume workspace has already been deleted.", "Refresh Resume and choose an available workspace.");
     if (active.revisionNumber !== input.expectedRevisionNumber) throw new WorkspaceError("RESUME_WORKSPACE_STALE", "Your resume workspace changed before deletion.", "Refresh Resume and confirm the workspace again.");
-    const now = new Date().toISOString(); const draftIds = (db.prepare("SELECT draft_id AS id FROM resume_workspace_drafts WHERE workspace_id = ?").all(input.workspaceId) as Array<{ id: string }>).map((row) => row.id); const evidenceIds = (db.prepare("SELECT evidence_id AS id FROM resume_workspace_evidence WHERE workspace_id = ?").all(input.workspaceId) as Array<{ id: string }>).map((row) => row.id); const importIds = (db.prepare("SELECT import_id AS id FROM resume_workspace_imports WHERE workspace_id = ?").all(input.workspaceId) as Array<{ id: string }>).map((row) => row.id); const profileIds = (db.prepare("SELECT profile_id AS id FROM resume_workspace_profiles WHERE workspace_id = ?").all(input.workspaceId) as Array<{ id: string }>).map((row) => row.id); const directories = [...new Set(importIds.flatMap((id) => (db.prepare("SELECT library_path FROM evidence_library_documents WHERE import_id = ?").all(id) as Array<{ library_path: string }>).map((row) => managedEvidenceDirectory(row.library_path)).filter((item): item is { category: "projects" | "experiences"; name: string } => Boolean(item)).map((item) => `${item.category}/${item.name}`)))];
+    const now = new Date().toISOString(); const texDraftIds = (db.prepare("SELECT id FROM tex_drafts WHERE workspace_id = ?").all(input.workspaceId) as Array<{ id: string }>).map((row) => row.id);
+    const draftIds = (db.prepare(`
+      SELECT DISTINCT id FROM material_drafts
+      WHERE id IN (SELECT draft_id FROM resume_workspace_drafts WHERE workspace_id = ?)
+         OR profile_revision_id IN (SELECT id FROM candidate_profile_revisions WHERE profile_id IN (SELECT profile_id FROM resume_workspace_profiles WHERE workspace_id = ?))
+         OR id IN (SELECT draft_id FROM material_draft_evidence WHERE evidence_revision_id IN (SELECT id FROM evidence_revisions WHERE evidence_id IN (SELECT evidence_id FROM resume_workspace_evidence WHERE workspace_id = ?)))
+    `).all(input.workspaceId, input.workspaceId, input.workspaceId) as Array<{ id: string }>).map((row) => row.id);
+    const evidenceIds = (db.prepare("SELECT evidence_id AS id FROM resume_workspace_evidence WHERE workspace_id = ?").all(input.workspaceId) as Array<{ id: string }>).map((row) => row.id); const importIds = (db.prepare("SELECT import_id AS id FROM resume_workspace_imports WHERE workspace_id = ?").all(input.workspaceId) as Array<{ id: string }>).map((row) => row.id); const profileIds = (db.prepare("SELECT profile_id AS id FROM resume_workspace_profiles WHERE workspace_id = ?").all(input.workspaceId) as Array<{ id: string }>).map((row) => row.id); const directories = [...new Set(importIds.flatMap((id) => (db.prepare("SELECT library_path FROM evidence_library_documents WHERE import_id = ?").all(id) as Array<{ library_path: string }>).map((row) => managedEvidenceDirectory(row.library_path)).filter((item): item is { category: "projects" | "experiences"; name: string } => Boolean(item)).map((item) => `${item.category}/${item.name}`)))];
     // The tables below are all private workspace payload, never audit payload.
-    for (const trigger of ["material_claim_support_immutable_delete", "material_draft_claims_immutable_delete", "material_draft_evidence_immutable_delete", "material_draft_handoffs_immutable_delete", "material_drafts_immutable_delete", "candidate_profile_revisions_immutable_delete", "candidate_profiles_immutable_delete", "evidence_library_imports_immutable_delete", "evidence_library_documents_immutable_delete", "evidence_library_candidates_immutable_delete", "evidence_records_immutable_delete", "evidence_revisions_immutable_delete", "evidence_documenter_decisions_immutable_delete"]) db.exec(`DROP TRIGGER IF EXISTS ${trigger}`);
+    for (const trigger of ["material_claim_support_immutable_delete", "material_draft_claims_immutable_delete", "material_draft_evidence_immutable_delete", "material_draft_handoffs_immutable_delete", "material_drafts_immutable_delete", "candidate_profile_revisions_immutable_delete", "candidate_profiles_immutable_delete", "evidence_library_imports_immutable_delete", "evidence_library_documents_immutable_delete", "evidence_library_candidates_immutable_delete", "evidence_records_immutable_delete", "evidence_revisions_immutable_delete", "evidence_documenter_decisions_immutable_delete", "tex_drafts_immutable_delete", "tex_draft_revisions_immutable_delete", "tex_draft_revision_artifacts_immutable_delete"]) db.exec(`DROP TRIGGER IF EXISTS ${trigger}`);
     // Remove ownership joins before deleting the rows they reference. SQLite
     // correctly prevents deleting a private record while its workspace link is
     // still present; the previous order turned that constraint into a generic
@@ -70,12 +94,13 @@ export async function permanentlyDeleteResumeWorkspace(input: Options & { worksp
     // workspaces can still have the global generation pointer set.
     db.prepare("UPDATE resume_workspaces SET active_profile_revision_id = NULL WHERE id = ?").run(input.workspaceId);
     for (const id of profileIds) db.prepare("UPDATE resume_generation_state SET active_profile_revision_id = NULL, revision_number = revision_number + 1, updated_at = ? WHERE active_profile_revision_id IN (SELECT id FROM candidate_profile_revisions WHERE profile_id = ?)").run(now, id);
+    db.prepare("DELETE FROM tex_draft_revision_artifacts WHERE revision_id IN (SELECT id FROM tex_draft_revisions WHERE draft_id IN (SELECT id FROM tex_drafts WHERE workspace_id = ?))").run(input.workspaceId); db.prepare("DELETE FROM tex_draft_revisions WHERE draft_id IN (SELECT id FROM tex_drafts WHERE workspace_id = ?)").run(input.workspaceId); db.prepare("DELETE FROM tex_drafts WHERE workspace_id = ?").run(input.workspaceId);
     db.prepare("DELETE FROM resume_workspace_drafts WHERE workspace_id = ?").run(input.workspaceId);
     db.prepare("DELETE FROM resume_workspace_evidence WHERE workspace_id = ?").run(input.workspaceId);
     db.prepare("DELETE FROM resume_workspace_imports WHERE workspace_id = ?").run(input.workspaceId);
     db.prepare("DELETE FROM resume_workspace_profiles WHERE workspace_id = ?").run(input.workspaceId);
     for (const id of draftIds) { db.prepare("DELETE FROM material_claim_support WHERE claim_id IN (SELECT id FROM material_draft_claims WHERE draft_id = ?)").run(id); db.prepare("DELETE FROM material_draft_claims WHERE draft_id = ?").run(id); db.prepare("DELETE FROM material_draft_evidence WHERE draft_id = ?").run(id); db.prepare("DELETE FROM material_draft_handoffs WHERE draft_id = ?").run(id); db.prepare("DELETE FROM material_drafts WHERE id = ?").run(id); }
-    for (const id of evidenceIds) { db.prepare("DELETE FROM evidence_library_candidates WHERE evidence_revision_id IN (SELECT id FROM evidence_revisions WHERE evidence_id = ?)").run(id); db.prepare("DELETE FROM evidence_documenter_proposal_decisions WHERE evidence_revision_id IN (SELECT id FROM evidence_revisions WHERE evidence_id = ?)").run(id); db.prepare("DELETE FROM evidence_revisions WHERE evidence_id = ?").run(id); db.prepare("DELETE FROM evidence_records WHERE id = ?").run(id); }
+    for (const id of evidenceIds) { db.prepare("DELETE FROM material_claim_support WHERE evidence_revision_id IN (SELECT id FROM evidence_revisions WHERE evidence_id = ?)").run(id); db.prepare("DELETE FROM material_draft_evidence WHERE evidence_revision_id IN (SELECT id FROM evidence_revisions WHERE evidence_id = ?)").run(id); db.prepare("DELETE FROM evidence_library_candidates WHERE evidence_revision_id IN (SELECT id FROM evidence_revisions WHERE evidence_id = ?)").run(id); db.prepare("DELETE FROM evidence_documenter_proposal_decisions WHERE evidence_revision_id IN (SELECT id FROM evidence_revisions WHERE evidence_id = ?)").run(id); db.prepare("DELETE FROM evidence_revisions WHERE evidence_id = ?").run(id); db.prepare("DELETE FROM evidence_records WHERE id = ?").run(id); }
     for (const id of importIds) { db.prepare("DELETE FROM evidence_library_candidates WHERE document_id IN (SELECT id FROM evidence_library_documents WHERE import_id = ?)").run(id); db.prepare("DELETE FROM evidence_library_documents WHERE import_id = ?").run(id); db.prepare("DELETE FROM evidence_library_imports WHERE id = ?").run(id); }
     for (const id of profileIds) { db.prepare("DELETE FROM candidate_profile_revisions WHERE profile_id = ?").run(id); db.prepare("DELETE FROM candidate_profiles WHERE id = ?").run(id); }
     const next = active.workspace?.id === input.workspaceId ? db.prepare("SELECT id FROM resume_workspaces WHERE id <> ? ORDER BY updated_at DESC, id DESC LIMIT 1").get(input.workspaceId) as { id: string } | undefined : active.workspace;
@@ -84,12 +109,13 @@ export async function permanentlyDeleteResumeWorkspace(input: Options & { worksp
     restoreDeletionGuards(db);
     db.prepare("INSERT INTO resume_workspace_deletion_audit (id, workspace_id, occurred_at, outcome, reclaimed_bytes) VALUES (?, ?, ?, 'success', 0)").run(createUuidV7(), input.workspaceId, now);
     appendAuditEvent(db, createAuditEvent({ actor: "local-os-user", action: "resume.workspace_deleted", outcome: "success", entityId: input.workspaceId }));
-    return directories;
+    return { directories, texDraftIds };
   });
   const libraryRoot = evidenceLibraryRoot(input.workspaceRoot); let artifactCleanupIncomplete = false;
   const workspacePacketRoot = resolve(libraryRoot, "workspaces", input.workspaceId);
   if (!(await removeManagedDirectory(libraryRoot, workspacePacketRoot).catch(() => false))) artifactCleanupIncomplete = true;
-  await Promise.all(managedDirectories.map(async (directory) => { try { if (!(await removeManagedDirectory(libraryRoot, resolve(libraryRoot, directory)))) artifactCleanupIncomplete = true; } catch { artifactCleanupIncomplete = true; } }));
+  await Promise.all(managedDirectories.directories.map(async (directory) => { try { if (!(await removeManagedDirectory(libraryRoot, resolve(libraryRoot, directory)))) artifactCleanupIncomplete = true; } catch { artifactCleanupIncomplete = true; } }));
+  await Promise.all(managedDirectories.texDraftIds.map(async (id) => { try { if (!(await removeManagedDirectory(resolve(paths.root, "tex-drafts"), resolve(paths.root, "tex-drafts", id)))) artifactCleanupIncomplete = true; } catch { artifactCleanupIncomplete = true; } }));
   const db = openDatabase(databasePath); try { db.exec("VACUUM"); } finally { db.close(); }
   const after = await (await import("node:fs/promises")).stat(databasePath).then((item) => item.size).catch(() => 0); const reclaimedBytes = Math.max(0, await before - after); const auditDb = openDatabase(databasePath); try { auditDb.prepare("UPDATE resume_workspace_deletion_audit SET reclaimed_bytes = ? WHERE workspace_id = ? AND outcome = 'success'").run(reclaimedBytes, input.workspaceId); } finally { auditDb.close(); } return { reclaimedBytes, artifactCleanupIncomplete };
 }

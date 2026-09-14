@@ -37,18 +37,54 @@ public static class ModernFolderPicker {
   private const uint FOS_FORCEFILESYSTEM = 0x00000040;
   private const uint SIGDN_FILESYSPATH = 0x80058000;
   public static string Pick() {
-    Type dialogType = Type.GetTypeFromCLSID(new Guid("DC1C5A9C-E88A-4DDE-A5A1-60F82A20AEF7"), true);
-    IFileDialog dialog = (IFileDialog)Activator.CreateInstance(dialogType);
-    uint options; dialog.GetOptions(out options); dialog.SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM);
-    dialog.SetTitle("Choose a local Project or Experience folder"); dialog.SetOkButtonLabel("Select folder");
-    IntPtr owner = GetForegroundWindow(); if (owner == IntPtr.Zero) owner = GetConsoleWindow();
-    int result = dialog.Show(owner); if (result != 0) return "";
-    IShellItem item; dialog.GetResult(out item); IntPtr path; item.GetDisplayName(SIGDN_FILESYSPATH, out path);
-    try { return Marshal.PtrToStringUni(path) ?? ""; } finally { if (path != IntPtr.Zero) CoTaskMemFree(path); }
+    string selected = "";
+    IFileDialog dialog = null;
+    IShellItem item = null;
+    try {
+      Type dialogType = Type.GetTypeFromCLSID(new Guid("DC1C5A9C-E88A-4DDE-A5A1-60F82A20AEF7"), true);
+      dialog = (IFileDialog)Activator.CreateInstance(dialogType);
+      uint options;
+      dialog.GetOptions(out options);
+      dialog.SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM);
+      dialog.SetTitle("Choose a local Project or Experience folder");
+      dialog.SetOkButtonLabel("Select folder");
+      IntPtr owner = GetForegroundWindow();
+      if (owner == IntPtr.Zero) owner = GetConsoleWindow();
+      int result = dialog.Show(owner);
+      if (result == 0) {
+        dialog.GetResult(out item);
+        if (item != null) {
+          IntPtr path = IntPtr.Zero;
+          item.GetDisplayName(SIGDN_FILESYSPATH, out path);
+          if (path != IntPtr.Zero) {
+            try {
+              selected = Marshal.PtrToStringUni(path) ?? "";
+            } finally {
+              CoTaskMemFree(path);
+            }
+          }
+        }
+      }
+    } catch {
+    } finally {
+      if (item != null) {
+        try { Marshal.FinalReleaseComObject(item); } catch {}
+      }
+      if (dialog != null) {
+        try { Marshal.FinalReleaseComObject(dialog); } catch {}
+      }
+    }
+    return selected;
   }
 }
 '@
-[Console]::Out.Write([ModernFolderPicker]::Pick())
+try {
+  $selected = [ModernFolderPicker]::Pick()
+  if ($selected) { [Console]::Out.Write($selected) }
+  [Console]::Out.Flush()
+} finally {
+  [Environment]::Exit(0)
+}
 `;
 
 /** Opens the Explorer-style Windows folder dialog; selected paths are never persisted. */

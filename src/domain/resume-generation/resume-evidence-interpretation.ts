@@ -15,7 +15,7 @@ type TaskCategory = "purpose" | "ownership" | "users_workflow" | "outcome" | "me
 type Item = { key: string; name: string; category: Category; documents: Array<{ path: string; text: string }> };
 export type CuratedFact = { fact: string; unknowns: string; sourcePath: string };
 
-const taskQuestions: Record<TaskCategory, (name: string) => string> = {
+const projectTaskQuestions: Record<TaskCategory, (name: string) => string> = {
   purpose: (name) => `What problem or need was ${name} intended to address?`,
   ownership: (name) => `What parts of ${name} did you personally build, design, or contribute?`,
   users_workflow: (name) => `Who was ${name} for, and what workflow did it support?`,
@@ -26,6 +26,20 @@ const taskQuestions: Record<TaskCategory, (name: string) => string> = {
   dates: (name) => `When did you work on ${name}?`,
   role: (name) => `What was your role or context for ${name}?`,
 };
+
+const experienceTaskQuestions: Record<TaskCategory, (name: string) => string> = {
+  purpose: (name) => `What was the primary focus, product, or mission of your team at ${name}?`,
+  ownership: (name) => `What systems, features, or workflows did you personally build or contribute to at ${name}?`,
+  users_workflow: (name) => `Who used the systems or tools you worked on at ${name}, and what workflows did they support?`,
+  outcome: (name) => `What key deliverables, improvements, or outcomes resulted from your work at ${name}?`,
+  metrics: (name) => `Are there any measured results, scale details, or performance metrics from your work at ${name}?`,
+  deployment: (name) => `What was the release, deployment, or production status of the systems you worked on at ${name}?`,
+  collaboration: (name) => `Who did you collaborate with at ${name}, and what was your role on the team?`,
+  dates: (name) => `When did your work or internship at ${name} take place?`,
+  role: (name) => `What was your job title and primary role at ${name}?`,
+};
+
+export const taskQuestions = projectTaskQuestions;
 
 /** Only provenance-backed E blocks are facts. B blocks are research/proposals. */
 export function parseCuratedFacts(text: string, sourcePath: string): CuratedFact[] {
@@ -43,7 +57,11 @@ export function parseCuratedFacts(text: string, sourcePath: string): CuratedFact
 const has = (facts: string, pattern: RegExp) => pattern.test(facts);
 
 /** Facts are the only input. Unknown statements and E/B identifiers are not evidence. */
-export function planClarifications(name: string, facts: string): Array<{ category: TaskCategory; question: string }> {
+export function planClarifications(
+  name: string,
+  facts: string,
+  category: Category = "project",
+): Array<{ category: TaskCategory; question: string }> {
   const planned: TaskCategory[] = [];
   if (!has(facts, /\b(purpose|problem|intended to|designed to address|address|objective)\b/i)) planned.push("purpose");
   if (!has(facts, /\b(i |my role|personally|responsible for|contributed to)\b/i)) planned.push("ownership");
@@ -54,7 +72,8 @@ export function planClarifications(name: string, facts: string): Array<{ categor
   if (!has(facts, /\b(team|collaborat|adviser|advisor|group)\b/i)) planned.push("collaboration");
   if (!has(facts, /\b20\d{2}\b|semester|ay\s*20/i)) planned.push("dates");
   if (!has(facts, /\b(role|developer|researcher|student|intern|contributor)\b/i)) planned.push("role");
-  return planned.map((category) => ({ category, question: taskQuestions[category](name) }));
+  const questionMap = category === "experience" ? experienceTaskQuestions : projectTaskQuestions;
+  return planned.map((cat) => ({ category: cat, question: questionMap[cat](name) }));
 }
 
 function normalizedAssertion(value: string): string {
@@ -109,7 +128,12 @@ function reconcilePendingTasks(db: ReturnType<typeof openDatabase>, workspaceId:
   db.prepare(statement).run(workspaceId, item.key, ...categories);
   for (const task of planned) {
     insertInterpretation(db, workspaceId, item, "unknown", task.question, item.documents[0]!.path, now);
-    db.prepare("INSERT OR IGNORE INTO resume_clarification_tasks (id, workspace_id, item_key, item_name, item_category, category, question, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(createUuidV7(), workspaceId, item.key, item.name, item.category, task.category, task.question, now);
+    db.prepare(
+      "INSERT INTO resume_clarification_tasks (id, workspace_id, item_key, item_name, item_category, category, question, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (workspace_id, item_key, category) DO UPDATE SET question = excluded.question, item_category = excluded.item_category, item_name = excluded.item_name WHERE status = 'pending'",
+    ).run(createUuidV7(), workspaceId, item.key, item.name, item.category, task.category, task.question, now);
+    db.prepare(
+      "UPDATE resume_interview_turns SET content = ? WHERE workspace_id = ? AND task_id = (SELECT id FROM resume_clarification_tasks WHERE workspace_id = ? AND item_key = ? AND category = ? AND status = 'pending') AND NOT EXISTS (SELECT 1 FROM resume_interview_candidate_turns c WHERE c.workspace_id = ? AND c.task_id = resume_interview_turns.task_id)",
+    ).run(task.question, workspaceId, workspaceId, item.key, task.category, workspaceId);
   }
 }
 
@@ -138,7 +162,7 @@ export async function interpretWorkspaceEvidence(expectedWorkspaceId: string, op
         insertInterpretation(db, expectedWorkspaceId, item, "capability", item.category === "project" ? "Demonstrates project-based technical problem solving." : "Demonstrates documented professional experience.", source, now);
         for (const fact of facts.filter(({ fact }) => /\b(problem|purpose|workflow|user|intended)\b/i.test(fact)).map(({ fact }) => fact)) insertInterpretation(db, expectedWorkspaceId, item, "context", fact, source, now);
         for (const conflict of contradictions(facts)) insertInterpretation(db, expectedWorkspaceId, item, "contradiction", conflict, source, now);
-        reconcilePendingTasks(db, expectedWorkspaceId, item, planClarifications(item.name, facts.map(({ fact }) => fact).join("\n")), now);
+        reconcilePendingTasks(db, expectedWorkspaceId, item, planClarifications(item.name, facts.map(({ fact }) => fact).join("\n"), item.category), now);
       }
       db.exec("COMMIT");
       await reconcileResumeWorkspaceJourney(expectedWorkspaceId, options);

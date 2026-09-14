@@ -76,9 +76,9 @@ their own persisted intake contract. In their absence, generation produces a
 truthful untailored base resume rather than inventing candidate positioning or
 fit.
 
-## Oboda v22 PDF contract
+## Canonical Resume.pdf contract
 
-Generated PDFs use the TeX pipeline and follow the Oboda v22 one-page visual
+Generated PDFs use the TeX pipeline and follow the canonical `Resume.pdf` one-page visual
 and editorial hierarchy:
 
 1. Experience

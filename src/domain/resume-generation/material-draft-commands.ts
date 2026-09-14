@@ -30,9 +30,24 @@ export type MaterialDraftFileCitation = {
   endLine: number;
   contentDigest: string;
 };
+export type MaterialDraftCandidateProfile = {
+  firstName: string;
+  middleName?: string | null;
+  lastName: string;
+  email: string;
+  phone: string;
+  school: string;
+  program: string;
+  graduationYear: number;
+  gwa?: string | null;
+  latinHonors?: string | null;
+  linkedInUrl?: string | null;
+  githubUrl?: string | null;
+};
 export type MaterialDraftView = {
   id: string;
   profileLabel: string;
+  candidateProfile?: MaterialDraftCandidateProfile;
   templateLabel: string;
   templateId: string;
   templateDigest: string;
@@ -45,6 +60,7 @@ export type MaterialDraftView = {
     candidateClarifications: MaterialDraftCandidateClarification[];
     fileCitations: MaterialDraftFileCitation[];
   }>;
+  candidateClarifications?: MaterialDraftCandidateClarification[];
   unknowns: string[];
   handedOff: boolean;
 };
@@ -329,9 +345,29 @@ function parseStoredDraft(row: StoredMaterialDraftRead): MaterialDraftView {
     Number.isNaN(new Date(row.handedOffAt).getTime())
   )
     invalid();
+  let candidateProfile: MaterialDraftCandidateProfile | undefined;
+  if (row.candidateProfileJson) {
+    try {
+      const parsed = JSON.parse(row.candidateProfileJson);
+      if (parsed && typeof parsed === "object")
+        candidateProfile = parsed as MaterialDraftCandidateProfile;
+    } catch {
+      /* Safe fallback if json unparseable */
+    }
+  }
+  const candidateName = candidateProfile
+    ? [
+        candidateProfile.firstName,
+        candidateProfile.middleName,
+        candidateProfile.lastName,
+      ]
+        .filter(Boolean)
+        .join(" ")
+    : undefined;
   return {
     id: row.id,
-    profileLabel: "Saved Candidate Profile",
+    profileLabel: candidateName || "Saved Candidate Profile",
+    candidateProfile,
     templateLabel: row.templateFilename,
     templateId: row.templateId,
     templateDigest: row.templateDigest,
@@ -339,6 +375,7 @@ function parseStoredDraft(row: StoredMaterialDraftRead): MaterialDraftView {
     evidenceLabels: row.evidence.map((item) => item.label),
     sections,
     claims,
+    candidateClarifications,
     unknowns: unknownsInput as string[],
     handedOff: row.handedOffAt !== undefined,
   };

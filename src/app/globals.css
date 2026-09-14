@@ -2504,6 +2504,88 @@ select {
   display: inline-block;
   text-decoration: none;
 }
+.tex-draft-ready-links {
+  display: inline-flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.editable-tex-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.editable-tex-head h3 {
+  font-size: 1.05rem;
+  font-weight: 700;
+  margin: 0 0 4px;
+}
+.editable-tex-caption {
+  color: var(--muted-ink);
+  font-size: 0.88rem;
+  margin: 0;
+}
+.editable-tex-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+}
+.editable-tex-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.editable-tex-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.editable-tex-input {
+  border: 1px solid var(--border, #d4e0d7);
+  border-radius: 8px;
+  font-size: 0.92rem;
+  padding: 8px 12px;
+  width: 100%;
+  max-width: 28rem;
+}
+.editable-tex-consent {
+  margin: 2px 0;
+}
+.editable-tex-checkbox-label {
+  align-items: flex-start;
+  display: flex;
+  gap: 8px;
+  font-size: 0.84rem;
+  color: var(--muted-ink);
+  cursor: pointer;
+}
+.editable-tex-checkbox {
+  margin-top: 2px;
+}
+.editable-tex-button-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 4px;
+}
+.editable-tex-links {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+  font-size: 0.9rem;
+}
+.editable-tex-link {
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: underline;
+}
+.editable-tex-link-sep {
+  color: var(--muted-ink);
+}
+.editable-tex-next-action {
+  font-size: 0.85rem;
+  margin: 0;
+}
 .material-draft-review {
   max-width: 920px;
 }

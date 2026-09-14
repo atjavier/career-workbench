@@ -13,7 +13,7 @@ import { createResumeWorkspace } from "../src/domain/resume-generation/resume-wo
 import { openDatabase } from "../src/persistence/database";
 
 const hash = (value: unknown) => `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
-const modelList = () => new Response(JSON.stringify({ models: [{ type: "llm", key: "qwen/qwen3.5-9b", display_name: "Qwen3.5-9B", params_string: "9B", loaded_instances: [{ id: "one" }] }] }), { status: 200 });
+const modelList = () => new Response(JSON.stringify({ models: [{ type: "llm", key: "qwen/qwen3.5-9b", display_name: "Qwen3.5-9B", params_string: "9B", loaded_instances: [{ id: "one", context_length: 30000 }] }] }), { status: 200 });
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "ai-assessment-")); const appDataRoot = join(root, "private");

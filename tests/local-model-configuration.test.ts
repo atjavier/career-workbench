@@ -9,7 +9,7 @@ import { applyMigrations, openDatabase } from "../src/persistence/database";
 import { selectLocalModelConfiguration } from "../src/persistence/local-model-configuration-repository";
 
 function models(loaded = true) {
-  return new Response(JSON.stringify({ models: [{ type: "llm", key: "qwen/qwen3.5-9b", display_name: "Qwen 3.5 9B", params_string: "9B", loaded_instances: loaded ? [{ id: "instance-1" }] : [] }] }), { status: 200, headers: { "content-type": "application/json" } });
+  return new Response(JSON.stringify({ models: [{ type: "llm", key: "qwen/qwen3.5-9b", display_name: "Qwen 3.5 9B", params_string: "9B", loaded_instances: loaded ? [{ id: "instance-1", context_length: 30000 }] : [] }] }), { status: 200, headers: { "content-type": "application/json" } });
 }
 
 test("verified local-model settings create an immutable tokenless selected configuration", async () => {

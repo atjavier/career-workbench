@@ -44,6 +44,22 @@ function textFromTex(value: string, maximum = 900): string {
     value
       .replace(/(^|[^\\])%.*/gm, "$1")
       .replace(
+        /\\resumeskill\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g,
+        "\n$1: $2",
+      )
+      .replace(
+        /\\resumeproject\s*\{([^{}]*)\}(?:\s*\{([^{}]*)\})?(?:\s*\{([^{}]*)\})?/g,
+        (_, title, role) => role?.trim() ? `\n${title} | ${role}\n` : `\n${title}\n`,
+      )
+      .replace(
+        /\\resumeeducation\s*\{([^{}]*)\}\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g,
+        "\n$1 | $2 | $3\n",
+      )
+      .replace(
+        /\\resumeexperience\s*\{([^{}]*)\}\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g,
+        "\n$1 | $2 | $3\n",
+      )
+      .replace(
         /\\(?:textbf|textit|emph|underline|href)\*?(?:\[[^\]]*\])?\s*\{([^{}]*)\}/g,
         "$1",
       )

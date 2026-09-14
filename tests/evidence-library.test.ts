@@ -69,11 +69,17 @@ async function fixture() {
   };
 }
 
-test("refuses to document this Resume application as a project source", async () => {
-  await assert.rejects(readResumeDocumentationSource(process.cwd()), {
-    code: "EVIDENCE_DOCUMENTER_INVALID",
-    message: /Resume application folder cannot be documented/i,
-  });
+test("allows documenting this Resume application as a project source while excluding resume-evidence", async () => {
+  const source = await readResumeDocumentationSource(process.cwd());
+  assert.ok(source.files.length > 0);
+  assert.ok(
+    source.files.every(
+      (file) =>
+        !file.path.startsWith("resume-evidence") &&
+        !file.path.includes("/resume-evidence/") &&
+        !file.path.startsWith("node_modules"),
+    ),
+  );
 });
 
 test("imports the generated documentation set, leaves its output unchanged, and keeps evidence unreviewed", async () => {
@@ -745,4 +751,79 @@ test("browser folder snapshots accept only paired, bounded, safe relative source
     }),
     { code: "EVIDENCE_DOCUMENTER_INVALID" },
   );
+});
+
+function testPdfBytes(text = "MetaWatt Internship Report Delivered systems successfully") {
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
+    `<< /Length ${text.length + 32} >>\nstream\nBT /F1 12 Tf 72 720 Td (${text}) Tj ET\nendstream`,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+  ];
+  let output = "%PDF-1.4\n";
+  const offsets = [0];
+  for (let index = 0; index < objects.length; index += 1) {
+    offsets.push(Buffer.byteLength(output));
+    output += `${index + 1} 0 obj\n${objects[index]}\nendobj\n`;
+  }
+  const start = Buffer.byteLength(output);
+  output += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n${offsets.slice(1).map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`).join("")}trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${start}\n%%EOF\n`;
+  return new Uint8Array(Buffer.from(output));
+}
+
+test("reads PDF documents and complete multi-week YAML logs without artificial truncation", async () => {
+  const root = await mkdtemp(join(tmpdir(), "metawatt-folder-test-"));
+  try {
+    const pdfBytes = testPdfBytes("MetaWatt Internship Report Delivered systems successfully");
+    await writeFile(join(root, "report.pdf"), pdfBytes);
+    await writeFile(
+      join(root, "week_1.yaml"),
+      "tasks:\n  - Initialized backend services and set up development environment\n",
+    );
+    await writeFile(
+      join(root, "week_2.yaml"),
+      "tasks:\n  - Developed Go handlers and tested API endpoints\n",
+    );
+    await writeFile(
+      join(root, "week_3.yaml"),
+      "tasks:\n  - Migrated frontend components and integrated database models\n",
+    );
+    await writeFile(
+      join(root, "week_4.yaml"),
+      "tasks:\n  - Configured Bruno API testing and reviewed team pull requests\n",
+    );
+    await writeFile(
+      join(root, "week_5.yaml"),
+      "tasks:\n  - Completed email service verification and finalized report\n",
+    );
+    await writeFile(join(root, "generator.py"), "print('running generator')\n");
+
+    const source = await readResumeDocumentationSource(root);
+    const paths = source.files.map((f) => f.path);
+    assert.ok(paths.includes("report.pdf"), "report.pdf should be included");
+    assert.ok(paths.includes("week_1.yaml"), "week_1.yaml should be included");
+    assert.ok(paths.includes("week_2.yaml"), "week_2.yaml should be included");
+    assert.ok(paths.includes("week_3.yaml"), "week_3.yaml should be included");
+    assert.ok(paths.includes("week_4.yaml"), "week_4.yaml should be included");
+    assert.ok(paths.includes("week_5.yaml"), "week_5.yaml should be included");
+    assert.ok(paths.includes("generator.py"), "generator.py should be included");
+
+    const pdfFile = source.files.find((f) => f.path === "report.pdf");
+    assert.ok(pdfFile?.text.includes("MetaWatt Internship Report"));
+
+    // Also test uploaded source accepts PDF
+    const uploadedPdf = new File([pdfBytes], "report.pdf");
+    const uploadedSnapshot = await readUploadedResumeDocumentationSource({
+      files: [uploadedPdf],
+      manifest: JSON.stringify({
+        root: "experience",
+        files: [{ path: "experience/report.pdf", name: "report.pdf", size: uploadedPdf.size }],
+      }),
+    });
+    assert.equal(uploadedSnapshot.files.length, 1);
+    assert.ok(uploadedSnapshot.files[0].text.includes("MetaWatt Internship Report"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

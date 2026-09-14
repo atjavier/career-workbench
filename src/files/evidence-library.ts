@@ -13,6 +13,7 @@ import type { Stats } from "node:fs";
 import { basename, extname, join, relative, resolve, sep } from "node:path";
 import { WorkspaceError } from "@/domain/workspace/types";
 import { getResumeAgentSkill } from "@/domain/resume-agent/skill-registry";
+import { extractPdfText } from "@/adapters/resume-parser/pdf-text-parser";
 
 export type LibraryCategory = "project" | "experience";
 export type MarkdownDocument = {
@@ -80,6 +81,10 @@ function documentationSnapshotPriority(path: string): number {
   if (
     /^(?:readme|overview|architecture|design|requirements?|documentation)\.(?:md|txt)$/.test(
       normalized,
+    ) ||
+    /\.(?:pdf)$/.test(normalized) ||
+    /(?:^|\/)(?:week[_-]?\d+|log[s]?|reports?|evaluations?|certificates?|notes?|tasks?|summary|context|deliverables?)\.(?:ya?ml|md|txt|json|pdf)$/.test(
+      normalized,
     )
   )
     return 1;
@@ -125,13 +130,17 @@ function documentationTraversalPriority(name: string): number {
   )
     return 1;
   if (
-    /^(?:docs?|documentation|scripts?|infra|\.github|tests?|__tests__)$/.test(
+    /^(?:docs?|documentation|reports?|logs?|scripts?|infra|\.github|tests?|__tests__)$/.test(
       normalized,
     )
   )
     return 2;
   if (
     /^(?:package\.json|pyproject\.toml|cargo\.toml|composer\.json|go\.mod|readme\.(?:md|txt)|dockerfile|docker-compose(?:\.ya?ml)?)$/.test(
+      normalized,
+    ) ||
+    /\.(?:pdf)$/.test(normalized) ||
+    /^(?:week[_-]?\d+|log[s]?|reports?|evaluations?|certificates?|notes?|tasks?|summary)\.(?:ya?ml|md|txt|json|pdf)$/.test(
       normalized,
     )
   )
@@ -737,6 +746,45 @@ export async function readManagedDocumentedArtifacts(
       a.category.localeCompare(b.category) || a.name.localeCompare(b.name),
   );
 }
+async function readSourceFileContent(
+  path: string,
+  size: number,
+  maxBytes: number,
+  expected?: Pick<Stats, "dev" | "ino">,
+): Promise<{ bytes: Uint8Array; text: string } | undefined> {
+  if (!size || size > maxBytes) return undefined;
+  let handle;
+  try {
+    handle = await open(path, "r");
+    const opened = await handle.stat();
+    if (
+      !opened.isFile() ||
+      (expected && (opened.dev !== expected.dev || opened.ino !== expected.ino))
+    )
+      return undefined;
+    const bytes = await handle.readFile();
+    if (bytes.byteLength !== size) return undefined;
+    const isPdf = extname(path).toLowerCase() === ".pdf";
+    if (isPdf) {
+      try {
+        const text = await extractPdfText(bytes);
+        if (!text.trim()) return undefined;
+        return { bytes, text };
+      } catch {
+        return undefined;
+      }
+    }
+    try {
+      return { bytes, text: decoder.decode(bytes) };
+    } catch {
+      return undefined;
+    }
+  } catch {
+    return undefined;
+  } finally {
+    await handle?.close();
+  }
+}
 export async function readResumeDocumentationSource(
   sourceDirectory: string,
   workspaceRoot?: string,
@@ -746,12 +794,6 @@ export async function readResumeDocumentationSource(
 }> {
   const source = resolve(sourceDirectory);
   const root = evidenceLibraryRoot(workspaceRoot);
-  if (source === resolve(process.cwd()))
-    throw new WorkspaceError(
-      "EVIDENCE_DOCUMENTER_INVALID",
-      "This Resume application folder cannot be documented as project evidence.",
-      "Choose the actual Project or Experience folder you want to document.",
-    );
   if (source === root || inside(root, source))
     throw new WorkspaceError(
       "EVIDENCE_DOCUMENTER_INVALID",
@@ -794,12 +836,14 @@ export async function readResumeDocumentationSource(
     for (const entry of entries) {
       if (entriesSeen >= skill.limits.maxEntries) break;
       entriesSeen += 1;
+      const path = join(current.path, entry.name);
       if (
         entry.isDirectory() &&
-        excludedDirectories.has(entry.name.toLowerCase())
+        (excludedDirectories.has(entry.name.toLowerCase()) ||
+          path === root ||
+          inside(root, path))
       )
         continue;
-      const path = join(current.path, entry.name);
       const info = await lstat(path);
       if (info.isSymbolicLink())
         throw new WorkspaceError(
@@ -836,11 +880,13 @@ export async function readResumeDocumentationSource(
       left.path.localeCompare(right.path),
   )) {
     if (files.length >= skill.limits.maxFiles) break;
-    const captured = await bytesAndText(
+    const captured = await readSourceFileContent(
       candidate.absolutePath,
       candidate.size,
+      skill.limits.maxFileBytes,
       candidate.metadata,
     );
+    if (!captured || !captured.text.trim()) continue;
     const file = {
       path: candidate.path,
       text: captured.text,
@@ -974,18 +1020,38 @@ export async function readUploadedResumeDocumentationSource(input: {
         "Choose a smaller folder and try documentation.",
       );
     const bytes = new Uint8Array(await file.arrayBuffer());
-    if (bytes.byteLength !== file.size || bytes.includes(0))
+    if (bytes.byteLength !== file.size)
       invalidSnapshot(
         "A selected source file is unsafe or changed while it was being read.",
       );
+    const isPdf = extname(file.name).toLowerCase() === ".pdf";
     let text: string;
-    try {
-      text = decoder.decode(bytes);
-    } catch {
-      invalidSnapshot(
-        "A selected source file is not valid UTF-8 text.",
-        "Choose a folder containing readable source files and try documentation.",
-      );
+    if (isPdf) {
+      try {
+        text = await extractPdfText(bytes);
+      } catch {
+        invalidSnapshot(
+          "A selected PDF file could not be read or contains no readable text.",
+        );
+      }
+      if (!text.trim())
+        invalidSnapshot(
+          "A selected PDF file contains no readable text.",
+          "Choose a text-readable PDF document and try documentation.",
+        );
+    } else {
+      if (bytes.includes(0))
+        invalidSnapshot(
+          "A selected source file is unsafe or changed while it was being read.",
+        );
+      try {
+        text = decoder.decode(bytes);
+      } catch {
+        invalidSnapshot(
+          "A selected source file is not valid UTF-8 text.",
+          "Choose a folder containing readable source files and try documentation.",
+        );
+      }
     }
     const candidate = { path, text, contentDigest: digest(bytes) };
     if (
@@ -1111,25 +1177,35 @@ export type ResumeFileToolResult =
         | "unsupported_file";
     };
 export type ResumeFileReadSession = Readonly<{
-  roots: Array<{ rootId: string; label: "application" | "managed-work" }>;
+  roots: Array<{
+    rootId: string;
+    label: "application" | "managed-work";
+    name?: string;
+    category?: "project" | "experience";
+  }>;
   execute: (action: ResumeFileToolAction) => Promise<ResumeFileToolResult>;
   validateCitation: (citation: ResumeFileCitation) => boolean;
-  validateCitationStability?: (citation: ResumeFileCitation) => Promise<boolean>;
+  validateCitationStability?: (
+    citation: ResumeFileCitation,
+  ) => Promise<boolean>;
 }>;
 
 type ResumeFileRoot = {
   rootId: string;
   root: string;
   label: "application" | "managed-work";
+  name?: string;
+  category?: "project" | "experience";
   dev: number;
   ino: number;
 };
 const fileToolLimits = {
   maxCalls: 24,
   maxFiles: 120,
-  maxBytes: 48_000,
-  maxReadBytes: 8_000,
-  maxReadLines: 300,
+  maxBytes: 64_000,
+  maxFileBytes: 256_000,
+  maxReadBytes: 24_000,
+  maxReadLines: 400,
   maxDepth: 20,
   maxListEntries: 80,
   maxElapsedMs: 90_000,
@@ -1155,24 +1231,47 @@ const withinRoot = (root: string, target: string) => {
   return value === "" || (value !== ".." && !value.startsWith(`..${sep}`));
 };
 
+export type ResumeManagedRootDescriptor =
+  | string
+  | { root: string; name?: string; category?: "project" | "experience" };
+
 /** Creates a short-lived, host-owned local read capability for Resume Architect. */
 export async function createResumeFileReadSession(input: {
   applicationRoot?: string;
-  managedRoots: string[];
+  managedRoots: ResumeManagedRootDescriptor[];
 }): Promise<ResumeFileReadSession> {
   const skill = getResumeAgentSkill("resume.generate-base-resume");
   const extensions = new Set(skill.allowedExtensions);
   const excluded = new Set(skill.excludedDirectories);
   const roots: ResumeFileRoot[] = [];
+  const normalizedManaged = input.managedRoots.map((entry) => {
+    if (typeof entry === "string") {
+      const isExp = /(?:^|[\\/])experiences?(?:[\\/]|$)/i.test(entry);
+      return {
+        root: entry,
+        name: basename(entry),
+        category: (isExp ? "experience" : "project") as "project" | "experience",
+        label: "managed-work" as const,
+      };
+    }
+    const isExp =
+      entry.category === "experience" ||
+      /(?:^|[\\/])experiences?(?:[\\/]|$)/i.test(entry.root);
+    return {
+      root: entry.root,
+      name: entry.name || basename(entry.root),
+      category: (isExp ? "experience" : "project") as "project" | "experience",
+      label: "managed-work" as const,
+    };
+  });
   for (const candidate of [
+    ...normalizedManaged,
     {
       root: input.applicationRoot ?? process.cwd(),
       label: "application" as const,
+      name: "application",
+      category: undefined,
     },
-    ...input.managedRoots.map((root) => ({
-      root,
-      label: "managed-work" as const,
-    })),
   ]) {
     const info = await lstat(candidate.root).catch(() => undefined);
     const canonical =
@@ -1190,6 +1289,8 @@ export async function createResumeFileReadSession(input: {
       rootId: `root-${roots.length + 1}`,
       root: canonical,
       label: candidate.label,
+      name: candidate.name,
+      category: candidate.category,
       dev: info.dev,
       ino: info.ino,
     });
@@ -1275,8 +1376,7 @@ export async function createResumeFileReadSession(input: {
       return { ok: false, error: "unsupported_file" };
     if (
       !found.info.size ||
-      found.info.size > fileToolLimits.maxReadBytes ||
-      bytes + found.info.size > fileToolLimits.maxBytes
+      found.info.size > fileToolLimits.maxFileBytes
     )
       return { ok: false, error: "budget_exhausted" };
     let content: Uint8Array;
@@ -1297,10 +1397,20 @@ export async function createResumeFileReadSession(input: {
       await handle?.close();
     }
     let text: string;
-    try {
-      text = decoder.decode(content);
-    } catch {
-      return { ok: false, error: "unsupported_file" };
+    const isPdf = extname(path).toLowerCase() === ".pdf";
+    if (isPdf) {
+      try {
+        text = await extractPdfText(content);
+        if (!text.trim()) return { ok: false, error: "unsupported_file" };
+      } catch {
+        return { ok: false, error: "unsupported_file" };
+      }
+    } else {
+      try {
+        text = decoder.decode(content);
+      } catch {
+        return { ok: false, error: "unsupported_file" };
+      }
     }
     const lines = text.split(/\r?\n/);
     const startLine = action.startLine ?? 1;
@@ -1315,13 +1425,14 @@ export async function createResumeFileReadSession(input: {
     )
       return { ok: false, error: "invalid_request" };
     const selected = lines.slice(startLine - 1, endLine).join("\n");
+    const selectedBytes = new TextEncoder().encode(selected).byteLength;
     if (
       !selected ||
-      new TextEncoder().encode(selected).byteLength >
-        fileToolLimits.maxReadBytes
+      selectedBytes > fileToolLimits.maxReadBytes ||
+      bytes + selectedBytes > fileToolLimits.maxBytes
     )
       return { ok: false, error: "budget_exhausted" };
-    bytes += content.byteLength;
+    bytes += selectedBytes;
     files += 1;
     const citation = {
       citationId: `citation-${++ordinal}`,
@@ -1341,17 +1452,19 @@ export async function createResumeFileReadSession(input: {
     };
   };
   return {
-    roots: roots.map(({ rootId, label }) => ({ rootId, label })),
+    roots: roots.map(({ rootId, label, name, category }) => ({
+      rootId,
+      label,
+      name,
+      category,
+    })),
     execute,
     validateCitation: (citation) =>
       JSON.stringify(reads.get(citation.citationId)?.citation) ===
       JSON.stringify(citation),
     validateCitationStability: async (citation) => {
       const read = reads.get(citation.citationId);
-      if (
-        !read ||
-        JSON.stringify(read.citation) !== JSON.stringify(citation)
-      )
+      if (!read || JSON.stringify(read.citation) !== JSON.stringify(citation))
         return false;
       const found = await targetFor(read.root, citation.path);
       if (!found?.info.isFile()) return false;
@@ -1374,7 +1487,9 @@ export async function createResumeFileReadSession(input: {
       }
       if (digest(content) !== citation.contentDigest) return false;
       try {
-        return citation.endLine <= decoder.decode(content).split(/\r?\n/).length;
+        return (
+          citation.endLine <= decoder.decode(content).split(/\r?\n/).length
+        );
       } catch {
         return false;
       }

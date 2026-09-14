@@ -17,6 +17,7 @@ import {
   isLatestWorkspaceMaterialDraftCurrent,
 } from "@/persistence/material-draft-repository";
 import { listWorkspaceDocumentedEvidenceIds } from "@/persistence/resume-workspace-repository";
+import { findLatestTexDraftForWorkspace } from "@/persistence/tex-draft-repository";
 import { readLatestResumeGenerationJob } from "@/domain/resume-generation/resume-generation-jobs";
 import { readLatestResumeEvidenceIntake } from "@/domain/resume-generation/resume-evidence-intake";
 
@@ -90,6 +91,21 @@ export async function ResumeWorkspace() {
       current,
     };
   })().catch(() => ({ draft: undefined, current: false }));
+  const latestTexRevisionId = workspaceState.activeWorkspace
+    ? await (async () => {
+        const paths = await resolveAppDataPaths();
+        const db = openDatabase(paths.databasePath);
+        try {
+          applyMigrations(db);
+          return findLatestTexDraftForWorkspace(
+            db,
+            workspaceState.activeWorkspace!.id,
+          )?.revisionId;
+        } finally {
+          db.close();
+        }
+      })().catch(() => undefined)
+    : undefined;
   const generationJob = workspaceState.activeWorkspace
     ? await readLatestResumeGenerationJob(
         workspaceState.activeWorkspace.id,
@@ -195,6 +211,7 @@ export async function ResumeWorkspace() {
                 : undefined
           }
           workspaceId={workspaceState.activeWorkspace?.id}
+          latestTexRevisionId={latestTexRevisionId}
         />
       </section>
     </div>
