@@ -245,6 +245,79 @@ test("Resume Interview Coach streams a bounded natural reply through native LM S
   await assert.rejects(malformed.next(), { code: "RESUME_COACH_INVALID" });
 });
 
+test("Resume Interview Coach requests a context-aware acknowledgement grounded in the candidate's answer", async () => {
+  const base = {
+    connection,
+    workspaceId: "00000000-0000-7000-8000-000000000099",
+    taskId: "task-ack",
+    question: "What was your contribution?",
+    context: ["Built the documented workflow."],
+    transcript: [
+      "Coach: What was your contribution?",
+      "Candidate: I built the upload pipeline end to end.",
+    ],
+    consentNonce: "ack-consent",
+  };
+  const value = {
+    ...base,
+    consentFingerprint: resumeInterviewCoachConsentFingerprint(base),
+  };
+  const content = "Got it, the upload pipeline ownership is clear.";
+  const rawContent = interviewDecisionContent(content, {
+    schemaVersion: 1,
+    selectionEcho: value.consentFingerprint,
+    disposition: "complete",
+    answerSource: "latest",
+  });
+  const stream = streamResumeInterviewCoach(value, undefined, async (
+    url,
+    init,
+  ) => {
+    assert.equal(url, "http://127.0.0.1:1234/api/v1/chat");
+    const payload = JSON.parse(String(init.body)) as {
+      input: string;
+      system_prompt: string;
+    };
+    const input = JSON.parse(payload.input) as { responseShape: string };
+    assert.match(input.responseShape, /grounded in the candidate's latest message/);
+    assert.match(input.responseShape, /never reuse the same acknowledgement phrasing twice/);
+    assert.doesNotMatch(input.responseShape, /tailored to the question topic/);
+    assert.doesNotMatch(payload.system_prompt, /tailored to the question topic/);
+    assert.doesNotMatch(
+      String(init.body),
+      /that clarifies the delivered capability/,
+    );
+    return new Response(
+      [
+        {
+          name: "message.delta",
+          data: { type: "message.delta", content: rawContent },
+        },
+        {
+          name: "chat.end",
+          data: {
+            type: "chat.end",
+            result: { output: [{ type: "message", content: rawContent }] },
+          },
+        },
+      ]
+        .map(
+          (event) =>
+            `event: ${event.name}\ndata: ${JSON.stringify(event.data)}\n\n`,
+        )
+        .join(""),
+      { status: 200, headers: { "content-type": "text/event-stream" } },
+    );
+  });
+  const next = await stream.next();
+  assert.equal(next.value, content);
+  const complete = await stream.next();
+  assert.deepEqual(complete.value, {
+    content,
+    decision: { disposition: "complete", answerSource: "latest" },
+  });
+});
+
 test("Resume Interview Coach starts an empty conversation with a brief Coach opening", async () => {
   const base = {
     connection,

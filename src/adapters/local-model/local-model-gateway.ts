@@ -1195,7 +1195,15 @@ async function native(
   );
   try {
     return parseModelJson(content);
-  } catch {
+  } catch (error) {
+    if (process.env.NODE_ENV === "development") {
+      console.error(
+        "[native JSON parse failure]:",
+        error instanceof Error ? error.message : error,
+        "raw content tail:",
+        content.length > 2_000 ? `…${content.slice(-2_000)}` : content,
+      );
+    }
     throw new WorkspaceError(
       code,
       "The local model completed a response, but its JSON envelope was malformed.",
@@ -1508,8 +1516,14 @@ async function requestFileAgentResume(
             citation.startLine < 1 ||
             citation.endLine < citation.startLine ||
             !sha(citation.contentDigest)
-          )
+          ) {
+            if (process.env.NODE_ENV === "development")
+              console.error(
+                "[file agent citation field failure]:",
+                JSON.stringify(item),
+              );
             throw new Error("unverified file citation");
+          }
           if (!session.validateCitation(citation)) {
             const matchingRead = executedReadCitations.find(
               (r) =>
@@ -1519,6 +1533,11 @@ async function requestFileAgentResume(
             if (matchingRead && session.validateCitation(matchingRead)) {
               citation = matchingRead;
             } else {
+              if (process.env.NODE_ENV === "development")
+                console.error(
+                  "[file agent citation session failure]:",
+                  JSON.stringify(citation),
+                );
               throw new Error("unverified file citation");
             }
           }
@@ -1996,37 +2015,7 @@ export async function* streamResumeInterviewCoach(
       .trim();
     if (!opening && !latestCandidateMessage)
       invalid("The selected interview context cannot be sent safely.");
-    const questionTopic = (() => {
-      const q = request.question.toLowerCase();
-      if (/problem|need|purpose|mission|focus|intended to address/i.test(q))
-        return "purpose";
-      if (/personally build|design|contribute|systems.*personally/i.test(q))
-        return "ownership";
-      if (/capability|deliver|outcome|key deliverables|improvements/i.test(q))
-        return "outcome";
-      if (/who was .* for|workflow|who used/i.test(q))
-        return "users_workflow";
-      if (/deployment|usage status|release|production status/i.test(q))
-        return "deployment";
-      if (/measured results|scale|metrics|performance/i.test(q))
-        return "metrics";
-      if (/collaborate|work with anyone|team/i.test(q))
-        return "collaboration";
-      if (/when did/i.test(q))
-        return "dates";
-      return "general";
-    })();
-    const topicAcknowledgementExamples: Record<string, string> = {
-      purpose: "e.g. 'Understood, that makes the primary problem and purpose clear.', 'Got it, that explains the core need it addressed.', or 'Understood, that clarifies why this was built.'",
-      ownership: "e.g. 'Got it, noted your personal contribution.', 'Understood, that makes your ownership and role clear.', or 'Great, noted your hands-on involvement.'",
-      outcome: "e.g. 'Got it, that clarifies the delivered capability.', 'Understood, that outlines the concrete outcome well.', or 'Great, that captures the end result nicely.'",
-      users_workflow: "e.g. 'Got it, that clarifies the target users and workflows.', 'Understood, that gives clear context on who uses it.', or 'Noted, that outlines the workflow clearly.'",
-      deployment: "e.g. 'Understood, that clarifies the release and operational status.', 'Got it, noted where and how it was deployed.'",
-      metrics: "e.g. 'Understood, that clarifies the scale and measurable results.', 'Got it, noted the scale context.'",
-      collaboration: "e.g. 'Got it, that clarifies your role within the team.', 'Understood, noted how you worked with collaborators.'",
-      dates: "e.g. 'Got it, that confirms the timeline.', 'Understood, noted the dates.'",
-      general: "e.g. 'Understood, thanks for the details.', 'Got it, that provides helpful context.', or 'Great, that clarifies that point.'",
-    };
+    const acknowledgementRule = `ACKNOWLEDGEMENT RULE: In exactly one short sentence, acknowledge the candidate's latest message by tying back to one specific detail they actually gave (a feature, workflow, role, tool, problem, outcome, or constraint they named), rephrased in your own words. Vary the opening word and sentence shape between turns (Got it / Understood / That helps / Thanks / Perfect / Good context) and never reuse the same acknowledgement phrasing twice in the conversation. NEVER echo, repeat, or mirror the candidate's full answer back to them, and never invent details they did not state. If the candidate declines to add more, briefly accept that in one varied sentence (for example 'Understood — I will keep your earlier answer.').`;
     const body = JSON.stringify({
       model: request.connection.modelIdentifier,
       input: JSON.stringify({
@@ -2038,8 +2027,8 @@ export async function* streamResumeInterviewCoach(
         clarificationUsed: request.clarificationUsed === true,
         responseShape: opening
           ? "Ask the exact saved question directly. Reply with that question only: no preamble, explanation, labels, tools, or actions."
-          : `Respond with 1 brief, natural acknowledgement sentence tailored to the question topic (${topicAcknowledgementExamples[questionTopic]}).
-CRITICAL: NEVER repeat, echo, or parrot the candidate's answer back to them. Write your own concise acknowledgement.
+          : `Respond with exactly 1 brief, natural acknowledgement sentence grounded in the candidate's latest message: reference one specific detail they actually gave (a feature, workflow, role, tool, problem, outcome, or constraint they named), rephrased in your own words. Vary the opening word and sentence shape between turns (Got it / Understood / That helps / Thanks / Perfect / Good context) and never reuse the same acknowledgement phrasing twice in this conversation.
+CRITICAL: NEVER repeat, echo, or parrot the candidate's answer back to them, and never invent details they did not state.
 Then append exactly one machine-only decision tag with no text after it: ${interviewDecisionStart}{"schemaVersion":1,"selectionEcho":"${request.consentFingerprint}","disposition":"complete","answerSource":"latest"}${interviewDecisionEnd}.
 The visible reply comes before the tag and must not mention the tag or decision.
 Decision options:
@@ -2047,13 +2036,13 @@ Decision options:
 - For complete with prior answer (candidate declines to add more after a prior substantive answer): ${interviewDecisionStart}{"schemaVersion":1,"selectionEcho":"${request.consentFingerprint}","disposition":"complete","answerSource":"prior"}${interviewDecisionEnd}
 - For unknown (candidate cannot answer): ${interviewDecisionStart}{"schemaVersion":1,"selectionEcho":"${request.consentFingerprint}","disposition":"unknown"}${interviewDecisionEnd}
 - For clarify (one critical detail is missing): ${interviewDecisionStart}{"schemaVersion":1,"selectionEcho":"${request.consentFingerprint}","disposition":"clarify","missingDetail":"<exact phrase>"}${interviewDecisionEnd} (visible reply must be 1 question <= 240 chars containing the missingDetail phrase). ${request.clarificationUsed ? "A clarification has already been used, so do not choose clarify." : ""}
-For complete or unknown, use one brief acknowledgement tailored to the question topic, with no question. Never repeat the candidate's message and never ask a generic question about anything else.`,
+For complete or unknown, the visible reply is exactly the one acknowledgement sentence described above, with no question. Never repeat the candidate's message and never ask a generic question about anything else.`,
       }),
       system_prompt: [
         "You are Coach Resume in a live, evidence-grounded resume clarification conversation.",
         `The only task is this exact saved resume question: ${request.question}`,
         "DECISION GUIDANCE: If the candidate answered the question (even broadly or simply, such as 'I built it end to end' or naming a general tool/layer), accept it immediately as complete/latest. If they decline to add more after previously answering, choose complete/prior. Choose unknown if they cannot answer. Choose clarify only if a critical piece of information directly asked in the question is absent.",
-        `ACKNOWLEDGEMENT RULE: When accepting an answer, write a short, polite confirmation tailored to the question topic (${topicAcknowledgementExamples[questionTopic]}). NEVER echo, repeat, or mirror the candidate's answer back to them.`,
+        ...(acknowledgementRule && !opening ? [acknowledgementRule] : []),
         "Never act as a general-purpose assistant or discuss another project. Do not mention an application, framework, API, database, file, technology, or plan unless it is supplied in the saved question, documented context, or the candidate's own message.",
         "Use supplied evidence only as context; do not invent claims. Never create tasks, claims, evidence, drafts, PDFs, tools, filesystem, or network actions.",
         opening
