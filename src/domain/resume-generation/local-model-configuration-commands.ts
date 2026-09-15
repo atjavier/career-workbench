@@ -110,12 +110,20 @@ async function verifyModel(
     invalid(
       "Choose a loaded Qwen3.5-9B model before saving Local AI settings.",
     );
-  const contexts = matched.loaded_instances.map((instance) =>
-    instance && typeof instance === "object"
-      ? ((instance as { context_length?: unknown }).context_length ??
-        (instance as { contextLength?: unknown }).contextLength)
-      : undefined,
-  );
+  const contexts = matched.loaded_instances.map((instance) => {
+    if (!instance || typeof instance !== "object") return undefined;
+    const item = instance as {
+      context_length?: unknown;
+      contextLength?: unknown;
+      config?: { context_length?: unknown; contextLength?: unknown };
+    };
+    return (
+      item.config?.context_length ??
+      item.config?.contextLength ??
+      item.context_length ??
+      item.contextLength
+    );
+  });
   if (
     contexts.some(
       (value) =>

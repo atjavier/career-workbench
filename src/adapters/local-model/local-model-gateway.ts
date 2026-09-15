@@ -1197,10 +1197,17 @@ async function native(
     return parseModelJson(content);
   } catch (error) {
     if (process.env.NODE_ENV === "development") {
+      const posMatch = /position (\d+)/i.exec(
+        error instanceof Error ? error.message : "",
+      );
+      const pos = posMatch ? parseInt(posMatch[1], 10) : -1;
+      const snippet =
+        pos >= 0 ? content.slice(Math.max(0, pos - 150), pos + 150) : "";
       console.error(
         "[native JSON parse failure]:",
         error instanceof Error ? error.message : error,
-        "raw content tail:",
+        pos >= 0 ? `\n[error context around pos ${pos}]:\n>>>${snippet}<<<` : "",
+        "\nraw content tail:",
         content.length > 2_000 ? `…${content.slice(-2_000)}` : content,
       );
     }

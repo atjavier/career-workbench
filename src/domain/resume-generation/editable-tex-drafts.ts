@@ -101,24 +101,85 @@ async function approvedArtifactSnapshot(input: { databasePath: string; workspace
     const state = openDatabase(input.databasePath);
     let approved = false;
     try {
-      approved = Boolean(state.prepare(`SELECT 1 FROM evidence_library_candidates c JOIN evidence_revisions r ON r.id = c.evidence_revision_id WHERE c.document_id IN (${groupIds.map(() => "?").join(",")}) AND r.review_state = 'approved' LIMIT 1`).get(...groupIds));
-    } finally { state.close(); }
+      approved = Boolean(
+        state
+          .prepare(
+            `SELECT 1 FROM evidence_library_candidates c
+             JOIN evidence_revisions initial_r ON initial_r.id = c.evidence_revision_id
+             JOIN evidence_revisions r ON r.evidence_id = initial_r.evidence_id
+             WHERE c.document_id IN (${groupIds.map(() => "?").join(",")})
+               AND r.review_state = 'approved'
+               AND NOT EXISTS (SELECT 1 FROM evidence_revisions n WHERE n.supersedes_revision_id = r.id)
+             LIMIT 1`,
+          )
+          .get(...groupIds),
+      );
+    } finally {
+      state.close();
+    }
     if (!approved) continue;
     for (const document of group.documents) {
       const record = byPath.get(document.libraryPath)!;
-      if (document.contentDigest !== record.digest) throw new WorkspaceError("RESUME_COACH_INVALID", "An approved workspace artifact changed before it could be used.", "Refresh the documented artifact and try the editable TeX draft again.");
-      artifacts.push({ documentId: record.id, path: record.path, contentDigest: record.digest, text: document.text });
+      if (document.contentDigest !== record.digest)
+        throw new WorkspaceError(
+          "RESUME_COACH_INVALID",
+          "An approved workspace artifact changed before it could be used.",
+          "Refresh the documented artifact and try the editable TeX draft again.",
+        );
+      artifacts.push({
+        documentId: record.id,
+        path: record.path,
+        contentDigest: record.digest,
+        text: document.text,
+      });
     }
   }
-  if (!artifacts.length) throw new WorkspaceError("RESUME_COACH_INVALID", "Approve documented workspace evidence before creating an editable TeX draft.", "Review at least one documented finding, then try again.");
+  if (!artifacts.length)
+    throw new WorkspaceError(
+      "RESUME_COACH_INVALID",
+      "Approve documented workspace evidence before creating an editable TeX draft.",
+      "Review at least one documented finding, then try again.",
+    );
   return artifacts.sort((left, right) => left.path.localeCompare(right.path));
 }
 function snapshotDigest(artifacts: Artifact[]): string {
-  return digest(artifacts.map(({ documentId, path, contentDigest }) => `${documentId}:${path}:${contentDigest}`).join("\n"));
+  return digest(
+    artifacts
+      .map(
+        ({ documentId, path, contentDigest }) =>
+          `${documentId}:${path}:${contentDigest}`,
+      )
+      .join("\n"),
+  );
 }
 /** Recomputes the database side of the complete approved set while the write lock is held. */
-function approvedArtifactSnapshotInDatabase(db: ReturnType<typeof openDatabase>, workspaceId: string): Array<{ documentId: string; path: string; contentDigest: string }> {
-  const rows = db.prepare("SELECT d.id AS document_id, d.library_path AS path, d.content_digest AS content_digest, EXISTS (SELECT 1 FROM evidence_library_candidates c JOIN evidence_revisions r ON r.id = c.evidence_revision_id WHERE c.document_id = d.id AND r.review_state = 'approved') AS approved FROM evidence_library_documents d JOIN evidence_library_imports i ON i.id = d.import_id JOIN resume_workspace_imports w ON w.import_id = i.id WHERE w.workspace_id = ? ORDER BY d.library_path, d.id").all(workspaceId) as Array<{ document_id: string; path: string; content_digest: string; approved: number }>;
+function approvedArtifactSnapshotInDatabase(
+  db: ReturnType<typeof openDatabase>,
+  workspaceId: string,
+): Array<{ documentId: string; path: string; contentDigest: string }> {
+  const rows = db
+    .prepare(
+      `SELECT d.id AS document_id, d.library_path AS path, d.content_digest AS content_digest,
+       EXISTS (
+         SELECT 1 FROM evidence_library_candidates c
+         JOIN evidence_revisions initial_r ON initial_r.id = c.evidence_revision_id
+         JOIN evidence_revisions r ON r.evidence_id = initial_r.evidence_id
+         WHERE c.document_id = d.id
+           AND r.review_state = 'approved'
+           AND NOT EXISTS (SELECT 1 FROM evidence_revisions n WHERE n.supersedes_revision_id = r.id)
+       ) AS approved
+       FROM evidence_library_documents d
+       JOIN evidence_library_imports i ON i.id = d.import_id
+       JOIN resume_workspace_imports w ON w.import_id = i.id
+       WHERE w.workspace_id = ?
+       ORDER BY d.library_path, d.id`,
+    )
+    .all(workspaceId) as Array<{
+    document_id: string;
+    path: string;
+    content_digest: string;
+    approved: number;
+  }>;
   const groups = new Map<string, typeof rows>();
   for (const row of rows) { const key = row.path.slice(0, row.path.lastIndexOf("/")); groups.set(key, [...(groups.get(key) ?? []), row]); }
   return [...groups.values()].filter((group) => group.some((row) => row.approved === 1)).flatMap((group) => group.map((row) => ({ documentId: row.document_id, path: row.path, contentDigest: row.content_digest }))).sort((left, right) => left.path.localeCompare(right.path));
