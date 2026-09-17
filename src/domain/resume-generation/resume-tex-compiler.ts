@@ -89,21 +89,43 @@ async function removeSafeDirectory(root: string, directory: string): Promise<voi
 }
 
 async function compiler(): Promise<string> {
-  try {
-    await assertSafeDirectoryAncestors(projectRoot, compilerPath);
-    const metadata = await lstat(compilerPath);
-    if (
-      !metadata.isFile() ||
-      metadata.isSymbolicLink() ||
-      !inside(projectRoot, compilerPath)
-    )
-      throw new Error("unavailable");
-    return compilerPath;
-  } catch {
-    throw new ResumeTexCompilationError(
-      "The local TeX compiler is unavailable.",
-    );
+  const binaryName = process.platform === "win32" ? "tectonic.exe" : "tectonic";
+  const projectCandidates = [
+    join(projectRoot, "tools", "tectonic", binaryName),
+    join(projectRoot, "tools", "tectonic", "tectonic.exe"),
+    join(projectRoot, "tools", "tectonic", "tectonic"),
+  ];
+  for (const candidate of projectCandidates) {
+    try {
+      await assertSafeDirectoryAncestors(projectRoot, candidate);
+      const metadata = await lstat(candidate);
+      if (
+        metadata.isFile() &&
+        !metadata.isSymbolicLink() &&
+        inside(projectRoot, candidate)
+      ) {
+        return candidate;
+      }
+    } catch {}
   }
+  if (process.platform !== "win32") {
+    const systemCandidates = [
+      "/opt/homebrew/bin/tectonic",
+      "/usr/local/bin/tectonic",
+      "/usr/bin/tectonic",
+    ];
+    for (const sysPath of systemCandidates) {
+      try {
+        const metadata = await lstat(sysPath);
+        if (metadata.isFile() && !metadata.isSymbolicLink()) {
+          return sysPath;
+        }
+      } catch {}
+    }
+  }
+  throw new ResumeTexCompilationError(
+    "The local TeX compiler is unavailable.",
+  );
 }
 
 async function run(

@@ -87,15 +87,82 @@ try {
 }
 `;
 
-/** Opens the Explorer-style Windows folder dialog; selected paths are never persisted. */
-export async function chooseLocalEvidenceFolder(): Promise<string | undefined> {
-  if (process.platform !== "win32") throw new WorkspaceError("EVIDENCE_DOCUMENTER_INVALID", "Local folder selection is available on Windows only.", "Choose a Project or Experience folder from this Windows computer.");
+export type FolderPickerExecutor = (
+  file: string,
+  args: string[],
+  options?: any,
+) => Promise<{ stdout: string; stderr?: string }>;
+
+/** Opens native folder dialog on Windows (PowerShell/COM), macOS (osascript), or Linux (zenity); selected paths are never persisted. */
+export async function chooseLocalEvidenceFolder(
+  executor?: FolderPickerExecutor,
+): Promise<string | undefined> {
+  const exec = executor ?? (execute as FolderPickerExecutor);
+  if (process.platform === "darwin") {
+    try {
+      const { stdout } = await exec("osascript", [
+        "-e",
+        'POSIX path of (choose folder with prompt "Choose a local Project or Experience folder")',
+      ], { timeout: 10 * 60_000, maxBuffer: 16 * 1024 });
+      const folder = stdout.trim().replace(/[\/\\]+$/, "");
+      return folder || undefined;
+    } catch (error: any) {
+      const message =
+        String(error?.message ?? "") +
+        " " +
+        String(error?.stderr ?? "") +
+        " " +
+        String(error?.stdout ?? "");
+      if (message.includes("-128") || /user canceled/i.test(message)) {
+        return undefined;
+      }
+      console.error("macOS native folder picker failed before a folder was selected.", error);
+      throw new WorkspaceError(
+        "EVIDENCE_DOCUMENTER_INVALID",
+        "The local folder picker could not open.",
+        "Grant permission or use this app from your macOS desktop session, then choose the folder again.",
+      );
+    }
+  }
+
+  if (process.platform === "linux") {
+    try {
+      const { stdout } = await exec("zenity", [
+        "--file-selection",
+        "--directory",
+        "--title=Choose a local Project or Experience folder",
+      ], { timeout: 10 * 60_000, maxBuffer: 16 * 1024 });
+      const folder = stdout.trim().replace(/[\/\\]+$/, "");
+      return folder || undefined;
+    } catch (error: any) {
+      if (error?.code === 1) return undefined;
+      console.error("Linux folder picker failed before a folder was selected.", error);
+      throw new WorkspaceError(
+        "EVIDENCE_DOCUMENTER_INVALID",
+        "The local folder picker could not open.",
+        "Ensure zenity is installed or enter a folder path, then try again.",
+      );
+    }
+  }
+
+  if (process.platform !== "win32") {
+    throw new WorkspaceError(
+      "EVIDENCE_DOCUMENTER_INVALID",
+      "Local folder selection is not supported on this platform.",
+      "Run this app on Windows or macOS, then choose the folder again.",
+    );
+  }
+
   try {
-    const { stdout } = await execute("powershell.exe", ["-NoProfile", "-NonInteractive", "-STA", "-Command", pickerScript], { timeout: 10 * 60_000, windowsHide: true, maxBuffer: 16 * 1024 });
+    const { stdout } = await exec("powershell.exe", ["-NoProfile", "-NonInteractive", "-STA", "-Command", pickerScript], { timeout: 10 * 60_000, windowsHide: true, maxBuffer: 16 * 1024 });
     const folder = stdout.trim();
     return folder || undefined;
   } catch (error) {
     console.error("Explorer-style Windows folder picker failed before a folder was selected.", error);
-    throw new WorkspaceError("EVIDENCE_DOCUMENTER_INVALID", "The local folder picker could not open.", "Use this app from your Windows desktop session, then choose the folder again.");
+    throw new WorkspaceError(
+      "EVIDENCE_DOCUMENTER_INVALID",
+      "The local folder picker could not open.",
+      "Use this app from your Windows desktop session, then choose the folder again.",
+    );
   }
 }

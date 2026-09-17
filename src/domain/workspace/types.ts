@@ -107,12 +107,12 @@ export function toSafeWorkspaceError(error: unknown): SafeWorkspaceError {
     return new WorkspaceError(
       "DATA_STORAGE_UNAVAILABLE",
       "The private workspace is currently read-only, so this change was not saved.",
-      "Close any other copy of the app, then verify your Windows account can modify its PersonalJobDiscovery app-data folder and try again.",
+      "Close any other copy of the app, then verify your user account can modify its PersonalJobDiscovery app-data folder and try again.",
     );
   }
   return new WorkspaceError(
     "WORKSPACE_INITIALIZATION_FAILED",
     "The private workspace could not be initialized.",
-    "Check your Windows account's local app-data access, then try initialization again.",
+    "Check your user account's local app-data access, then try initialization again.",
   );
 }

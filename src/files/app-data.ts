@@ -10,8 +10,17 @@ export type AppDataPaths = {
 };
 
 function defaultAppDataRoot(): string {
-  const windowsLocalAppData = process.env.LOCALAPPDATA;
-  const parent = windowsLocalAppData ?? join(homedir(), "AppData", "Local");
+  if (process.env.LOCALAPPDATA) {
+    return join(process.env.LOCALAPPDATA, "PersonalJobDiscovery");
+  }
+  if (process.platform === "darwin") {
+    return join(homedir(), "Library", "Application Support", "PersonalJobDiscovery");
+  }
+  if (process.platform === "win32") {
+    return join(homedir(), "AppData", "Local", "PersonalJobDiscovery");
+  }
+  const xdgDataHome = process.env.XDG_DATA_HOME;
+  const parent = xdgDataHome ?? join(homedir(), ".local", "share");
   return join(parent, "PersonalJobDiscovery");
 }
 
@@ -44,7 +53,7 @@ export async function resolveAppDataPaths(appDataRoot?: string): Promise<AppData
       throw new WorkspaceError(
         "APP_DATA_PATH_INVALID",
         "The private workspace location cannot be checked.",
-        "Check that your Windows account can use its local app-data folder, then try again.",
+        "Check that your user account can use its local app-data folder, then try again.",
       );
     }
 
@@ -54,7 +63,7 @@ export async function resolveAppDataPaths(appDataRoot?: string): Promise<AppData
       throw new WorkspaceError(
         "APP_DATA_PATH_INVALID",
         "The private workspace location cannot be created.",
-        "Check that your Windows account can use its local app-data folder, then try again.",
+        "Check that your user account can use its local app-data folder, then try again.",
       );
     }
   }
