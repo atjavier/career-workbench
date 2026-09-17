@@ -148,8 +148,11 @@ function resumeGenerationDocumentation(
     .filter((group) => group.documents.length > 0);
 }
 function parseModelJson(content: string): Record<string, unknown> {
-  const fenced = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(content.trim());
-  const source = fenced?.[1] ?? content.trim();
+  const cleaned = content.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+  const fenced = /```(?:json)?\s*([\s\S]*?)\s*```/i.exec(cleaned);
+  let source = (fenced?.[1] ?? cleaned).trim();
+  const firstBrace = source.indexOf("{");
+  if (firstBrace > 0) source = source.slice(firstBrace);
   try {
     return JSON.parse(source);
   } catch (firstError) {
@@ -218,6 +221,10 @@ function parseModelJson(content: string): Record<string, unknown> {
       repaired.replace(/(?<=})\s*,\s*"unknowns"\s*:/g, '],"unknowns":'),
       repaired.replace(/(?<=\])\s*\}\s*,\s*"unknowns"\s*:/g, ',"unknowns":'),
     ];
+    const lastBrace = repaired.lastIndexOf("}");
+    if (lastBrace > 0 && lastBrace < repaired.length - 1) {
+      candidates.push(repaired.slice(0, lastBrace + 1));
+    }
     for (const candidate of candidates) {
       try {
         return JSON.parse(candidate);
@@ -4150,6 +4157,6 @@ export async function requestEditableTexRevision(request: EditableTexRevisionReq
   // validateEditableTexRequest budgets this exact serialization before any transport.
   const content = await nativeText(request.connection, editableTexRevisionSystemInstruction, editableTexPacket(request), editableTexOutputTokens, fetcher, "RESUME_COACH_UNAVAILABLE", editableTexMaximumResponseBytes);
   let parsed: unknown;
-  try { parsed = JSON.parse(content); } catch { editableTexInvalid("The local model returned a malformed TeX response envelope."); }
+  try { parsed = parseModelJson(content); } catch { editableTexInvalid("The local model returned a malformed TeX response envelope."); }
   return validateEditableTexRevisionResponse(parsed, request);
 }

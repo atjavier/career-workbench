@@ -25,7 +25,7 @@ const digest = (value: unknown) =>
 
 export type LocalModelReadiness = {
   ready: boolean;
-  displayLabel?: "Qwen3.5-9B";
+  displayLabel?: string;
 };
 export type ConfigureLocalModelInput = {
   appDataRoot?: string;
@@ -52,12 +52,9 @@ function unavailable(
 }
 function invalid(
   summary: string,
-  next = "Choose a loaded Qwen3.5-9B model and try again.",
+  next = "Choose a loaded local model and try again.",
 ): never {
   throw new WorkspaceError("LOCAL_MODEL_CONFIGURATION_INVALID", summary, next);
-}
-function validQwenIdentifier(value: string): boolean {
-  return /qwen/i.test(value) && /3[._-]?5/i.test(value) && /9\s*b/i.test(value);
 }
 
 async function verifyModel(
@@ -92,23 +89,40 @@ async function verifyModel(
     const model = candidate as {
       type?: unknown;
       key?: unknown;
+      id?: unknown;
       display_name?: unknown;
       params_string?: unknown;
       loaded_instances?: unknown;
     };
+    const keyMatch =
+      model.key === modelIdentifier ||
+      model.id === modelIdentifier ||
+      (typeof model.key === "string" &&
+        model.key.toLowerCase() === modelIdentifier.toLowerCase()) ||
+      (typeof model.id === "string" &&
+        model.id.toLowerCase() === modelIdentifier.toLowerCase()) ||
+      (typeof model.display_name === "string" &&
+        model.display_name.toLowerCase() === modelIdentifier.toLowerCase()) ||
+      (Array.isArray(model.loaded_instances) &&
+        model.loaded_instances.some(
+          (inst: any) =>
+            inst &&
+            typeof inst === "object" &&
+            (inst.id === modelIdentifier ||
+              (typeof inst.id === "string" &&
+                inst.id.toLowerCase() === modelIdentifier.toLowerCase())),
+        ));
     return (
-      model.type === "llm" &&
-      model.key === modelIdentifier &&
-      validQwenIdentifier(
-        `${String(model.key)} ${String(model.display_name ?? "")} ${String(model.params_string ?? "")}`,
-      ) &&
+      model.type !== "embedding" &&
+      keyMatch &&
       Array.isArray(model.loaded_instances) &&
       model.loaded_instances.length > 0
     );
   }) as { loaded_instances: unknown[] } | undefined;
   if (!matched)
     invalid(
-      "Choose a loaded Qwen3.5-9B model before saving Local AI settings.",
+      "Choose a loaded local model before saving Local AI settings.",
+      `Confirm '${modelIdentifier}' is loaded in LM Studio and try again.`,
     );
   const contexts = matched.loaded_instances.map((instance) => {
     if (!instance || typeof instance !== "object") return undefined;
@@ -145,8 +159,8 @@ export async function configureLocalModel(
 ): Promise<LocalModelReadiness> {
   const modelIdentifier = input.modelIdentifier.trim();
   const fetcher = input.fetcher ?? fetch;
-  if (!plain(modelIdentifier, 240) || !validQwenIdentifier(modelIdentifier))
-    invalid("Enter a valid loaded Qwen3.5-9B model.");
+  if (!plain(modelIdentifier, 240))
+    invalid("Enter a valid loaded model identifier.");
   const contextLimitTokens = await verifyModel(modelIdentifier, fetcher);
   const paths = await resolveAppDataPaths(input.appDataRoot);
   const now = new Date().toISOString();
@@ -204,7 +218,12 @@ export async function configureLocalModel(
   } finally {
     db.close();
   }
-  return { ready: true, displayLabel: "Qwen3.5-9B" };
+  return {
+    ready: true,
+    displayLabel: /qwen/i.test(modelIdentifier)
+      ? "Qwen3.5-9B"
+      : modelIdentifier,
+  };
 }
 
 /** Shared local-model consumers remain compatible with pre-context-limit settings. */
@@ -264,8 +283,13 @@ export async function readLocalModelReadiness(
   input: { appDataRoot?: string } = {},
 ): Promise<LocalModelReadiness> {
   try {
-    await readLocalModelGatewayConfiguration(input);
-    return { ready: true, displayLabel: "Qwen3.5-9B" };
+    const config = await readLocalModelGatewayConfiguration(input);
+    return {
+      ready: true,
+      displayLabel: /qwen/i.test(config.modelIdentifier)
+        ? "Qwen3.5-9B"
+        : config.modelIdentifier,
+    };
   } catch {
     return { ready: false };
   }

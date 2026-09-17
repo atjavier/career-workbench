@@ -3143,4 +3143,65 @@ test("Resume Coach accepts unedited baseline work sections without requiring unp
   );
 });
 
+test("Resume Coach accepts reasoning model responses containing think tags and conversational code fences", async () => {
+  const base = {
+    ...requestBase,
+    baseline,
+  };
+  const value = {
+    ...base,
+    consentFingerprint: resumeCoachConsentFingerprint(base),
+  };
+  const response = {
+    schemaVersion: 1,
+    selectionEcho: value.consentFingerprint,
+    sections: [
+      {
+        heading: "Experience",
+        text: "Software Engineering Intern | Example Co",
+      },
+      {
+        heading: "Education",
+        text: "Example University | Computer Science | 2026",
+      },
+      {
+        heading: "Projects",
+        text: "- Built accessible TypeScript interfaces.",
+      },
+      {
+        heading: "Technical Skills",
+        text: "Languages: TypeScript",
+      },
+    ],
+    claims: [
+      {
+        text: "Built accessible TypeScript interfaces.",
+        evidenceIndexes: [0],
+      },
+    ],
+    unknowns: [],
+  };
+  const wrappedContent = `<think>
+Analyzing candidate evidence:
+- Candidate built accessible TypeScript interfaces.
+Formatting output into required schema.
+</think>
+Here is the JSON response matching your requested schema:
+\`\`\`json
+${JSON.stringify(response, null, 2)}
+\`\`\`
+Let me know if you need further adjustments!`;
+
+  const result = await requestResumeCoach(value, async () => new Response(
+    JSON.stringify({
+      output: [{ type: "message", content: wrappedContent }],
+    }),
+    { status: 200 },
+  ));
+  assert.equal(result.schemaVersion, 1);
+  assert.equal(result.selectionEcho, value.consentFingerprint);
+  assert.equal(result.sections.length, 4);
+});
+
+
 

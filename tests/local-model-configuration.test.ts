@@ -70,3 +70,55 @@ test("a stale selection and a failed database save leave no selected configurati
     } finally { verify.close(); }
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+test("supports configuring non-Qwen loaded models and preserves dynamic displayLabel", async () => {
+  const root = await mkdtemp(join(tmpdir(), "local-model-config-generic-"));
+  try {
+    const genericModels = () =>
+      new Response(
+        JSON.stringify({
+          models: [
+            {
+              type: "llm",
+              key: "glm-5.3-flash",
+              display_name: "GLM 5.3 Flash",
+              loaded_instances: [{ id: "inst-glm-1", context_length: 32768 }],
+            },
+            {
+              type: "llm",
+              key: "meta-llama/llama-3.2-3b-instruct",
+              id: "llama-3.2-3b",
+              display_name: "Llama 3.2 3B Instruct",
+              loaded_instances: [{ id: "inst-llama-1", config: { context_length: 16384 } }],
+            },
+          ],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+
+    const savedGlm = await configureLocalModel({
+      appDataRoot: join(root, "private"),
+      modelIdentifier: "glm-5.3-flash",
+      fetcher: async () => genericModels(),
+    });
+    assert.equal(savedGlm.ready, true);
+    assert.equal(savedGlm.displayLabel, "glm-5.3-flash");
+
+    const readinessGlm = await readLocalModelReadiness({ appDataRoot: join(root, "private") });
+    assert.deepEqual(readinessGlm, { ready: true, displayLabel: "glm-5.3-flash" });
+
+    const savedLlama = await configureLocalModel({
+      appDataRoot: join(root, "private"),
+      modelIdentifier: "llama-3.2-3b",
+      fetcher: async () => genericModels(),
+    });
+    assert.equal(savedLlama.ready, true);
+    assert.equal(savedLlama.displayLabel, "llama-3.2-3b");
+
+    const readinessLlama = await readLocalModelReadiness({ appDataRoot: join(root, "private") });
+    assert.deepEqual(readinessLlama, { ready: true, displayLabel: "llama-3.2-3b" });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
