@@ -95,9 +95,10 @@ test("Linux folder picker executes zenity and returns selected path or undefined
 
 test("privateAppDataRoot respects LOCALAPPDATA when present", () => {
   const original = process.env.LOCALAPPDATA;
+  const customAppData = process.platform === "win32" ? "C:\\CustomAppData" : "/tmp/CustomAppData";
   try {
-    process.env.LOCALAPPDATA = "C:\\CustomAppData";
-    assert.equal(privateAppDataRoot(), join("C:\\CustomAppData", "PersonalJobDiscovery"));
+    process.env.LOCALAPPDATA = customAppData;
+    assert.equal(privateAppDataRoot(), join(customAppData, "PersonalJobDiscovery"));
   } finally {
     if (original === undefined) delete process.env.LOCALAPPDATA;
     else process.env.LOCALAPPDATA = original;

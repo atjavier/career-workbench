@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -10,7 +10,7 @@ const execFileAsync = promisify(execFile);
 
 for (const [kind, name] of [["structured", "compileResumeDraftPdf"], ["raw", "compileRawTexDraftPdf"]] as const) {
   test(`${name} preserves command, cwd, output validation and cleanup at runtime`, async () => {
-    const root = await mkdtemp(join(tmpdir(), "resume-tex-compiler-contract-"));
+    const root = await realpath(await mkdtemp(join(tmpdir(), "resume-tex-compiler-contract-")));
     try {
       const result = await execFileAsync(process.execPath, [
         "--experimental-test-module-mocks", "--import", "tsx",

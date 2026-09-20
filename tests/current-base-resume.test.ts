@@ -57,7 +57,8 @@ test("legacy Current Base Resume import is history-only and staging helpers stil
   try {
     await assert.rejects(importCurrentBaseResume({ appDataRoot, filename: "Resume.pdf", bytes: new Uint8Array([1, 2, 3]) }), { code: "CURRENT_BASE_RESUME_HISTORY_ONLY" });
     await mkdir(join(appDataRoot, "current-base-resumes", "test-id"), { recursive: true });
-    await assert.rejects(stageCurrentBaseResume(appDataRoot, "test-id", "Resume.pdf", textPdf()), /EPERM|EEXIST|exist/i);
+    await writeFile(join(appDataRoot, "current-base-resumes", "test-id", "existing.pdf"), "existing");
+    await assert.rejects(stageCurrentBaseResume(appDataRoot, "test-id", "Resume.pdf", textPdf()), /EPERM|EEXIST|ENOTEMPTY|exist/i);
     await assert.rejects(readFile(join(appDataRoot, ".import-staging", "test-id", "Resume.pdf")));
   } finally { await rm(root, { recursive: true, force: true }); }
 });

@@ -194,6 +194,14 @@ async function requireDirectory(
 }
 async function assertSafeAncestors(path: string): Promise<void> {
   for (let current = resolve(path); ; current = resolve(current, "..")) {
+    if (
+      process.platform === "darwin" &&
+      (current === "/var" || current === "/tmp" || current === "/etc")
+    ) {
+      const parent = resolve(current, "..");
+      if (parent === current) return;
+      continue;
+    }
     const info = await lstat(current).catch(() => undefined);
     if (
       info &&
