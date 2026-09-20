@@ -364,7 +364,7 @@ test("Current Base Resume UI remains a safe retained-history component outside t
     /storageLocation|contentDigest|absolute path|parser diagnostics/i,
   );
   assert.match(ui, /Evidence support:/);
-  assert.match(ui, /retained evidence reference that is no longer available/);
+  assert.match(ui, /retained\s+evidence\s+reference\s+that\s+is\s+no\s+longer\s+available/);
   assert.match(ui, /Review this evidence/);
   assert.match(ui, /Save the displayed edits before approving this revision/);
   assert.match(ui, /Manual resume review/);

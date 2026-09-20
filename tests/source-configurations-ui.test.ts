@@ -48,7 +48,7 @@ test("Permitted Sources remains an accessible historical policy control outside 
   assert.doesNotMatch(page, /Permitted Sources/);
   assert.match(actions, /sourceConfigurationAction/);
   assert.match(actions, /careersPageUrlAction/);
-  assert.match(ui, /will not be opened or scanned/);
+  assert.match(ui, /will\s+not\s+be\s+opened\s+or\s+scanned/);
   for (const source of [
     "LinkedIn Jobs",
     "JobStreet Philippines",

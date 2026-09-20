@@ -100,7 +100,10 @@ test("the registered workflow separates folder documentation from base-resume ge
   assert.match(coach, /every documented Experience/);
   assert.match(registry, /resume\.generate-base-resume/);
   assert.match(registry, /resume\.coach-resume/);
-  assert.match(coach, /does not rebuild the resume on every visit/);
+  assert.match(
+    coach,
+    /does\s+not\s+rebuild\s+the\s+resume\s+on\s+every\s+visit/,
+  );
   assert.doesNotMatch(coach, /startTransition\(\(\) => generationAction/);
   assert.doesNotMatch(coach, /name="evidenceId"|name="consent"/);
   assert.match(actions, /const selectedIds = evidence\.map/);
@@ -191,7 +194,7 @@ test("generated resumes offer an accessible evidence-based regeneration control 
 
   assert.match(
     coach,
-    /<form action=\{revisionAction\}[\s\S]*?name="generationCommand" value="revision"[\s\S]*?<button type="submit"[^>]*>\s*\{revisionPending \? "Regenerating resume…" : "Regenerate resume"\}/,
+    /<form[\s\S]*?action=\{revisionAction\}[\s\S]*?name="generationCommand"[\s\S]*?value="revision"[\s\S]*?<button[^>]*type="submit"[^>]*>[\s\S]*?\{revisionPending[\s\S]*?\?[\s\S]*?"Regenerating resume…"[\s\S]*?:[\s\S]*?"Regenerate resume"\}[\s\S]*?<\/button>/,
   );
   assert.doesNotMatch(
     coach,

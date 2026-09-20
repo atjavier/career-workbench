@@ -8,7 +8,7 @@ test("Data & Storage exposes local-only consequences and semantic confirmations"
     "utf8",
   );
   assert.match(ui, /workspace database snapshot/);
-  assert.match(ui, /not portable, cloud-synced, or application-encrypted/);
+  assert.match(ui, /not\s+portable,\s+cloud-synced,\s+or\s+application-encrypted/);
   assert.match(ui, /Local trash/);
   assert.match(ui, /type="checkbox"/);
   assert.match(ui, /aria-live/);

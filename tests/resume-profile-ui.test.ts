@@ -128,7 +128,7 @@ test("mandatory Coach Resume interview is chat-only and accessible", async () =>
     "Try again",
     "1_500",
   ])
-    assert.match(interview, new RegExp(label));
+    assert.match(interview, new RegExp(label.replace(/\s+/g, "\\s+")));
   assert.match(streamRoute, /streamResumeInterviewCoach/);
   assert.match(streamRoute, /beginResumeInterviewCoachStream/);
   assert.match(streamRoute, /finalizeResumeInterviewCoachStream/);

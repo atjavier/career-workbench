@@ -17,7 +17,10 @@ test("Jobs renders the captured Opportunity Library rather than legacy discovery
     "Add opportunity",
     "No captured opportunities saved yet",
   ])
-    assert.ok(`${ui}\n${page}\n${settings}`.includes(token));
+    assert.match(
+      `${ui} ${page} ${settings}`.replace(/\s+/g, " "),
+      new RegExp(token.replace(/\s+/g, " ")),
+    );
   assert.match(page, /listCapturedOpportunities/);
   for (const token of [
     "listJobListings",
@@ -45,7 +48,10 @@ test("Captured opportunity cards preserve local attribution and an explicit outb
     "Captured ",
     "No fit guidance yet",
   ])
-    assert.ok(ui.includes(token));
+    assert.match(
+      ui.replace(/\s+/g, " "),
+      new RegExp(token.replace(/\s+/g, " ")),
+    );
   assert.doesNotMatch(
     ui,
     /fetch\s*\(|setInterval|setTimeout|browser automation|adapter|source configuration|refresh|credential/i,
@@ -70,7 +76,7 @@ test("Jobs keeps the capture dialog, local search, accessible states, and narrow
     'setJobsView("all"); setQuery(""); closeCapture()',
     "Applied opportunities are not available yet",
   ])
-    assert.ok(ui.includes(token));
+    assert.ok(ui.replace(/\s+/g, " ").includes(token.replace(/\s+/g, " ")));
   for (const token of [
     "copiedDescription",
     "contentDigest",
@@ -128,7 +134,10 @@ test("Stitch Job Board provides company logo badge, search clear ref, and safe o
     "sourceHost",
     "Return to all opportunities",
   ])
-    assert.ok(ui.includes(token));
+    assert.match(
+      ui.replace(/\s+/g, " "),
+      new RegExp(token.replace(/\s+/g, " ")),
+    );
   assert.match(styles, /\.company-logo-badge\s*\{/);
   assert.match(styles, /@media\s*\(prefers-reduced-motion:\s*reduce\)/);
   assert.match(styles, /#opportunity-search::-webkit-search-cancel-button/);

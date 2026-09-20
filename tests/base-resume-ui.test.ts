@@ -27,7 +27,7 @@ test("Template importer is available only until the active resume has an importe
   assert.match(importer, /aria-invalid=\{state\.status === "error"\}/);
   assert.match(
     importer,
-    /aria-describedby=\{state\.status === "error" \? "base-resume-import-error"/,
+    /aria-describedby=\{\s*state\.status === "error" \? "base-resume-import-error"/,
   );
   assert.match(importer, /type="submit"/);
   assert.doesNotMatch(page, /storageLocation|primaryDigest|absolute/i);

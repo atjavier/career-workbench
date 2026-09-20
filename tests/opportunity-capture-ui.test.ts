@@ -32,7 +32,7 @@ test("Opportunity capture is an accessible local review flow, not a source retri
   assert.match(capture, /<textarea/);
   assert.match(capture, /aria-invalid/);
   assert.match(capture, /aria-describedby/);
-  assert.match(capture, /role="status" aria-live="polite"/);
+  assert.match(capture, /role="status"\s+aria-live="polite"/);
   assert.match(capture, /noValidate/);
   assert.match(capture, /disabled=\{formPending\}/);
   assert.match(capture, /draftIsCurrent && state\.draft/);

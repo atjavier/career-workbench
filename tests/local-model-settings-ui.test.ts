@@ -19,7 +19,7 @@ test("Local AI Settings and Resume recovery keep secrets and diagnostics out of 
   assert.match(settings, /aria-busy/);
   assert.match(settings, /aria-live="polite"/);
   assert.match(settings, /Qwen3\.5-9B/);
-  assert.match(settings, /does not use an API token/);
+  assert.match(settings, /does\s+not\s+use\s+an\s+API\s+token/);
   assert.match(page, /ApplicationShell active="Settings"/);
   assert.match(coach, /Set up local AI/);
   assert.match(coach, /local employer-side reviewer/);

@@ -15,7 +15,10 @@ test("Resume Coach presents the generated PDF and does not regenerate on page vi
     "aria-busy",
     'aria-live="polite"',
   ])
-    assert.ok(coach.includes(token));
+    assert.match(
+      coach.replace(/\s+/g, " "),
+      new RegExp(token.replace(/\s+/g, " ")),
+    );
   assert.ok(
     coach.indexOf("Resume template is unchanged") <
       coach.indexOf("Review base resume"),
@@ -47,7 +50,7 @@ test("review route awaits async params and renders only a safe local read projec
   assert.match(page, /await params/);
   assert.match(
     page,
-    /readMaterialDraft\(\{ draftId, requireHandoff: true \}\)/,
+    /readMaterialDraft\(\{\s*draftId,\s*requireHandoff:\s*true,?\s*\}\)/,
   );
   assert.match(page, /unavailable/);
   for (const token of [

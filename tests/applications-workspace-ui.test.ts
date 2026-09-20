@@ -32,13 +32,13 @@ test("Applications gives an honest, accessible empty tracking state and useful h
     assert.match(workspace, new RegExp(text));
   }
   assert.match(workspace, /<h1>/);
-  assert.match(workspace, /<section aria-labelledby="applications-status"/);
-  assert.match(workspace, /<section aria-labelledby="applications-list"/);
+  assert.match(workspace, /<section\s+aria-labelledby="applications-status"/);
+  assert.match(workspace, /<section\s+aria-labelledby="applications-list"/);
   assert.match(workspace, /<Link href="\/">Browse Jobs<\/Link>/);
   assert.doesNotMatch(workspace, /href="\/google-sheets"/);
   assert.match(
     workspace,
-    /Ordered rounds, dates, statuses, outcomes, notes, and next actions\./,
+    /Ordered\s+rounds,\s+dates,\s+statuses,\s+outcomes,\s+notes,\s+and\s+next\s+actions\./,
   );
   assert.match(workspace, /captured opportunities/i);
 });
@@ -54,7 +54,7 @@ test("Applications preserves local-first scope and does not manufacture tracking
   );
   assert.match(
     workspace,
-    /Local tracking will remain available without a Google Sheets connection\./,
+    /Local\s+tracking\s+will\s+remain\s+available\s+without\s+a\s+Google\s+Sheets\s+connection\./,
   );
   assert.match(styles, /\.applications-workspace/);
   assert.match(styles, /\.applications-empty-state/);

@@ -30,7 +30,7 @@ test("Experience & Projects exposes category-specific source-folder handoff and 
     "Ready to use",
     "delete-documented-item",
     "Confirm permanent deletion",
-    'evidenceCommand" value="remove',
+    'evidenceCommand"[\\s\\S]*?value="remove',
   ])
     assert.match(ui, new RegExp(text));
   assert.match(workspace, /resume-page-head/);
@@ -47,7 +47,7 @@ test("Experience & Projects exposes category-specific source-folder handoff and 
     "It is not uploaded",
     "bounded local inspection",
   ])
-    assert.match(ui, new RegExp(text));
+    assert.match(ui, new RegExp(text.replace(/\s+/g, "\\s+")));
   assert.doesNotMatch(
     ui + workspace,
     /type="file"|webkitdirectory|sourceManifest|sourceFile|Base Resume|Resume\.pdf|Add Experience|Add Project|Absolute local|accept="\.md|local LM Studio|Document for Resume proposals|Markdown copies|Codex prompt|copyable/i,
