@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { lstat, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
 
 import type { MaterialDraftView } from "@/domain/resume-generation/material-draft-commands";
@@ -122,9 +122,10 @@ async function compiler(): Promise<string> {
     ];
     for (const sysPath of systemCandidates) {
       try {
-        const metadata = await lstat(sysPath);
+        const target = await realpath(sysPath);
+        const metadata = await lstat(target);
         if (metadata.isFile() && !metadata.isSymbolicLink()) {
-          return sysPath;
+          return target;
         }
       } catch {}
     }

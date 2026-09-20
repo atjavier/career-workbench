@@ -92,7 +92,6 @@ const supports = (claim: string, source: string) => {
 // malformed control sequence; reject the remaining non-printing controls.
 const textBlock = (value: unknown, maximum: number) =>
   typeof value === "string" &&
-  value.length > 0 &&
   value.length <= maximum &&
   !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/.test(value);
 // Keep draft reads aligned with the Resume Coach/documentation contract. A
@@ -113,7 +112,7 @@ function parseStoredDraft(row: StoredMaterialDraftRead): MaterialDraftView {
       !uuidV7(claim.id) ||
       claim.ordinal !== ordinal ||
       !plain(claim.text, 1_000) ||
-      claim.evidence.length > 50 ||
+      claim.evidence.length > maxResumeCoachEvidence ||
       claim.evidence.some(
         (item) =>
           !uuidV7(item.id) ||
