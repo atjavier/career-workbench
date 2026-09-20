@@ -3,6 +3,7 @@
 import { dirname } from "node:path";
 import { initializeWorkspace } from "@/domain/workspace/initialize-workspace";
 import {
+  bootstrapBundledBaseResume,
   importBaseResume,
   maximumBaseResumeFiles,
   maximumBaseResumeFileSize,
@@ -380,6 +381,8 @@ export async function resumeOnboardingAction(
     created = await createResumeWorkspace({
       name: String(formData.get("resumeName") ?? ""),
     });
+    await bootstrapBundledBaseResume().catch(() => undefined);
+    await bootstrapBundledResumeTemplate().catch(() => undefined);
     await saveCandidateProfile({
       expectedStateRevisionNumber: created.revisionNumber,
       values: {
@@ -616,9 +619,17 @@ export async function generateBaseResumeAction(
         "Complete the current Resume Coach step before generating a resume.",
         "Return to the active resume workspace and finish its required clarification or recovery step.",
       );
-    const baseline = await readInitialResumeTemplateContract({
+    let baseline = await readInitialResumeTemplateContract({
       appDataRoot: paths.root,
-    });
+    }).catch(() => undefined);
+    if (!baseline) {
+      await bootstrapBundledBaseResume({ appDataRoot: paths.root }).catch(
+        () => undefined,
+      );
+      baseline = await readInitialResumeTemplateContract({
+        appDataRoot: paths.root,
+      });
+    }
     if (!template) {
       await bootstrapBundledResumeTemplate();
       const templateDb = openDatabase(paths.databasePath);

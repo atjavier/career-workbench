@@ -105,12 +105,44 @@ export function extractResumeTemplateContract(
     return [{ heading, tag: sectionTag, existingDetail: textFromTex(body) }];
   });
   if (
-    sections.length < 2 ||
-    sections.length > 8 ||
-    new Set(sections.map((section) => section.tag)).size !== sections.length
-  )
-    return undefined;
-  return { baselineId, baselineDigest, sections };
+    sections.length >= 2 &&
+    sections.length <= 8 &&
+    new Set(sections.map((section) => section.tag)).size === sections.length
+  ) {
+    return { baselineId, baselineDigest, sections };
+  }
+  if (
+    tex.includes("{{EXPERIENCE_SECTION}}") ||
+    tex.includes("{{PROJECTS_SECTION}}")
+  ) {
+    const placeholderSections: ResumeTemplateSectionContract[] = [
+      tex.includes("{{EXPERIENCE_SECTION}}") && {
+        heading: "Experience",
+        tag: "experience",
+        existingDetail: "",
+      },
+      tex.includes("{{EDUCATION_SECTION}}") && {
+        heading: "Education",
+        tag: "education",
+        existingDetail: "",
+      },
+      tex.includes("{{PROJECTS_SECTION}}") && {
+        heading: "Projects",
+        tag: "projects",
+        existingDetail: "",
+      },
+      tex.includes("{{SKILLS_SECTION}}") && {
+        heading: "Technical Skills",
+        tag: "technical-skills",
+        existingDetail: "",
+      },
+    ].filter(Boolean) as ResumeTemplateSectionContract[];
+
+    if (placeholderSections.length >= 2) {
+      return { baselineId, baselineDigest, sections: placeholderSections };
+    }
+  }
+  return undefined;
 }
 
 export async function readInitialResumeTemplateContract(

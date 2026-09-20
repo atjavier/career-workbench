@@ -4,7 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { importBaseResume } from "../src/domain/base-resume/import-base-resume";
+import {
+  bootstrapBundledBaseResume,
+  importBaseResume,
+} from "../src/domain/base-resume/import-base-resume";
 import {
   extractResumeTemplateContract,
   readInitialResumeTemplateContract,
@@ -50,6 +53,51 @@ TypeScript, SQLite
     contract?.sections[1]?.existingDetail,
     "BioEvidence\n- Built an evidence workflow.",
   );
+});
+
+test("extracts template contract from token-based resume template", () => {
+  const contract = extractResumeTemplateContract(
+    String.raw`\documentclass{article}
+\begin{document}
+{{HEADER}}
+{{EXPERIENCE_SECTION}}
+{{EDUCATION_SECTION}}
+{{PROJECTS_SECTION}}
+{{SKILLS_SECTION}}
+\end{document}`,
+    "00000000-0000-7000-8000-000000000002",
+    `sha256:${"b".repeat(64)}`,
+  );
+  assert.ok(contract);
+  assert.deepEqual(
+    contract?.sections.map(({ heading, tag }) => ({ heading, tag })),
+    [
+      { heading: "Experience", tag: "experience" },
+      { heading: "Education", tag: "education" },
+      { heading: "Projects", tag: "projects" },
+      { heading: "Technical Skills", tag: "technical-skills" },
+    ],
+  );
+});
+
+test("bootstraps bundled resume-template.tex when no baseline exists and is idempotent", async () => {
+  const { root } = await fixture();
+  const appDataRoot = join(root, "private");
+  try {
+    const bootstrapped = await bootstrapBundledBaseResume({ appDataRoot });
+    assert.ok(bootstrapped);
+    assert.equal(bootstrapped?.baseResume.primaryFilename, "resume-template.tex");
+    const contract = await readInitialResumeTemplateContract({ appDataRoot });
+    assert.equal(contract.baselineId, bootstrapped.baseResume.id);
+    assert.deepEqual(
+      contract.sections.map((section) => section.heading),
+      ["Experience", "Education", "Projects", "Technical Skills"],
+    );
+    const idempotent = await bootstrapBundledBaseResume({ appDataRoot });
+    assert.equal(idempotent, undefined);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("reads only the initial imported resume.tex baseline and fails safely when unavailable", async () => {

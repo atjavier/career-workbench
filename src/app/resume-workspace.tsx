@@ -4,6 +4,7 @@ import { BaseResumeImporter } from "@/app/base-resume-importer";
 import { ResumeCoach } from "@/app/resume-coach";
 import { ResumeWorkspacePicker } from "@/app/resume-workspace-picker";
 import { ResumeOnboarding } from "@/app/resume-onboarding";
+import { bootstrapBundledBaseResume } from "@/domain/base-resume/import-base-resume";
 import { readInitialResumeTemplateContract } from "@/domain/base-resume/resume-template-contract";
 import { readCandidateProfileState } from "@/domain/resume-generation/candidate-profile-commands";
 import { readLocalModelReadiness } from "@/domain/resume-generation/local-model-configuration-commands";
@@ -36,9 +37,15 @@ export async function ResumeWorkspace() {
     error: safeError(error),
   }));
   const localModel = await readLocalModelReadiness();
-  const baselineReady = await readInitialResumeTemplateContract()
+  let baselineReady = await readInitialResumeTemplateContract()
     .then(() => true)
     .catch(() => false);
+  if (!baselineReady) {
+    await bootstrapBundledBaseResume().catch(() => undefined);
+    baselineReady = await readInitialResumeTemplateContract()
+      .then(() => true)
+      .catch(() => false);
+  }
   const materials = await (async () => {
     if (!workspaceState.activeWorkspace) return [];
     const paths = await resolveAppDataPaths();

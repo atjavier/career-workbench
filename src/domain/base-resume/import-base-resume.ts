@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { basename, join, relative, resolve } from "node:path";
 
 import { createAuditEvent, createUuidV7 } from "@/audit/audit-event";
@@ -267,3 +267,36 @@ export function isRelativePrivateLocation(
     )
   );
 }
+
+export async function bootstrapBundledBaseResume(
+  input: { appDataRoot?: string } = {},
+): Promise<ImportedBaseResume | undefined> {
+  const paths = await resolveAppDataPaths(input.appDataRoot);
+  const db = openDatabase(paths.databasePath);
+  let existingCount = 0;
+  try {
+    applyMigrations(db);
+    const row = db
+      .prepare("SELECT count(*) AS count FROM base_resumes")
+      .get() as { count: number } | undefined;
+    existingCount = row?.count ?? 0;
+  } finally {
+    db.close();
+  }
+  if (existingCount > 0) return undefined;
+
+  const templatePath = join(process.cwd(), "resume-template.tex");
+  let bytes: Uint8Array;
+  try {
+    bytes = new Uint8Array(await readFile(templatePath));
+  } catch {
+    return undefined;
+  }
+  if (!bytes.byteLength) return undefined;
+
+  return await importBaseResume({
+    appDataRoot: input.appDataRoot,
+    files: [{ name: "resume-template.tex", bytes }],
+  });
+}
+
