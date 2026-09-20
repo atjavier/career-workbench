@@ -1240,8 +1240,7 @@ const withinRoot = (root: string, target: string) => {
 };
 
 export type ResumeManagedRootDescriptor =
-  | string
-  | { root: string; name?: string; category?: "project" | "experience" };
+  string | { root: string; name?: string; category?: "project" | "experience" };
 
 /** Creates a short-lived, host-owned local read capability for Resume Architect. */
 export async function createResumeFileReadSession(input: {
@@ -1258,7 +1257,8 @@ export async function createResumeFileReadSession(input: {
       return {
         root: entry,
         name: basename(entry),
-        category: (isExp ? "experience" : "project") as "project" | "experience",
+        category: (isExp ? "experience" : "project") as
+          "project" | "experience",
         label: "managed-work" as const,
       };
     }
@@ -1382,10 +1382,7 @@ export async function createResumeFileReadSession(input: {
     if (!found.info.isFile()) return { ok: false, error: "invalid_request" };
     if (!extensions.has(extname(path).toLowerCase()))
       return { ok: false, error: "unsupported_file" };
-    if (
-      !found.info.size ||
-      found.info.size > fileToolLimits.maxFileBytes
-    )
+    if (!found.info.size || found.info.size > fileToolLimits.maxFileBytes)
       return { ok: false, error: "budget_exhausted" };
     let content: Uint8Array;
     let handle;

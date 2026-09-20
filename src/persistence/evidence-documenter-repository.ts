@@ -1,13 +1,124 @@
 import type { DatabaseSync } from "node:sqlite";
 
-export type StoredDocumenterProposal = { id: string; revisionId: string; factualText: string; sourcePaths: string[]; unknowns: string[]; contentDigest: string; state: "proposed" | "accepted" | "edited" | "rejected" };
+export type StoredDocumenterProposal = {
+  id: string;
+  revisionId: string;
+  factualText: string;
+  sourcePaths: string[];
+  unknowns: string[];
+  contentDigest: string;
+  state: "proposed" | "accepted" | "edited" | "rejected";
+};
 type Row = Record<string, string | null>;
-const select = "p.id, p.factual_text, p.source_references, p.unknowns, p.content_digest, COALESCE(d.id, p.id) AS revision_id, COALESCE(d.decision, 'proposed') AS state";
-function map(row: Row): StoredDocumenterProposal { return { id: row.id!, revisionId: row.revision_id!, factualText: row.factual_text!, sourcePaths: JSON.parse(row.source_references!) as string[], unknowns: JSON.parse(row.unknowns!) as string[], contentDigest: row.content_digest!, state: row.state as StoredDocumenterProposal["state"] }; }
-export function findSet(database: DatabaseSync, sourceDigest: string): { id: string } | undefined { return database.prepare("SELECT id FROM evidence_documenter_proposal_sets WHERE source_digest = ?").get(sourceDigest) as { id: string } | undefined; }
-export function insertSet(database: DatabaseSync, id: string, sourceDigest: string, createdAt: string): void { database.prepare("INSERT INTO evidence_documenter_proposal_sets (id, source_digest, created_at) VALUES (?, ?, ?)").run(id, sourceDigest, createdAt); }
-export function insertProposal(database: DatabaseSync, value: Omit<StoredDocumenterProposal, "revisionId" | "state"> & { proposalSetId: string; createdAt: string }): void { database.prepare("INSERT INTO evidence_documenter_proposals (id, proposal_set_id, factual_text, source_references, unknowns, content_digest, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(value.id, value.proposalSetId, value.factualText, JSON.stringify(value.sourcePaths), JSON.stringify(value.unknowns), value.contentDigest, value.createdAt); }
-export function listBySet(database: DatabaseSync, setId: string): StoredDocumenterProposal[] { return (database.prepare(`SELECT ${select} FROM evidence_documenter_proposals p LEFT JOIN evidence_documenter_proposal_decisions d ON d.proposal_id = p.id WHERE p.proposal_set_id = ? ORDER BY p.created_at, p.id`).all(setId) as Row[]).map(map); }
-export function listAll(database: DatabaseSync): StoredDocumenterProposal[] { return (database.prepare(`SELECT ${select} FROM evidence_documenter_proposals p LEFT JOIN evidence_documenter_proposal_decisions d ON d.proposal_id = p.id ORDER BY p.created_at DESC, p.id`).all() as Row[]).map(map); }
-export function findById(database: DatabaseSync, id: string): StoredDocumenterProposal | undefined { const row = database.prepare(`SELECT ${select} FROM evidence_documenter_proposals p LEFT JOIN evidence_documenter_proposal_decisions d ON d.proposal_id = p.id WHERE p.id = ?`).get(id) as Row | undefined; return row && map(row); }
-export function insertDecision(database: DatabaseSync, value: { id: string; proposalId: string; decision: "accepted" | "edited" | "rejected"; factualText?: string; evidenceRevisionId?: string; createdAt: string }): void { database.prepare("INSERT INTO evidence_documenter_proposal_decisions (id, proposal_id, decision, factual_text, evidence_revision_id, created_at) VALUES (?, ?, ?, ?, ?, ?)").run(value.id, value.proposalId, value.decision, value.factualText ?? null, value.evidenceRevisionId ?? null, value.createdAt); }
+const select =
+  "p.id, p.factual_text, p.source_references, p.unknowns, p.content_digest, COALESCE(d.id, p.id) AS revision_id, COALESCE(d.decision, 'proposed') AS state";
+function map(row: Row): StoredDocumenterProposal {
+  return {
+    id: row.id!,
+    revisionId: row.revision_id!,
+    factualText: row.factual_text!,
+    sourcePaths: JSON.parse(row.source_references!) as string[],
+    unknowns: JSON.parse(row.unknowns!) as string[],
+    contentDigest: row.content_digest!,
+    state: row.state as StoredDocumenterProposal["state"],
+  };
+}
+export function findSet(
+  database: DatabaseSync,
+  sourceDigest: string,
+): { id: string } | undefined {
+  return database
+    .prepare(
+      "SELECT id FROM evidence_documenter_proposal_sets WHERE source_digest = ?",
+    )
+    .get(sourceDigest) as { id: string } | undefined;
+}
+export function insertSet(
+  database: DatabaseSync,
+  id: string,
+  sourceDigest: string,
+  createdAt: string,
+): void {
+  database
+    .prepare(
+      "INSERT INTO evidence_documenter_proposal_sets (id, source_digest, created_at) VALUES (?, ?, ?)",
+    )
+    .run(id, sourceDigest, createdAt);
+}
+export function insertProposal(
+  database: DatabaseSync,
+  value: Omit<StoredDocumenterProposal, "revisionId" | "state"> & {
+    proposalSetId: string;
+    createdAt: string;
+  },
+): void {
+  database
+    .prepare(
+      "INSERT INTO evidence_documenter_proposals (id, proposal_set_id, factual_text, source_references, unknowns, content_digest, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    )
+    .run(
+      value.id,
+      value.proposalSetId,
+      value.factualText,
+      JSON.stringify(value.sourcePaths),
+      JSON.stringify(value.unknowns),
+      value.contentDigest,
+      value.createdAt,
+    );
+}
+export function listBySet(
+  database: DatabaseSync,
+  setId: string,
+): StoredDocumenterProposal[] {
+  return (
+    database
+      .prepare(
+        `SELECT ${select} FROM evidence_documenter_proposals p LEFT JOIN evidence_documenter_proposal_decisions d ON d.proposal_id = p.id WHERE p.proposal_set_id = ? ORDER BY p.created_at, p.id`,
+      )
+      .all(setId) as Row[]
+  ).map(map);
+}
+export function listAll(database: DatabaseSync): StoredDocumenterProposal[] {
+  return (
+    database
+      .prepare(
+        `SELECT ${select} FROM evidence_documenter_proposals p LEFT JOIN evidence_documenter_proposal_decisions d ON d.proposal_id = p.id ORDER BY p.created_at DESC, p.id`,
+      )
+      .all() as Row[]
+  ).map(map);
+}
+export function findById(
+  database: DatabaseSync,
+  id: string,
+): StoredDocumenterProposal | undefined {
+  const row = database
+    .prepare(
+      `SELECT ${select} FROM evidence_documenter_proposals p LEFT JOIN evidence_documenter_proposal_decisions d ON d.proposal_id = p.id WHERE p.id = ?`,
+    )
+    .get(id) as Row | undefined;
+  return row && map(row);
+}
+export function insertDecision(
+  database: DatabaseSync,
+  value: {
+    id: string;
+    proposalId: string;
+    decision: "accepted" | "edited" | "rejected";
+    factualText?: string;
+    evidenceRevisionId?: string;
+    createdAt: string;
+  },
+): void {
+  database
+    .prepare(
+      "INSERT INTO evidence_documenter_proposal_decisions (id, proposal_id, decision, factual_text, evidence_revision_id, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+    )
+    .run(
+      value.id,
+      value.proposalId,
+      value.decision,
+      value.factualText ?? null,
+      value.evidenceRevisionId ?? null,
+      value.createdAt,
+    );
+}

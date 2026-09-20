@@ -43,13 +43,11 @@ function textFromTex(value: string, maximum = 900): string {
   return boundedMultiline(
     value
       .replace(/(^|[^\\])%.*/gm, "$1")
-      .replace(
-        /\\resumeskill\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g,
-        "\n$1: $2",
-      )
+      .replace(/\\resumeskill\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g, "\n$1: $2")
       .replace(
         /\\resumeproject\s*\{([^{}]*)\}(?:\s*\{([^{}]*)\})?(?:\s*\{([^{}]*)\})?/g,
-        (_, title, role) => role?.trim() ? `\n${title} | ${role}\n` : `\n${title}\n`,
+        (_, title, role) =>
+          role?.trim() ? `\n${title} | ${role}\n` : `\n${title}\n`,
       )
       .replace(
         /\\resumeeducation\s*\{([^{}]*)\}\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g,

@@ -11,7 +11,10 @@ const unavailableHeaders = {
 };
 
 function unavailablePdfResponse(): Response {
-  return new Response("The original resume PDF is unavailable.", { status: 404, headers: unavailableHeaders });
+  return new Response("The original resume PDF is unavailable.", {
+    status: 404,
+    headers: unavailableHeaders,
+  });
 }
 
 function responseBody(bytes: Uint8Array): ArrayBuffer {
@@ -20,7 +23,10 @@ function responseBody(bytes: Uint8Array): ArrayBuffer {
   return body;
 }
 
-export async function GET(_request: Request, context: { params: Promise<{ sourceId: string }> }): Promise<Response> {
+export async function GET(
+  _request: Request,
+  context: { params: Promise<{ sourceId: string }> },
+): Promise<Response> {
   const { sourceId } = await context.params;
   const pdf = await readCurrentBaseResumePdf({ sourceId });
   if (!pdf) return unavailablePdfResponse();

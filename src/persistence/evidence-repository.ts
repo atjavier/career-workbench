@@ -1,10 +1,97 @@
 import type { DatabaseSync } from "node:sqlite";
 
-export type EvidenceRevision = { id: string; evidenceId: string; revisionNumber: number; origin: "extracted" | "user_entered"; sourceDocument: string; sourceSection: string; factualText: string; reviewState: "unreviewed" | "approved" | "rejected" | "removed"; createdAt: string; contentDigest: string };
-const select = "id, evidence_id, revision_number, origin, source_document, source_section, factual_text, review_state, created_at, content_digest";
-function map(row: Record<string, string | number>): EvidenceRevision { return { id: row.id as string, evidenceId: row.evidence_id as string, revisionNumber: row.revision_number as number, origin: row.origin as EvidenceRevision["origin"], sourceDocument: row.source_document as string, sourceSection: row.source_section as string, factualText: row.factual_text as string, reviewState: row.review_state as EvidenceRevision["reviewState"], createdAt: row.created_at as string, contentDigest: row.content_digest as string }; }
-export function insertRecord(database: DatabaseSync, id: string, timestamp: string): void { database.prepare("INSERT INTO evidence_records (id, created_at) VALUES (?, ?)").run(id, timestamp); }
-export function insertRevision(database: DatabaseSync, revision: EvidenceRevision, baseResumeId?: string, supersedesRevisionId?: string): void { database.prepare("INSERT INTO evidence_revisions (id, evidence_id, revision_number, origin, source_base_resume_id, source_document, source_section, factual_text, review_state, supersedes_revision_id, created_at, content_digest) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(revision.id, revision.evidenceId, revision.revisionNumber, revision.origin, baseResumeId ?? null, revision.sourceDocument, revision.sourceSection, revision.factualText, revision.reviewState, supersedesRevisionId ?? null, revision.createdAt, revision.contentDigest); }
-export function currentRevision(database: DatabaseSync, evidenceId: string): EvidenceRevision | undefined { const row = database.prepare(`SELECT ${select} FROM evidence_revisions r WHERE evidence_id = ? AND NOT EXISTS (SELECT 1 FROM evidence_revisions n WHERE n.supersedes_revision_id = r.id)`).get(evidenceId) as Record<string, string | number> | undefined; return row && map(row); }
-export function listCurrentEvidence(database: DatabaseSync): EvidenceRevision[] { return (database.prepare(`SELECT ${select} FROM evidence_revisions r WHERE NOT EXISTS (SELECT 1 FROM evidence_revisions n WHERE n.supersedes_revision_id = r.id) ORDER BY r.created_at DESC`).all() as Record<string, string | number>[]).map(map); }
-export function listApprovedEvidence(database: DatabaseSync): EvidenceRevision[] { return (database.prepare(`SELECT ${select} FROM evidence_revisions r WHERE r.review_state = 'approved' AND NOT EXISTS (SELECT 1 FROM evidence_revisions n WHERE n.supersedes_revision_id = r.id) ORDER BY r.created_at DESC`).all() as Record<string, string | number>[]).map(map); }
+export type EvidenceRevision = {
+  id: string;
+  evidenceId: string;
+  revisionNumber: number;
+  origin: "extracted" | "user_entered";
+  sourceDocument: string;
+  sourceSection: string;
+  factualText: string;
+  reviewState: "unreviewed" | "approved" | "rejected" | "removed";
+  createdAt: string;
+  contentDigest: string;
+};
+const select =
+  "id, evidence_id, revision_number, origin, source_document, source_section, factual_text, review_state, created_at, content_digest";
+function map(row: Record<string, string | number>): EvidenceRevision {
+  return {
+    id: row.id as string,
+    evidenceId: row.evidence_id as string,
+    revisionNumber: row.revision_number as number,
+    origin: row.origin as EvidenceRevision["origin"],
+    sourceDocument: row.source_document as string,
+    sourceSection: row.source_section as string,
+    factualText: row.factual_text as string,
+    reviewState: row.review_state as EvidenceRevision["reviewState"],
+    createdAt: row.created_at as string,
+    contentDigest: row.content_digest as string,
+  };
+}
+export function insertRecord(
+  database: DatabaseSync,
+  id: string,
+  timestamp: string,
+): void {
+  database
+    .prepare("INSERT INTO evidence_records (id, created_at) VALUES (?, ?)")
+    .run(id, timestamp);
+}
+export function insertRevision(
+  database: DatabaseSync,
+  revision: EvidenceRevision,
+  baseResumeId?: string,
+  supersedesRevisionId?: string,
+): void {
+  database
+    .prepare(
+      "INSERT INTO evidence_revisions (id, evidence_id, revision_number, origin, source_base_resume_id, source_document, source_section, factual_text, review_state, supersedes_revision_id, created_at, content_digest) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .run(
+      revision.id,
+      revision.evidenceId,
+      revision.revisionNumber,
+      revision.origin,
+      baseResumeId ?? null,
+      revision.sourceDocument,
+      revision.sourceSection,
+      revision.factualText,
+      revision.reviewState,
+      supersedesRevisionId ?? null,
+      revision.createdAt,
+      revision.contentDigest,
+    );
+}
+export function currentRevision(
+  database: DatabaseSync,
+  evidenceId: string,
+): EvidenceRevision | undefined {
+  const row = database
+    .prepare(
+      `SELECT ${select} FROM evidence_revisions r WHERE evidence_id = ? AND NOT EXISTS (SELECT 1 FROM evidence_revisions n WHERE n.supersedes_revision_id = r.id)`,
+    )
+    .get(evidenceId) as Record<string, string | number> | undefined;
+  return row && map(row);
+}
+export function listCurrentEvidence(
+  database: DatabaseSync,
+): EvidenceRevision[] {
+  return (
+    database
+      .prepare(
+        `SELECT ${select} FROM evidence_revisions r WHERE NOT EXISTS (SELECT 1 FROM evidence_revisions n WHERE n.supersedes_revision_id = r.id) ORDER BY r.created_at DESC`,
+      )
+      .all() as Record<string, string | number>[]
+  ).map(map);
+}
+export function listApprovedEvidence(
+  database: DatabaseSync,
+): EvidenceRevision[] {
+  return (
+    database
+      .prepare(
+        `SELECT ${select} FROM evidence_revisions r WHERE r.review_state = 'approved' AND NOT EXISTS (SELECT 1 FROM evidence_revisions n WHERE n.supersedes_revision_id = r.id) ORDER BY r.created_at DESC`,
+      )
+      .all() as Record<string, string | number>[]
+  ).map(map);
+}

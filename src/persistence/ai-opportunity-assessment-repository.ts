@@ -1,15 +1,164 @@
 import type { DatabaseSync } from "node:sqlite";
 
-export type StoredAiOpportunityAssessment = { id: string; opportunityId: string; opportunityRevisionId: string; opportunityContentDigest: string; profileRevisionId: string; profileContentDigest: string; templateSourceId: string; templateContentDigest: string; modelIdentifier: string; capabilityVersion: string; inputFingerprint: string; responseJson: string; contentDigest: string; createdAt: string };
-export type StoredOpportunityDecision = { id: string; opportunityId: string; assessmentId: string; parentRevisionId?: string; pursue: boolean; priority: "low" | "normal" | "high"; contentDigest: string; createdAt: string };
-const assessmentColumns = "id, opportunity_id AS opportunityId, opportunity_revision_id AS opportunityRevisionId, opportunity_content_digest AS opportunityContentDigest, profile_revision_id AS profileRevisionId, profile_content_digest AS profileContentDigest, template_source_id AS templateSourceId, template_content_digest AS templateContentDigest, model_identifier AS modelIdentifier, capability_version AS capabilityVersion, input_fingerprint AS inputFingerprint, response_json AS responseJson, content_digest AS contentDigest, created_at AS createdAt";
-const decisionColumns = "id, opportunity_id AS opportunityId, assessment_id AS assessmentId, parent_revision_id AS parentRevisionId, pursue, priority, content_digest AS contentDigest, created_at AS createdAt";
-function assessment(row: Record<string, unknown>): StoredAiOpportunityAssessment { return { id: String(row.id), opportunityId: String(row.opportunityId), opportunityRevisionId: String(row.opportunityRevisionId), opportunityContentDigest: String(row.opportunityContentDigest), profileRevisionId: String(row.profileRevisionId), profileContentDigest: String(row.profileContentDigest), templateSourceId: String(row.templateSourceId), templateContentDigest: String(row.templateContentDigest), modelIdentifier: String(row.modelIdentifier), capabilityVersion: String(row.capabilityVersion), inputFingerprint: String(row.inputFingerprint), responseJson: String(row.responseJson), contentDigest: String(row.contentDigest), createdAt: String(row.createdAt) }; }
-function decision(row: Record<string, unknown>): StoredOpportunityDecision { return { id: String(row.id), opportunityId: String(row.opportunityId), assessmentId: String(row.assessmentId), parentRevisionId: row.parentRevisionId ? String(row.parentRevisionId) : undefined, pursue: Number(row.pursue) === 1, priority: row.priority as StoredOpportunityDecision["priority"], contentDigest: String(row.contentDigest), createdAt: String(row.createdAt) }; }
-export function findAiOpportunityAssessmentByFingerprint(db: DatabaseSync, inputFingerprint: string): StoredAiOpportunityAssessment | undefined { const row = db.prepare(`SELECT ${assessmentColumns} FROM ai_opportunity_assessments WHERE input_fingerprint = ?`).get(inputFingerprint) as Record<string, unknown> | undefined; return row ? assessment(row) : undefined; }
-export function latestAiOpportunityAssessment(db: DatabaseSync, opportunityId: string): StoredAiOpportunityAssessment | undefined { const row = db.prepare(`SELECT ${assessmentColumns} FROM ai_opportunity_assessments WHERE opportunity_id = ? ORDER BY created_at DESC LIMIT 1`).get(opportunityId) as Record<string, unknown> | undefined; return row ? assessment(row) : undefined; }
-export function insertAiOpportunityAssessment(db: DatabaseSync, item: StoredAiOpportunityAssessment) { db.prepare("INSERT INTO ai_opportunity_assessments (id, opportunity_id, opportunity_revision_id, opportunity_content_digest, profile_revision_id, profile_content_digest, template_source_id, template_content_digest, model_identifier, capability_version, input_fingerprint, response_json, content_digest, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(item.id, item.opportunityId, item.opportunityRevisionId, item.opportunityContentDigest, item.profileRevisionId, item.profileContentDigest, item.templateSourceId, item.templateContentDigest, item.modelIdentifier, item.capabilityVersion, item.inputFingerprint, item.responseJson, item.contentDigest, item.createdAt); }
-export function insertAiOpportunityAssessmentEvidence(db: DatabaseSync, assessmentId: string, evidence: Array<{ id: string; contentDigest: string }>) { const statement = db.prepare("INSERT INTO ai_opportunity_assessment_evidence (assessment_id, evidence_revision_id, evidence_content_digest, ordinal) VALUES (?, ?, ?, ?)"); evidence.forEach((item, ordinal) => statement.run(assessmentId, item.id, item.contentDigest, ordinal)); }
-export function listAiOpportunityAssessmentEvidence(db: DatabaseSync, assessmentId: string): Array<{ sourceDocument: string; sourceSection: string }> { return db.prepare("SELECT e.source_document AS sourceDocument, e.source_section AS sourceSection FROM ai_opportunity_assessment_evidence link JOIN evidence_revisions e ON e.id = link.evidence_revision_id WHERE link.assessment_id = ? ORDER BY link.ordinal").all(assessmentId) as Array<{ sourceDocument: string; sourceSection: string }>; }
-export function latestOpportunityDecision(db: DatabaseSync, opportunityId: string): StoredOpportunityDecision | undefined { const row = db.prepare(`SELECT ${decisionColumns} FROM opportunity_decision_revisions WHERE opportunity_id = ? ORDER BY created_at DESC LIMIT 1`).get(opportunityId) as Record<string, unknown> | undefined; return row ? decision(row) : undefined; }
-export function insertOpportunityDecision(db: DatabaseSync, item: StoredOpportunityDecision) { db.prepare("INSERT INTO opportunity_decision_revisions (id, opportunity_id, assessment_id, parent_revision_id, pursue, priority, content_digest, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(item.id, item.opportunityId, item.assessmentId, item.parentRevisionId ?? null, item.pursue ? 1 : 0, item.priority, item.contentDigest, item.createdAt); }
+export type StoredAiOpportunityAssessment = {
+  id: string;
+  opportunityId: string;
+  opportunityRevisionId: string;
+  opportunityContentDigest: string;
+  profileRevisionId: string;
+  profileContentDigest: string;
+  templateSourceId: string;
+  templateContentDigest: string;
+  modelIdentifier: string;
+  capabilityVersion: string;
+  inputFingerprint: string;
+  responseJson: string;
+  contentDigest: string;
+  createdAt: string;
+};
+export type StoredOpportunityDecision = {
+  id: string;
+  opportunityId: string;
+  assessmentId: string;
+  parentRevisionId?: string;
+  pursue: boolean;
+  priority: "low" | "normal" | "high";
+  contentDigest: string;
+  createdAt: string;
+};
+const assessmentColumns =
+  "id, opportunity_id AS opportunityId, opportunity_revision_id AS opportunityRevisionId, opportunity_content_digest AS opportunityContentDigest, profile_revision_id AS profileRevisionId, profile_content_digest AS profileContentDigest, template_source_id AS templateSourceId, template_content_digest AS templateContentDigest, model_identifier AS modelIdentifier, capability_version AS capabilityVersion, input_fingerprint AS inputFingerprint, response_json AS responseJson, content_digest AS contentDigest, created_at AS createdAt";
+const decisionColumns =
+  "id, opportunity_id AS opportunityId, assessment_id AS assessmentId, parent_revision_id AS parentRevisionId, pursue, priority, content_digest AS contentDigest, created_at AS createdAt";
+function assessment(
+  row: Record<string, unknown>,
+): StoredAiOpportunityAssessment {
+  return {
+    id: String(row.id),
+    opportunityId: String(row.opportunityId),
+    opportunityRevisionId: String(row.opportunityRevisionId),
+    opportunityContentDigest: String(row.opportunityContentDigest),
+    profileRevisionId: String(row.profileRevisionId),
+    profileContentDigest: String(row.profileContentDigest),
+    templateSourceId: String(row.templateSourceId),
+    templateContentDigest: String(row.templateContentDigest),
+    modelIdentifier: String(row.modelIdentifier),
+    capabilityVersion: String(row.capabilityVersion),
+    inputFingerprint: String(row.inputFingerprint),
+    responseJson: String(row.responseJson),
+    contentDigest: String(row.contentDigest),
+    createdAt: String(row.createdAt),
+  };
+}
+function decision(row: Record<string, unknown>): StoredOpportunityDecision {
+  return {
+    id: String(row.id),
+    opportunityId: String(row.opportunityId),
+    assessmentId: String(row.assessmentId),
+    parentRevisionId: row.parentRevisionId
+      ? String(row.parentRevisionId)
+      : undefined,
+    pursue: Number(row.pursue) === 1,
+    priority: row.priority as StoredOpportunityDecision["priority"],
+    contentDigest: String(row.contentDigest),
+    createdAt: String(row.createdAt),
+  };
+}
+export function findAiOpportunityAssessmentByFingerprint(
+  db: DatabaseSync,
+  inputFingerprint: string,
+): StoredAiOpportunityAssessment | undefined {
+  const row = db
+    .prepare(
+      `SELECT ${assessmentColumns} FROM ai_opportunity_assessments WHERE input_fingerprint = ?`,
+    )
+    .get(inputFingerprint) as Record<string, unknown> | undefined;
+  return row ? assessment(row) : undefined;
+}
+export function latestAiOpportunityAssessment(
+  db: DatabaseSync,
+  opportunityId: string,
+): StoredAiOpportunityAssessment | undefined {
+  const row = db
+    .prepare(
+      `SELECT ${assessmentColumns} FROM ai_opportunity_assessments WHERE opportunity_id = ? ORDER BY created_at DESC LIMIT 1`,
+    )
+    .get(opportunityId) as Record<string, unknown> | undefined;
+  return row ? assessment(row) : undefined;
+}
+export function insertAiOpportunityAssessment(
+  db: DatabaseSync,
+  item: StoredAiOpportunityAssessment,
+) {
+  db.prepare(
+    "INSERT INTO ai_opportunity_assessments (id, opportunity_id, opportunity_revision_id, opportunity_content_digest, profile_revision_id, profile_content_digest, template_source_id, template_content_digest, model_identifier, capability_version, input_fingerprint, response_json, content_digest, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  ).run(
+    item.id,
+    item.opportunityId,
+    item.opportunityRevisionId,
+    item.opportunityContentDigest,
+    item.profileRevisionId,
+    item.profileContentDigest,
+    item.templateSourceId,
+    item.templateContentDigest,
+    item.modelIdentifier,
+    item.capabilityVersion,
+    item.inputFingerprint,
+    item.responseJson,
+    item.contentDigest,
+    item.createdAt,
+  );
+}
+export function insertAiOpportunityAssessmentEvidence(
+  db: DatabaseSync,
+  assessmentId: string,
+  evidence: Array<{ id: string; contentDigest: string }>,
+) {
+  const statement = db.prepare(
+    "INSERT INTO ai_opportunity_assessment_evidence (assessment_id, evidence_revision_id, evidence_content_digest, ordinal) VALUES (?, ?, ?, ?)",
+  );
+  evidence.forEach((item, ordinal) =>
+    statement.run(assessmentId, item.id, item.contentDigest, ordinal),
+  );
+}
+export function listAiOpportunityAssessmentEvidence(
+  db: DatabaseSync,
+  assessmentId: string,
+): Array<{ sourceDocument: string; sourceSection: string }> {
+  return db
+    .prepare(
+      "SELECT e.source_document AS sourceDocument, e.source_section AS sourceSection FROM ai_opportunity_assessment_evidence link JOIN evidence_revisions e ON e.id = link.evidence_revision_id WHERE link.assessment_id = ? ORDER BY link.ordinal",
+    )
+    .all(assessmentId) as Array<{
+    sourceDocument: string;
+    sourceSection: string;
+  }>;
+}
+export function latestOpportunityDecision(
+  db: DatabaseSync,
+  opportunityId: string,
+): StoredOpportunityDecision | undefined {
+  const row = db
+    .prepare(
+      `SELECT ${decisionColumns} FROM opportunity_decision_revisions WHERE opportunity_id = ? ORDER BY created_at DESC LIMIT 1`,
+    )
+    .get(opportunityId) as Record<string, unknown> | undefined;
+  return row ? decision(row) : undefined;
+}
+export function insertOpportunityDecision(
+  db: DatabaseSync,
+  item: StoredOpportunityDecision,
+) {
+  db.prepare(
+    "INSERT INTO opportunity_decision_revisions (id, opportunity_id, assessment_id, parent_revision_id, pursue, priority, content_digest, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+  ).run(
+    item.id,
+    item.opportunityId,
+    item.assessmentId,
+    item.parentRevisionId ?? null,
+    item.pursue ? 1 : 0,
+    item.priority,
+    item.contentDigest,
+    item.createdAt,
+  );
+}

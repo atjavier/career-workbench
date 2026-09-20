@@ -103,7 +103,11 @@ export function toSafeWorkspaceError(error: unknown): SafeWorkspaceError {
     return error;
   }
   const message = error instanceof Error ? error.message : String(error);
-  if (/readonly database|SQLITE_READONLY|EACCES|EPERM|permission denied/i.test(message)) {
+  if (
+    /readonly database|SQLITE_READONLY|EACCES|EPERM|permission denied/i.test(
+      message,
+    )
+  ) {
     return new WorkspaceError(
       "DATA_STORAGE_UNAVAILABLE",
       "The private workspace is currently read-only, so this change was not saved.",

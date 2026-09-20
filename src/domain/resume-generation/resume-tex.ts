@@ -100,7 +100,10 @@ function experienceEntry(item: ResumeEntry): string {
   } else {
     const raw = detail || meta;
     if (raw.includes(" | ")) {
-      const parts = raw.split(" | ").map((p) => p.trim()).filter(Boolean);
+      const parts = raw
+        .split(" | ")
+        .map((p) => p.trim())
+        .filter(Boolean);
       if (parts.length >= 2) {
         organization = `${latex(parts[0]!)}\\hfill ${latex(parts.slice(1).join(" | "))}`;
       } else {
@@ -143,7 +146,10 @@ function educationBody(value: string | undefined): string {
     .filter(Boolean);
   const rawHeader = lines.shift() ?? "";
   const parts = rawHeader.includes("|")
-    ? rawHeader.split("|").map((part) => part.trim()).filter(Boolean)
+    ? rawHeader
+        .split("|")
+        .map((part) => part.trim())
+        .filter(Boolean)
     : rawHeader
         .split(
           /\s*[-–—]\s*|\s*,\s*(?=(?:BS|MS|BA|Master|Bachelor|Doctor|Degree|Computer Science|\d{4})\b)/i,

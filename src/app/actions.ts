@@ -194,10 +194,19 @@ export async function generateEditableTexDraftAction(
       consented: formData.get("consent") === "yes",
     });
     revalidatePath("/resume");
-    return { status: "success", summary: "Editable TeX draft compiled for review.", revisionId: result.revisionId, displayName: result.displayName };
+    return {
+      status: "success",
+      summary: "Editable TeX draft compiled for review.",
+      revisionId: result.revisionId,
+      displayName: result.displayName,
+    };
   } catch (error) {
     const safe = toSafeWorkspaceError(error);
-    return { status: "error", summary: safe.summary, safeNextAction: safe.safeNextAction };
+    return {
+      status: "error",
+      summary: safe.summary,
+      safeNextAction: safe.safeNextAction,
+    };
   }
 }
 
@@ -259,7 +268,11 @@ export async function resumeWorkspaceAction(
       });
       if (result.artifactCleanupIncomplete) {
         revalidatePath("/resume");
-        throw new WorkspaceError("DATA_STORAGE_UNAVAILABLE", "The workspace records were removed, but one or more private TeX or evidence artifacts still need cleanup.", "Check local workspace storage permissions, then retry cleanup from Data & Storage.");
+        throw new WorkspaceError(
+          "DATA_STORAGE_UNAVAILABLE",
+          "The workspace records were removed, but one or more private TeX or evidence artifacts still need cleanup.",
+          "Check local workspace storage permissions, then retry cleanup from Data & Storage.",
+        );
       }
       deleted = true;
     } else
@@ -322,8 +335,7 @@ export async function resumeOnboardingAction(
   formData: FormData,
 ): Promise<WorkspaceActionState> {
   let created:
-    | { workspace: { id: string }; revisionNumber: number }
-    | undefined;
+    { workspace: { id: string }; revisionNumber: number } | undefined;
   try {
     const count = Number(formData.get("workCount") ?? 1);
     if (!Number.isInteger(count) || count < 1 || count > 12)
@@ -649,14 +661,15 @@ export async function generateBaseResumeAction(
     // Authorize only complete, active workspace-owned managed item folders.
     // Their document text remains host-side for file-tool generation; the
     // metadata below stays in the consent fingerprint and safe fallback path.
-    const managedGroups = (await readManagedDocumentedArtifacts().catch(() => []))
-      .filter(
-        (group) =>
-          group.documents.length > 0 &&
-          group.documents.every((document) =>
-            ownedDocumentPaths.has(document.libraryPath),
-          ),
-      );
+    const managedGroups = (
+      await readManagedDocumentedArtifacts().catch(() => [])
+    ).filter(
+      (group) =>
+        group.documents.length > 0 &&
+        group.documents.every((document) =>
+          ownedDocumentPaths.has(document.libraryPath),
+        ),
+    );
     const managedRoots = [
       ...new Set(
         managedGroups.map((group) => {

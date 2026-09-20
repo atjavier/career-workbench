@@ -2,54 +2,444 @@ import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 
 import { createAuditEvent, createUuidV7 } from "@/audit/audit-event";
-import { localModelCapabilityVersion, opportunityAssessmentConsentFingerprint, requestOpportunityAssessment, validateOpportunityAssessmentResponse, type OpportunityAssessmentRequest, type OpportunityAssessmentResponse } from "@/adapters/local-model/local-model-gateway";
+import {
+  localModelCapabilityVersion,
+  opportunityAssessmentConsentFingerprint,
+  requestOpportunityAssessment,
+  validateOpportunityAssessmentResponse,
+  type OpportunityAssessmentRequest,
+  type OpportunityAssessmentResponse,
+} from "@/adapters/local-model/local-model-gateway";
 import { readLocalModelGatewayConfiguration } from "@/domain/resume-generation/local-model-configuration-commands";
 import type { OsVault } from "@/adapters/os-vault/os-vault";
 import { WorkspaceError } from "@/domain/workspace/types";
 import { resolveAppDataPaths } from "@/files/app-data";
-import { findAiOpportunityAssessmentByFingerprint, insertAiOpportunityAssessment, insertAiOpportunityAssessmentEvidence, insertOpportunityDecision, latestAiOpportunityAssessment, latestOpportunityDecision, listAiOpportunityAssessmentEvidence, type StoredAiOpportunityAssessment } from "@/persistence/ai-opportunity-assessment-repository";
+import {
+  findAiOpportunityAssessmentByFingerprint,
+  insertAiOpportunityAssessment,
+  insertAiOpportunityAssessmentEvidence,
+  insertOpportunityDecision,
+  latestAiOpportunityAssessment,
+  latestOpportunityDecision,
+  listAiOpportunityAssessmentEvidence,
+  type StoredAiOpportunityAssessment,
+} from "@/persistence/ai-opportunity-assessment-repository";
 import { findCandidateProfileRevision } from "@/persistence/candidate-profile-repository";
-import { listCapturedOpportunities, listCapturedRevisions, parseStoredRequirements } from "@/persistence/captured-opportunities-repository";
+import {
+  listCapturedOpportunities,
+  listCapturedRevisions,
+  parseStoredRequirements,
+} from "@/persistence/captured-opportunities-repository";
 import { applyMigrations, openDatabase } from "@/persistence/database";
 import { listApprovedEvidence } from "@/persistence/evidence-repository";
 import { findDesignatedResumeTemplate } from "@/persistence/resume-template-repository";
 import { appendAuditEvent } from "@/persistence/workspace-repository";
-import { listWorkspaceApprovedEvidenceIds, readActiveResumeWorkspace } from "@/persistence/resume-workspace-repository";
+import {
+  listWorkspaceApprovedEvidenceIds,
+  readActiveResumeWorkspace,
+} from "@/persistence/resume-workspace-repository";
 
 type Options = { appDataRoot?: string; vault?: OsVault };
-export type AssessCapturedOpportunityInput = Options & { opportunityId: string; evidenceIds: string[]; consent: boolean };
-export type OpportunityAssessmentView = { id: string; cached: boolean; createdAt: string; strengths: Array<{ text: string; evidence: string[]; excerpt: string }>; gaps: Array<{ text: string; excerpt: string }>; unknowns: string[]; disclosures: string[] };
+export type AssessCapturedOpportunityInput = Options & {
+  opportunityId: string;
+  evidenceIds: string[];
+  consent: boolean;
+};
+export type OpportunityAssessmentView = {
+  id: string;
+  cached: boolean;
+  createdAt: string;
+  strengths: Array<{ text: string; evidence: string[]; excerpt: string }>;
+  gaps: Array<{ text: string; excerpt: string }>;
+  unknowns: string[];
+  disclosures: string[];
+};
 export type OpportunityDecisionView = { id: string };
-const digest = (value: unknown) => `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
+const digest = (value: unknown) =>
+  `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
 
-function safeStoredResponse(row: StoredAiOpportunityAssessment, description: string, evidence: Array<{ sourceDocument: string; sourceSection: string }>): OpportunityAssessmentView {
+function safeStoredResponse(
+  row: StoredAiOpportunityAssessment,
+  description: string,
+  evidence: Array<{ sourceDocument: string; sourceSection: string }>,
+): OpportunityAssessmentView {
   try {
-    const response = JSON.parse(row.responseJson) as OpportunityAssessmentResponse;
-    if (!response || response.schemaVersion !== 1 || !Array.isArray(response.strengths) || !Array.isArray(response.gaps) || !Array.isArray(response.unknowns)) throw new Error("invalid");
-    const excerpt = (range: { start: number; end: number }) => { if (!Number.isInteger(range.start) || !Number.isInteger(range.end) || range.start < 0 || range.end > description.length || range.end <= range.start || range.end - range.start > 500) throw new Error("invalid"); return description.slice(range.start, range.end); };
-    return { id: row.id, cached: true, createdAt: row.createdAt, strengths: response.strengths.map((item) => ({ text: item.text, evidence: item.evidenceIndexes.map((index) => { if (!Number.isInteger(index) || index < 0 || index >= evidence.length) throw new Error("invalid"); const source = evidence[index]!; return `Approved evidence revision: ${source.sourceDocument} — ${source.sourceSection}`; }), excerpt: excerpt(item.excerpt) })), gaps: response.gaps.map((item) => ({ text: item.text, excerpt: excerpt(item.excerpt) })), unknowns: response.unknowns, disclosures: [] };
-  } catch { throw new WorkspaceError("OPPORTUNITY_ASSESSMENT_INVALID", "A saved fit assessment cannot be read safely.", "Assess this opportunity again after reviewing your local workspace."); }
+    const response = JSON.parse(
+      row.responseJson,
+    ) as OpportunityAssessmentResponse;
+    if (
+      !response ||
+      response.schemaVersion !== 1 ||
+      !Array.isArray(response.strengths) ||
+      !Array.isArray(response.gaps) ||
+      !Array.isArray(response.unknowns)
+    )
+      throw new Error("invalid");
+    const excerpt = (range: { start: number; end: number }) => {
+      if (
+        !Number.isInteger(range.start) ||
+        !Number.isInteger(range.end) ||
+        range.start < 0 ||
+        range.end > description.length ||
+        range.end <= range.start ||
+        range.end - range.start > 500
+      )
+        throw new Error("invalid");
+      return description.slice(range.start, range.end);
+    };
+    return {
+      id: row.id,
+      cached: true,
+      createdAt: row.createdAt,
+      strengths: response.strengths.map((item) => ({
+        text: item.text,
+        evidence: item.evidenceIndexes.map((index) => {
+          if (!Number.isInteger(index) || index < 0 || index >= evidence.length)
+            throw new Error("invalid");
+          const source = evidence[index]!;
+          return `Approved evidence revision: ${source.sourceDocument} — ${source.sourceSection}`;
+        }),
+        excerpt: excerpt(item.excerpt),
+      })),
+      gaps: response.gaps.map((item) => ({
+        text: item.text,
+        excerpt: excerpt(item.excerpt),
+      })),
+      unknowns: response.unknowns,
+      disclosures: [],
+    };
+  } catch {
+    throw new WorkspaceError(
+      "OPPORTUNITY_ASSESSMENT_INVALID",
+      "A saved fit assessment cannot be read safely.",
+      "Assess this opportunity again after reviewing your local workspace.",
+    );
+  }
 }
-function load(db: DatabaseSync, input: AssessCapturedOpportunityInput, configured: Awaited<ReturnType<typeof readLocalModelGatewayConfiguration>>) {
-  const opportunity = listCapturedOpportunities(db).find((item) => item.id === input.opportunityId); const revision = opportunity ? listCapturedRevisions(db, opportunity.id).at(-1) : undefined;
-  const workspace = readActiveResumeWorkspace(db).workspace; const profile = workspace?.activeProfileRevisionId ? findCandidateProfileRevision(db, workspace.activeProfileRevisionId) : undefined; const template = findDesignatedResumeTemplate(db); const allowedEvidence = workspace ? new Set(listWorkspaceApprovedEvidenceIds(db, workspace.id)) : new Set<string>(); const approved = listApprovedEvidence(db).filter((item) => allowedEvidence.has(item.id));
-  const ids = [...new Set(input.evidenceIds)]; const evidence = approved.filter((item) => ids.includes(item.id));
-  if (!opportunity || !revision || !profile || !template || !evidence.length || evidence.length !== ids.length) throw new WorkspaceError("OPPORTUNITY_ASSESSMENT_INVALID", "This assessment needs a saved profile, Resume.pdf template, captured opportunity, and selected approved evidence.", "Complete the missing local material, then try again.");
-  const requirements = parseStoredRequirements(revision.requirements); const connection = { configurationRevisionId: configured.id, configurationDigest: configured.configurationDigest, modelIdentifier: configured.modelIdentifier };
-  const profileSummary = JSON.stringify({ program: profile.values.program, school: profile.values.school, graduationYear: profile.values.graduationYear, honors: profile.values.latinHonors ?? null });
-  const requestBase = { connection, profileDigest: profile.contentDigest, templateDigest: template.contentDigest, profileSummary, opportunity: { id: revision.id, contentDigest: revision.contentDigest, title: revision.title, company: revision.company, requirements, copiedDescription: revision.copiedDescription }, evidence: evidence.map(({ id, contentDigest, factualText }) => ({ id, contentDigest, factualText })) };
-  const consentFingerprint = opportunityAssessmentConsentFingerprint(requestBase); return { opportunity, revision, profile, template, evidence, request: { ...requestBase, consentFingerprint } };
+function load(
+  db: DatabaseSync,
+  input: AssessCapturedOpportunityInput,
+  configured: Awaited<ReturnType<typeof readLocalModelGatewayConfiguration>>,
+) {
+  const opportunity = listCapturedOpportunities(db).find(
+    (item) => item.id === input.opportunityId,
+  );
+  const revision = opportunity
+    ? listCapturedRevisions(db, opportunity.id).at(-1)
+    : undefined;
+  const workspace = readActiveResumeWorkspace(db).workspace;
+  const profile = workspace?.activeProfileRevisionId
+    ? findCandidateProfileRevision(db, workspace.activeProfileRevisionId)
+    : undefined;
+  const template = findDesignatedResumeTemplate(db);
+  const allowedEvidence = workspace
+    ? new Set(listWorkspaceApprovedEvidenceIds(db, workspace.id))
+    : new Set<string>();
+  const approved = listApprovedEvidence(db).filter((item) =>
+    allowedEvidence.has(item.id),
+  );
+  const ids = [...new Set(input.evidenceIds)];
+  const evidence = approved.filter((item) => ids.includes(item.id));
+  if (
+    !opportunity ||
+    !revision ||
+    !profile ||
+    !template ||
+    !evidence.length ||
+    evidence.length !== ids.length
+  )
+    throw new WorkspaceError(
+      "OPPORTUNITY_ASSESSMENT_INVALID",
+      "This assessment needs a saved profile, Resume.pdf template, captured opportunity, and selected approved evidence.",
+      "Complete the missing local material, then try again.",
+    );
+  const requirements = parseStoredRequirements(revision.requirements);
+  const connection = {
+    configurationRevisionId: configured.id,
+    configurationDigest: configured.configurationDigest,
+    modelIdentifier: configured.modelIdentifier,
+  };
+  const profileSummary = JSON.stringify({
+    program: profile.values.program,
+    school: profile.values.school,
+    graduationYear: profile.values.graduationYear,
+    honors: profile.values.latinHonors ?? null,
+  });
+  const requestBase = {
+    connection,
+    profileDigest: profile.contentDigest,
+    templateDigest: template.contentDigest,
+    profileSummary,
+    opportunity: {
+      id: revision.id,
+      contentDigest: revision.contentDigest,
+      title: revision.title,
+      company: revision.company,
+      requirements,
+      copiedDescription: revision.copiedDescription,
+    },
+    evidence: evidence.map(({ id, contentDigest, factualText }) => ({
+      id,
+      contentDigest,
+      factualText,
+    })),
+  };
+  const consentFingerprint =
+    opportunityAssessmentConsentFingerprint(requestBase);
+  return {
+    opportunity,
+    revision,
+    profile,
+    template,
+    evidence,
+    request: { ...requestBase, consentFingerprint },
+  };
 }
-function disclosures(revision: { postedAt: string; location: string; workStyle: string; title: string }) { const result: string[] = []; if (revision.postedAt === "Unknown") result.push("Posting date is Unknown."); else if (Date.now() - Date.parse(revision.postedAt) > 1000 * 60 * 60 * 24 * 30) result.push("The captured posting date is more than 30 days old."); if (revision.location === "Unknown") result.push("Location is Unknown."); if (revision.workStyle === "Unknown") result.push("Work style is Unknown."); if (/\b(senior|lead|principal|manager)\b/i.test(revision.title)) result.push("The title contains an explicit seniority signal; review it separately."); return result; }
-export async function assessCapturedOpportunity(input: AssessCapturedOpportunityInput, invoke: (request: OpportunityAssessmentRequest) => Promise<OpportunityAssessmentResponse> = requestOpportunityAssessment): Promise<OpportunityAssessmentView> {
-  if (!input.consent) throw new WorkspaceError("OPPORTUNITY_ASSESSMENT_INVALID", "Confirm what the local AI may read before assessing fit.", "Select the local-AI consent checkbox and try again.");
-  const configured = await readLocalModelGatewayConfiguration({ appDataRoot: input.appDataRoot }); const paths = await resolveAppDataPaths(input.appDataRoot); const db = openDatabase(paths.databasePath); let values;
-  try { applyMigrations(db); values = load(db, input, configured); const cached = findAiOpportunityAssessmentByFingerprint(db, values.request.consentFingerprint); if (cached) return { ...safeStoredResponse(cached, values.revision.copiedDescription, listAiOpportunityAssessmentEvidence(db, cached.id)), cached: true, disclosures: disclosures(values.revision) }; } finally { db.close(); }
-  const prepared = values as NonNullable<typeof values>; const response = validateOpportunityAssessmentResponse(await invoke(prepared.request), prepared.request); const now = new Date().toISOString(); const responseJson = JSON.stringify(response); const stored = { id: createUuidV7(), opportunityId: prepared.opportunity.id, opportunityRevisionId: prepared.revision.id, opportunityContentDigest: prepared.revision.contentDigest, profileRevisionId: prepared.profile.id, profileContentDigest: prepared.profile.contentDigest, templateSourceId: prepared.template.id, templateContentDigest: prepared.template.contentDigest, modelIdentifier: prepared.request.connection.modelIdentifier, capabilityVersion: localModelCapabilityVersion("opportunity-assessment"), inputFingerprint: prepared.request.consentFingerprint, responseJson, contentDigest: digest(responseJson), createdAt: now };
+function disclosures(revision: {
+  postedAt: string;
+  location: string;
+  workStyle: string;
+  title: string;
+}) {
+  const result: string[] = [];
+  if (revision.postedAt === "Unknown") result.push("Posting date is Unknown.");
+  else if (
+    Date.now() - Date.parse(revision.postedAt) >
+    1000 * 60 * 60 * 24 * 30
+  )
+    result.push("The captured posting date is more than 30 days old.");
+  if (revision.location === "Unknown") result.push("Location is Unknown.");
+  if (revision.workStyle === "Unknown") result.push("Work style is Unknown.");
+  if (/\b(senior|lead|principal|manager)\b/i.test(revision.title))
+    result.push(
+      "The title contains an explicit seniority signal; review it separately.",
+    );
+  return result;
+}
+export async function assessCapturedOpportunity(
+  input: AssessCapturedOpportunityInput,
+  invoke: (
+    request: OpportunityAssessmentRequest,
+  ) => Promise<OpportunityAssessmentResponse> = requestOpportunityAssessment,
+): Promise<OpportunityAssessmentView> {
+  if (!input.consent)
+    throw new WorkspaceError(
+      "OPPORTUNITY_ASSESSMENT_INVALID",
+      "Confirm what the local AI may read before assessing fit.",
+      "Select the local-AI consent checkbox and try again.",
+    );
+  const configured = await readLocalModelGatewayConfiguration({
+    appDataRoot: input.appDataRoot,
+  });
+  const paths = await resolveAppDataPaths(input.appDataRoot);
+  const db = openDatabase(paths.databasePath);
+  let values;
+  try {
+    applyMigrations(db);
+    values = load(db, input, configured);
+    const cached = findAiOpportunityAssessmentByFingerprint(
+      db,
+      values.request.consentFingerprint,
+    );
+    if (cached)
+      return {
+        ...safeStoredResponse(
+          cached,
+          values.revision.copiedDescription,
+          listAiOpportunityAssessmentEvidence(db, cached.id),
+        ),
+        cached: true,
+        disclosures: disclosures(values.revision),
+      };
+  } finally {
+    db.close();
+  }
+  const prepared = values as NonNullable<typeof values>;
+  const response = validateOpportunityAssessmentResponse(
+    await invoke(prepared.request),
+    prepared.request,
+  );
+  const now = new Date().toISOString();
+  const responseJson = JSON.stringify(response);
+  const stored = {
+    id: createUuidV7(),
+    opportunityId: prepared.opportunity.id,
+    opportunityRevisionId: prepared.revision.id,
+    opportunityContentDigest: prepared.revision.contentDigest,
+    profileRevisionId: prepared.profile.id,
+    profileContentDigest: prepared.profile.contentDigest,
+    templateSourceId: prepared.template.id,
+    templateContentDigest: prepared.template.contentDigest,
+    modelIdentifier: prepared.request.connection.modelIdentifier,
+    capabilityVersion: localModelCapabilityVersion("opportunity-assessment"),
+    inputFingerprint: prepared.request.consentFingerprint,
+    responseJson,
+    contentDigest: digest(responseJson),
+    createdAt: now,
+  };
   const persist = openDatabase(paths.databasePath);
-  try { applyMigrations(persist); persist.exec("BEGIN IMMEDIATE;"); try { const cached = findAiOpportunityAssessmentByFingerprint(persist, stored.inputFingerprint); if (cached) { persist.exec("COMMIT;"); return { ...safeStoredResponse(cached, prepared.revision.copiedDescription, listAiOpportunityAssessmentEvidence(persist, cached.id)), cached: true, disclosures: disclosures(prepared.revision) }; } insertAiOpportunityAssessment(persist, stored); insertAiOpportunityAssessmentEvidence(persist, stored.id, prepared.evidence); appendAuditEvent(persist, createAuditEvent({ actor: "local-os-user", action: "opportunity.assessment_calculated", outcome: "success", entityId: stored.id, contentHash: stored.contentDigest })); persist.exec("COMMIT;"); } catch (error) { persist.exec("ROLLBACK;"); throw error; } } finally { persist.close(); }
-  return { ...safeStoredResponse(stored, prepared.revision.copiedDescription, prepared.evidence), cached: false, disclosures: disclosures(prepared.revision) };
+  try {
+    applyMigrations(persist);
+    persist.exec("BEGIN IMMEDIATE;");
+    try {
+      const cached = findAiOpportunityAssessmentByFingerprint(
+        persist,
+        stored.inputFingerprint,
+      );
+      if (cached) {
+        persist.exec("COMMIT;");
+        return {
+          ...safeStoredResponse(
+            cached,
+            prepared.revision.copiedDescription,
+            listAiOpportunityAssessmentEvidence(persist, cached.id),
+          ),
+          cached: true,
+          disclosures: disclosures(prepared.revision),
+        };
+      }
+      insertAiOpportunityAssessment(persist, stored);
+      insertAiOpportunityAssessmentEvidence(
+        persist,
+        stored.id,
+        prepared.evidence,
+      );
+      appendAuditEvent(
+        persist,
+        createAuditEvent({
+          actor: "local-os-user",
+          action: "opportunity.assessment_calculated",
+          outcome: "success",
+          entityId: stored.id,
+          contentHash: stored.contentDigest,
+        }),
+      );
+      persist.exec("COMMIT;");
+    } catch (error) {
+      persist.exec("ROLLBACK;");
+      throw error;
+    }
+  } finally {
+    persist.close();
+  }
+  return {
+    ...safeStoredResponse(
+      stored,
+      prepared.revision.copiedDescription,
+      prepared.evidence,
+    ),
+    cached: false,
+    disclosures: disclosures(prepared.revision),
+  };
 }
-export async function latestCapturedOpportunityAssessment(opportunityId: string, options: Options = {}): Promise<OpportunityAssessmentView | undefined> { const paths = await resolveAppDataPaths(options.appDataRoot); const db = openDatabase(paths.databasePath); try { applyMigrations(db); const opportunity = listCapturedOpportunities(db).find((item) => item.id === opportunityId); const revision = opportunity ? listCapturedRevisions(db, opportunityId).at(-1) : undefined; const row = opportunity ? latestAiOpportunityAssessment(db, opportunityId) : undefined; if (!row || !revision) return undefined; return { ...safeStoredResponse(row, revision.copiedDescription, listAiOpportunityAssessmentEvidence(db, row.id)), disclosures: disclosures(revision) }; } finally { db.close(); } }
-export async function latestCapturedOpportunityDecision(opportunityId: string, options: Options = {}): Promise<OpportunityDecisionView | undefined> { const paths = await resolveAppDataPaths(options.appDataRoot); const db = openDatabase(paths.databasePath); try { applyMigrations(db); const decision = latestOpportunityDecision(db, opportunityId); return decision ? { id: decision.id } : undefined; } finally { db.close(); } }
-export async function recordOpportunityDecision(input: Options & { opportunityId: string; assessmentId: string; expectedDecisionId?: string; pursue: boolean; priority: "low" | "normal" | "high" }) { const paths = await resolveAppDataPaths(input.appDataRoot); const db = openDatabase(paths.databasePath); try { applyMigrations(db); db.exec("BEGIN IMMEDIATE;"); try { const assessment = latestAiOpportunityAssessment(db, input.opportunityId); const previous = latestOpportunityDecision(db, input.opportunityId); if (!assessment || assessment.id !== input.assessmentId) throw new WorkspaceError("OPPORTUNITY_ASSESSMENT_INVALID", "The fit assessment is unavailable for this opportunity.", "Refresh the opportunity and try again."); if ((previous?.id ?? "") !== (input.expectedDecisionId ?? "")) throw new WorkspaceError("OPPORTUNITY_ASSESSMENT_STALE", "Your decision changed before it could be saved.", "Review the current decision and try again."); const now = new Date().toISOString(); const item = { id: createUuidV7(), opportunityId: input.opportunityId, assessmentId: input.assessmentId, parentRevisionId: previous?.id, pursue: input.pursue, priority: input.priority, contentDigest: digest({ opportunityId: input.opportunityId, assessmentId: input.assessmentId, pursue: input.pursue, priority: input.priority, parent: previous?.id ?? null }), createdAt: now }; insertOpportunityDecision(db, item); appendAuditEvent(db, createAuditEvent({ actor: "local-os-user", action: "opportunity.decision_recorded", outcome: "success", entityId: item.id, contentHash: item.contentDigest })); db.exec("COMMIT;"); return item; } catch (error) { db.exec("ROLLBACK;"); throw error; } } finally { db.close(); } }
+export async function latestCapturedOpportunityAssessment(
+  opportunityId: string,
+  options: Options = {},
+): Promise<OpportunityAssessmentView | undefined> {
+  const paths = await resolveAppDataPaths(options.appDataRoot);
+  const db = openDatabase(paths.databasePath);
+  try {
+    applyMigrations(db);
+    const opportunity = listCapturedOpportunities(db).find(
+      (item) => item.id === opportunityId,
+    );
+    const revision = opportunity
+      ? listCapturedRevisions(db, opportunityId).at(-1)
+      : undefined;
+    const row = opportunity
+      ? latestAiOpportunityAssessment(db, opportunityId)
+      : undefined;
+    if (!row || !revision) return undefined;
+    return {
+      ...safeStoredResponse(
+        row,
+        revision.copiedDescription,
+        listAiOpportunityAssessmentEvidence(db, row.id),
+      ),
+      disclosures: disclosures(revision),
+    };
+  } finally {
+    db.close();
+  }
+}
+export async function latestCapturedOpportunityDecision(
+  opportunityId: string,
+  options: Options = {},
+): Promise<OpportunityDecisionView | undefined> {
+  const paths = await resolveAppDataPaths(options.appDataRoot);
+  const db = openDatabase(paths.databasePath);
+  try {
+    applyMigrations(db);
+    const decision = latestOpportunityDecision(db, opportunityId);
+    return decision ? { id: decision.id } : undefined;
+  } finally {
+    db.close();
+  }
+}
+export async function recordOpportunityDecision(
+  input: Options & {
+    opportunityId: string;
+    assessmentId: string;
+    expectedDecisionId?: string;
+    pursue: boolean;
+    priority: "low" | "normal" | "high";
+  },
+) {
+  const paths = await resolveAppDataPaths(input.appDataRoot);
+  const db = openDatabase(paths.databasePath);
+  try {
+    applyMigrations(db);
+    db.exec("BEGIN IMMEDIATE;");
+    try {
+      const assessment = latestAiOpportunityAssessment(db, input.opportunityId);
+      const previous = latestOpportunityDecision(db, input.opportunityId);
+      if (!assessment || assessment.id !== input.assessmentId)
+        throw new WorkspaceError(
+          "OPPORTUNITY_ASSESSMENT_INVALID",
+          "The fit assessment is unavailable for this opportunity.",
+          "Refresh the opportunity and try again.",
+        );
+      if ((previous?.id ?? "") !== (input.expectedDecisionId ?? ""))
+        throw new WorkspaceError(
+          "OPPORTUNITY_ASSESSMENT_STALE",
+          "Your decision changed before it could be saved.",
+          "Review the current decision and try again.",
+        );
+      const now = new Date().toISOString();
+      const item = {
+        id: createUuidV7(),
+        opportunityId: input.opportunityId,
+        assessmentId: input.assessmentId,
+        parentRevisionId: previous?.id,
+        pursue: input.pursue,
+        priority: input.priority,
+        contentDigest: digest({
+          opportunityId: input.opportunityId,
+          assessmentId: input.assessmentId,
+          pursue: input.pursue,
+          priority: input.priority,
+          parent: previous?.id ?? null,
+        }),
+        createdAt: now,
+      };
+      insertOpportunityDecision(db, item);
+      appendAuditEvent(
+        db,
+        createAuditEvent({
+          actor: "local-os-user",
+          action: "opportunity.decision_recorded",
+          outcome: "success",
+          entityId: item.id,
+          contentHash: item.contentDigest,
+        }),
+      );
+      db.exec("COMMIT;");
+      return item;
+    } catch (error) {
+      db.exec("ROLLBACK;");
+      throw error;
+    }
+  } finally {
+    db.close();
+  }
+}

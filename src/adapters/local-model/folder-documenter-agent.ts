@@ -1,18 +1,27 @@
 export type FolderDocumentationCategory = "project" | "experience";
 
-const evidenceIntelligenceProcedure = "Use evidence intelligence before synthesis: identify atomic direct facts, normalize recurring names and technologies, resolve repeated entities, and connect project identity, problem, objective, workflow, features, decisions, technical architecture, outcomes, ownership, collaboration, and unknowns. Keep direct facts separate from strongly supported capability classifications and contextual interpretation. A plausible benefit is an explicit gap, never a factual finding. Preserve contradictions rather than choosing a side.";
+const evidenceIntelligenceProcedure =
+  "Use evidence intelligence before synthesis: identify atomic direct facts, normalize recurring names and technologies, resolve repeated entities, and connect project identity, problem, objective, workflow, features, decisions, technical architecture, outcomes, ownership, collaboration, and unknowns. Keep direct facts separate from strongly supported capability classifications and contextual interpretation. A plausible benefit is an explicit gap, never a factual finding. Preserve contradictions rather than choosing a side.";
 
-const sharedGuardrails = "Use only the bounded, read-only selected-folder material. Build documentation, not a resume. Do not infer personal ownership, dates, users, outcomes, metrics, deployment status, or skills. Keep those as explicit unknowns. Exclude starter files, dependency files, generated output, and framework boilerplate unless they establish a project-specific fact. Never include absolute paths, credentials, prompts, diagnostics, hidden reasoning, or fenced code in factual prose.";
+const sharedGuardrails =
+  "Use only the bounded, read-only selected-folder material. Build documentation, not a resume. Do not infer personal ownership, dates, users, outcomes, metrics, deployment status, or skills. Keep those as explicit unknowns. Exclude starter files, dependency files, generated output, and framework boilerplate unless they establish a project-specific fact. Never include absolute paths, credentials, prompts, diagnostics, hidden reasoning, or fenced code in factual prose.";
 
-const projectProcedure = "You are the Folder Documenter for a project folder. Work like a careful BMad brownfield-project documenter. First classify the repository as single-part, multi-part, or monorepo. Then inventory existing documentation and manifests; trace entry points, interfaces, services, data models, client flows, integrations, operational configuration, and tests. Produce a detailed documentation set that explains what the project is, how its meaningful parts work together, what distinct capabilities are directly evidenced, and where evidence is absent. Preserve relative path, nearby heading or document, and one-based line provenance for atomic findings. Your handoff is for a later resume specialist; it must be factual context, never a claim of what the candidate personally did.";
+const projectProcedure =
+  "You are the Folder Documenter for a project folder. Work like a careful BMad brownfield-project documenter. First classify the repository as single-part, multi-part, or monorepo. Then inventory existing documentation and manifests; trace entry points, interfaces, services, data models, client flows, integrations, operational configuration, and tests. Produce a detailed documentation set that explains what the project is, how its meaningful parts work together, what distinct capabilities are directly evidenced, and where evidence is absent. Preserve relative path, nearby heading or document, and one-based line provenance for atomic findings. Your handoff is for a later resume specialist; it must be factual context, never a claim of what the candidate personally did.";
 
-const experienceProcedure = "You are the Folder Documenter for an experience folder. Treat it as a work-record and supporting-material archive, not necessarily a code repository. First identify role, organization, period, assignment, deliverables, reports, tickets, presentations, code, and review material only when directly evidenced. Then document responsibilities, concrete work outputs, collaboration or process evidence, tools or systems used, and outcomes or metrics only where explicitly stated. If source code is present, analyze it only to illuminate the documented work context; do not manufacture ownership from its presence. Preserve relative path, nearby heading or document, and one-based line provenance for atomic findings. Your handoff is for a later resume specialist; separate verified work facts from unknown attribution, scope, impact, and dates.";
+const experienceProcedure =
+  "You are the Folder Documenter for an experience folder. Treat it as a work-record and supporting-material archive, not necessarily a code repository. First identify role, organization, period, assignment, deliverables, reports, tickets, presentations, code, and review material only when directly evidenced. Then document responsibilities, concrete work outputs, collaboration or process evidence, tools or systems used, and outcomes or metrics only where explicitly stated. If source code is present, analyze it only to illuminate the documented work context; do not manufacture ownership from its presence. Preserve relative path, nearby heading or document, and one-based line provenance for atomic findings. Your handoff is for a later resume specialist; separate verified work facts from unknown attribution, scope, impact, and dates.";
 
-export function folderDocumenterSystemInstruction(category: FolderDocumentationCategory): string {
+export function folderDocumenterSystemInstruction(
+  category: FolderDocumentationCategory,
+): string {
   return `${category === "project" ? projectProcedure : experienceProcedure} ${evidenceIntelligenceProcedure} ${sharedGuardrails}`;
 }
 
-export function folderDocumenterArtifactInstruction(category: FolderDocumentationCategory, artifact: "project-overview.md" | "resume-summary.md"): string {
+export function folderDocumenterArtifactInstruction(
+  category: FolderDocumentationCategory,
+  artifact: "project-overview.md" | "resume-summary.md",
+): string {
   if (artifact === "project-overview.md") {
     return category === "project"
       ? "Write only project-overview.md. Begin exactly with '# Project Overview (Proposed / Unreviewed)'. Cover project purpose, repository shape, meaningful capabilities, architecture or workflow, and direct evidence gaps in at most eight concise bullets."

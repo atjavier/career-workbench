@@ -69,12 +69,18 @@ async function assertSafeDirectoryAncestors(
       );
   }
 }
-async function ensureSafeDirectory(root: string, directory: string): Promise<void> {
+async function ensureSafeDirectory(
+  root: string,
+  directory: string,
+): Promise<void> {
   await assertSafeDirectoryAncestors(root, directory);
   await mkdir(directory, { recursive: true });
   await assertSafeDirectoryAncestors(root, directory);
 }
-async function removeSafeDirectory(root: string, directory: string): Promise<void> {
+async function removeSafeDirectory(
+  root: string,
+  directory: string,
+): Promise<void> {
   await assertSafeDirectoryAncestors(root, directory);
   const metadata = await lstat(directory).catch(
     (error: NodeJS.ErrnoException) =>
@@ -123,9 +129,7 @@ async function compiler(): Promise<string> {
       } catch {}
     }
   }
-  throw new ResumeTexCompilationError(
-    "The local TeX compiler is unavailable.",
-  );
+  throw new ResumeTexCompilationError("The local TeX compiler is unavailable.");
 }
 
 async function run(
@@ -249,7 +253,9 @@ function bodyBounds(tex: string): { start: number; end: number } | undefined {
   const marker = "\\begin{document}";
   const start = tex.indexOf(marker);
   const end = tex.lastIndexOf("\\end{document}");
-  return start >= 0 && end > start ? { start: start + marker.length, end } : undefined;
+  return start >= 0 && end > start
+    ? { start: start + marker.length, end }
+    : undefined;
 }
 function declaredCommands(preamble: string): string[] {
   return [
@@ -296,7 +302,11 @@ function hasUnescapedComment(body: string): boolean {
   for (let index = 0; index < body.length; index += 1) {
     if (body[index] !== "%") continue;
     let slashes = 0;
-    for (let cursor = index - 1; cursor >= 0 && body[cursor] === "\\"; cursor -= 1)
+    for (
+      let cursor = index - 1;
+      cursor >= 0 && body[cursor] === "\\";
+      cursor -= 1
+    )
       slashes += 1;
     if (slashes % 2 === 0) return true;
   }
@@ -311,7 +321,11 @@ function environmentsAreCanonicalAndBalanced(
   for (const command of commands) {
     const tail = body.slice(command.index);
     const canonical = /^\\(begin|end)\{([A-Za-z@]+)\}/.exec(tail);
-    if (!canonical || canonical[1] !== command[1] || !allowed.has(canonical[2]!))
+    if (
+      !canonical ||
+      canonical[1] !== command[1] ||
+      !allowed.has(canonical[2]!)
+    )
       return false;
     if (canonical[1] === "begin") stack.push(canonical[2]!);
     else if (stack.pop() !== canonical[2]) return false;
@@ -415,7 +429,14 @@ async function compileSource(
     // Untrusted model TeX may read only a cache previously provisioned by the
     // host's established structured-template compilation path.
     const args = isolated
-      ? ["--untrusted", "--only-cached", "--keep-logs", "--outdir", work, sourcePath]
+      ? [
+          "--untrusted",
+          "--only-cached",
+          "--keep-logs",
+          "--outdir",
+          work,
+          sourcePath,
+        ]
       : ["--bundle", bundleUrl, "--keep-logs", "--outdir", work, sourcePath];
     await run(
       executable,

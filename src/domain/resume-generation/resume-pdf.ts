@@ -137,7 +137,10 @@ function sectionParagraphs(text: string): string[] {
     .filter(Boolean);
   const intermediate: string[] = [];
   for (const paragraph of rawParagraphs) {
-    const lines = paragraph.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    const lines = paragraph
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean);
     if (!lines.length) continue;
     const isFirstLineBullet = /^[•*\-]\s+/.test(lines[0]!);
     if (isFirstLineBullet && intermediate.length > 0) {
@@ -149,7 +152,10 @@ function sectionParagraphs(text: string): string[] {
 
   const result: string[] = [];
   for (const block of intermediate) {
-    const lines = block.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    const lines = block
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean);
     if (!lines.length) continue;
     let currentEntry: string[] = [];
     let seenBullet = false;
@@ -173,7 +179,6 @@ function sectionParagraphs(text: string): string[] {
   }
   return result;
 }
-
 
 function contactAndName(draft: MaterialDraftView): {
   name: string;
@@ -221,12 +226,16 @@ function contactAndName(draft: MaterialDraftView): {
       ]
         .filter(Boolean)
         .join(" ");
-    } else if (draft.profileLabel && draft.profileLabel !== "Saved Candidate Profile") {
+    } else if (
+      draft.profileLabel &&
+      draft.profileLabel !== "Saved Candidate Profile"
+    ) {
       name = draft.profileLabel;
     } else {
-      const summaryPrefix = plainText(summary)
-        .split(/\s+(?:is|has|with)\s+/i)[0]
-        ?.trim() ?? "";
+      const summaryPrefix =
+        plainText(summary)
+          .split(/\s+(?:is|has|with)\s+/i)[0]
+          ?.trim() ?? "";
       if (
         summaryPrefix &&
         !/\b(?:graduate|developer|engineer|student|specialist|professional|candidate)\b/i.test(
@@ -254,7 +263,10 @@ export function parseProjectHeader(line: string): {
 } {
   const bullet = /^(?:[-*•])\s+/.test(line);
   if (bullet) return { title: line };
-  const parts = line.split("|").map((p) => p.trim()).filter(Boolean);
+  const parts = line
+    .split("|")
+    .map((p) => p.trim())
+    .filter(Boolean);
   if (parts.length <= 1) return { title: line };
   if (parts.length === 2) {
     return { title: parts[0]!, tech: parts[1] };
@@ -339,7 +351,9 @@ export function compactProjectHeader(line: string, maxChars = 80): string {
     if (`${parsed.title} | ${next}`.length > maxChars - 2) break;
     trimmed = next;
   }
-  return trimmed ? `${parsed.title} | ${trimmed.replace(/,+$/, "")}` : candidate;
+  return trimmed
+    ? `${parsed.title} | ${trimmed.replace(/,+$/, "")}`
+    : candidate;
 }
 
 function entriesFromSection(
@@ -425,7 +439,9 @@ function entriesFromSection(
         .filter(Boolean)
         .join(" | ");
       if (otherMetadata) {
-        const cleanedMeta = isProject ? otherMetadata : cleanOrganization(otherMetadata);
+        const cleanedMeta = isProject
+          ? otherMetadata
+          : cleanOrganization(otherMetadata);
         meta = meta ? `${meta} | ${cleanedMeta}` : cleanedMeta;
       }
 

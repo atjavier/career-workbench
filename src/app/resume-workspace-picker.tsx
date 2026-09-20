@@ -1,7 +1,10 @@
 "use client";
 
 import { useActionState, useState, useRef, useEffect } from "react";
-import { resumeWorkspaceAction, type WorkspaceActionState } from "@/app/actions";
+import {
+  resumeWorkspaceAction,
+  type WorkspaceActionState,
+} from "@/app/actions";
 
 type Workspace = {
   id: string;
@@ -17,7 +20,7 @@ const journeyLabel = (workspace: Workspace) =>
     ready_to_generate: "Ready to generate",
     ready_for_preview: "Resume ready",
     recovery: "Needs attention",
-  }[workspace.journey?.phase ?? "onboarding"] ?? "Needs attention");
+  })[workspace.journey?.phase ?? "onboarding"] ?? "Needs attention";
 
 const initial: WorkspaceActionState = {
   status: "idle",
@@ -33,13 +36,18 @@ export function ResumeWorkspacePicker({
   activeWorkspaceId?: string;
   revisionNumber: number;
 }) {
-  const [state, action, pending] = useActionState(resumeWorkspaceAction, initial);
+  const [state, action, pending] = useActionState(
+    resumeWorkspaceAction,
+    initial,
+  );
   const [isOpen, setIsOpen] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  const activeWorkspace = workspaces.find((item) => item.id === activeWorkspaceId);
+  const activeWorkspace = workspaces.find(
+    (item) => item.id === activeWorkspaceId,
+  );
   const hasWorkspaces = workspaces.length > 0;
 
   // Close menu when clicking outside
@@ -53,7 +61,8 @@ export function ResumeWorkspacePicker({
     }
     if (isOpen) {
       document.addEventListener("mousedown", handleClickOutside);
-      return () => document.removeEventListener("mousedown", handleClickOutside);
+      return () =>
+        document.removeEventListener("mousedown", handleClickOutside);
     }
   }, [isOpen]);
 

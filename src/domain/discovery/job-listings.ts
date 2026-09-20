@@ -4,32 +4,397 @@ import { createAuditEvent, createUuidV7 } from "@/audit/audit-event";
 import { WorkspaceError } from "@/domain/workspace/types";
 import { resolveAppDataPaths } from "@/files/app-data";
 import { applyMigrations, openDatabase } from "@/persistence/database";
-import { activeDuplicateOverride, findListingByDuplicateKey, getDuplicateOverride, getStoredJobListing, insertDuplicateOverride, insertJobListing, insertSourceRecord, listSourceRecords, listStoredJobListings, moveListingGroup, reverseStoredDuplicateOverride, type StoredJobListing } from "@/persistence/job-listings-repository";
+import {
+  activeDuplicateOverride,
+  findListingByDuplicateKey,
+  getDuplicateOverride,
+  getStoredJobListing,
+  insertDuplicateOverride,
+  insertJobListing,
+  insertSourceRecord,
+  listSourceRecords,
+  listStoredJobListings,
+  moveListingGroup,
+  reverseStoredDuplicateOverride,
+  type StoredJobListing,
+} from "@/persistence/job-listings-repository";
 import { currentSourceConfigurationRevision } from "@/persistence/source-configurations-repository";
 import { appendAuditEvent } from "@/persistence/workspace-repository";
 import { latestFitAssessment } from "@/persistence/fit-assessment-repository";
 
 type Options = { appDataRoot?: string };
-type ImportInput = Options & { sourceId: string; sourceConfigurationRevisionId: string; title: unknown; company: unknown; workStyle?: unknown; location?: unknown; originalUrl: unknown; postedAt?: unknown; refreshRunId?: string };
-export type JobListing = { id: string; title: string; company: string; workStyle: string; location: string; duplicateGroupId: string; activeOverrideId?: string; firstSeenAt: string; lastObservedAt: string; fitAssessment?: { label: "Strong" | "Potential" | "Stretch"; confidence: "high" | "medium" | "low"; calculatedAt: string }; sourceRecords: Array<{ id: string; jobListingId: string; sourceName: string; originalUrl: string; postedAt?: string; observedAt: string; sourceConfigurationRevisionId: string }> };
+type ImportInput = Options & {
+  sourceId: string;
+  sourceConfigurationRevisionId: string;
+  title: unknown;
+  company: unknown;
+  workStyle?: unknown;
+  location?: unknown;
+  originalUrl: unknown;
+  postedAt?: unknown;
+  refreshRunId?: string;
+};
+export type JobListing = {
+  id: string;
+  title: string;
+  company: string;
+  workStyle: string;
+  location: string;
+  duplicateGroupId: string;
+  activeOverrideId?: string;
+  firstSeenAt: string;
+  lastObservedAt: string;
+  fitAssessment?: {
+    label: "Strong" | "Potential" | "Stretch";
+    confidence: "high" | "medium" | "low";
+    calculatedAt: string;
+  };
+  sourceRecords: Array<{
+    id: string;
+    jobListingId: string;
+    sourceName: string;
+    originalUrl: string;
+    postedAt?: string;
+    observedAt: string;
+    sourceConfigurationRevisionId: string;
+  }>;
+};
 export type JobListingsView = { listings: JobListing[]; hasListings: boolean };
-const digest = (value: unknown) => `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
-const uuid = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
-const clean = (value: unknown, label: string, max: number, required = true) => { if (typeof value !== "string") throw new WorkspaceError("JOB_LISTING_INVALID", `Enter a valid ${label}.`, `Correct the ${label} and try the local import again.`); const result = value.trim(); if ((required && !result) || result.length > max) throw new WorkspaceError("JOB_LISTING_INVALID", `Enter a valid ${label}.`, `Correct the ${label} and try the local import again.`); return result || undefined; };
-const url = (value: unknown) => { const result = clean(value, "original URL", 2048)!; try { const parsed = new URL(result); if (parsed.protocol !== "https:" || parsed.username || parsed.password) throw new Error(); return parsed.toString(); } catch { throw new WorkspaceError("JOB_LISTING_INVALID", "Enter a valid HTTPS original URL without embedded credentials.", "Correct the original URL and try the local import again."); } };
-const key = (title: string, company: string) => `${title.toLocaleLowerCase().replace(/\s+/g, " ").trim()}|${company.toLocaleLowerCase().replace(/\s+/g, " ").trim()}`;
-async function database<T>(options: Options, write: boolean, work: (db: ReturnType<typeof openDatabase>) => T): Promise<T> { const paths = await resolveAppDataPaths(options.appDataRoot); const db = openDatabase(paths.databasePath); try { applyMigrations(db); if (!write) return work(db); db.exec("BEGIN IMMEDIATE;"); try { const result = work(db); db.exec("COMMIT;"); return result; } catch (error) { db.exec("ROLLBACK;"); throw error; } } finally { db.close(); } }
-function view(db: ReturnType<typeof openDatabase>): JobListingsView {
-  const names = new Map((db.prepare("SELECT id, name FROM source_configuration_revisions").all() as Array<{ id: string; name: string }>).map((row) => [row.id, row.name]));
-  const stored = listStoredJobListings(db);
-  const recordView = (listingId: string) => listSourceRecords(db, listingId).map((record) => ({ id: record.id, jobListingId: record.jobListingId, sourceName: names.get(record.sourceConfigurationRevisionId) ?? "Unknown", originalUrl: record.originalUrl, postedAt: record.postedAt, observedAt: record.observedAt, sourceConfigurationRevisionId: record.sourceConfigurationRevisionId }));
-  return { listings: stored.map((item) => { const fit = latestFitAssessment(db, item.id); return { id: item.id, title: item.title, company: item.company, workStyle: item.workStyle ?? "Unknown", location: item.location ?? "Unknown", duplicateGroupId: item.duplicateGroupId, activeOverrideId: activeDuplicateOverride(db, item.id)?.id, firstSeenAt: item.firstSeenAt, lastObservedAt: item.lastObservedAt, fitAssessment: fit ? { label: fit.label, confidence: fit.confidence, calculatedAt: fit.calculatedAt } : undefined, sourceRecords: stored.filter((candidate) => candidate.duplicateGroupId === item.duplicateGroupId).flatMap((candidate) => recordView(candidate.id)) }; }), hasListings: stored.length > 0 };
+const digest = (value: unknown) =>
+  `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
+const uuid = (value: string) =>
+  /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value,
+  );
+const clean = (value: unknown, label: string, max: number, required = true) => {
+  if (typeof value !== "string")
+    throw new WorkspaceError(
+      "JOB_LISTING_INVALID",
+      `Enter a valid ${label}.`,
+      `Correct the ${label} and try the local import again.`,
+    );
+  const result = value.trim();
+  if ((required && !result) || result.length > max)
+    throw new WorkspaceError(
+      "JOB_LISTING_INVALID",
+      `Enter a valid ${label}.`,
+      `Correct the ${label} and try the local import again.`,
+    );
+  return result || undefined;
+};
+const url = (value: unknown) => {
+  const result = clean(value, "original URL", 2048)!;
+  try {
+    const parsed = new URL(result);
+    if (parsed.protocol !== "https:" || parsed.username || parsed.password)
+      throw new Error();
+    return parsed.toString();
+  } catch {
+    throw new WorkspaceError(
+      "JOB_LISTING_INVALID",
+      "Enter a valid HTTPS original URL without embedded credentials.",
+      "Correct the original URL and try the local import again.",
+    );
+  }
+};
+const key = (title: string, company: string) =>
+  `${title.toLocaleLowerCase().replace(/\s+/g, " ").trim()}|${company.toLocaleLowerCase().replace(/\s+/g, " ").trim()}`;
+async function database<T>(
+  options: Options,
+  write: boolean,
+  work: (db: ReturnType<typeof openDatabase>) => T,
+): Promise<T> {
+  const paths = await resolveAppDataPaths(options.appDataRoot);
+  const db = openDatabase(paths.databasePath);
+  try {
+    applyMigrations(db);
+    if (!write) return work(db);
+    db.exec("BEGIN IMMEDIATE;");
+    try {
+      const result = work(db);
+      db.exec("COMMIT;");
+      return result;
+    } catch (error) {
+      db.exec("ROLLBACK;");
+      throw error;
+    }
+  } finally {
+    db.close();
+  }
 }
-export async function listJobListings(options: Options = {}): Promise<JobListingsView> { return database(options, false, view); }
-function normalized(input: ImportInput) { const title = clean(input.title, "job title", 300)!; const company = clean(input.company, "company", 300)!; const workStyle = clean(input.workStyle ?? "", "work style", 120, false); const location = clean(input.location ?? "", "location", 300, false); const originalUrl = url(input.originalUrl); const postedAt = input.postedAt ? new Date(clean(input.postedAt, "posted date", 40)!).toISOString() : undefined; if (postedAt && Number.isNaN(Date.parse(postedAt))) throw new WorkspaceError("JOB_LISTING_INVALID", "Enter a valid posted date.", "Correct the posted date and try the local import again."); if (!uuid(input.sourceId) || !uuid(input.sourceConfigurationRevisionId) || input.refreshRunId && !uuid(input.refreshRunId)) throw new WorkspaceError("JOB_LISTING_INVALID", "The selected source is unavailable.", "Refresh Permitted Sources and select a current local source."); return { title, company, workStyle, location, originalUrl, postedAt }; }
-function persist(db: ReturnType<typeof openDatabase>, input: ImportInput, values = normalized(input)): string { const current = currentSourceConfigurationRevision(db, input.sourceId); if (!current || current.id !== input.sourceConfigurationRevisionId) throw new WorkspaceError("JOB_LISTING_STALE", "The selected source changed before this import completed.", "Refresh Permitted Sources, select the current source, and try the local import again."); if (current.accessPath !== "manual-browser-handoff") { const validRun = input.refreshRunId && (db.prepare("SELECT 1 FROM refresh_source_outcomes WHERE refresh_run_id = ? AND source_id = ? AND source_configuration_revision_id = ? AND status IN ('completed', 'partial')").get(input.refreshRunId, input.sourceId, input.sourceConfigurationRevisionId)); if (!validRun) throw new WorkspaceError("JOB_LISTING_STALE", "The permitted Refresh Run is unavailable for this source revision.", "Run an approved source refresh again before retaining listings."); } const duplicateKey = key(values.title, values.company); const existing = findListingByDuplicateKey(db, duplicateKey); const now = new Date().toISOString(); const stored: StoredJobListing = { id: createUuidV7(), title: values.title, company: values.company, workStyle: values.workStyle, location: values.location, duplicateKey, duplicateGroupId: existing?.duplicateGroupId ?? createUuidV7(), firstSeenAt: now, lastObservedAt: now, contentDigest: digest({ ...values, duplicateKey }) }; insertJobListing(db, stored); insertSourceRecord(db, { id: createUuidV7(), jobListingId: stored.id, sourceId: input.sourceId, sourceConfigurationRevisionId: input.sourceConfigurationRevisionId, refreshRunId: input.refreshRunId, originalUrl: values.originalUrl, postedAt: values.postedAt, observedAt: now, contentDigest: digest({ jobListingId: stored.id, sourceId: input.sourceId, revisionId: input.sourceConfigurationRevisionId, originalUrl: values.originalUrl, postedAt: values.postedAt }) }); appendAuditEvent(db, createAuditEvent({ actor: "local-os-user", action: "discovery.job_listing_imported", outcome: "success", entityId: stored.id, contentHash: digest({ jobListingId: stored.id, sourceId: input.sourceId, revisionId: input.sourceConfigurationRevisionId }) })); return stored.id; }
-export function validateAdapterListings(listings: ImportInput[]): void { if (listings.length > 100) throw new WorkspaceError("JOB_LISTING_INVALID", "The source returned too many listings for one bounded refresh.", "Use a narrower permitted source scope and try a later explicit refresh."); listings.forEach((listing) => normalized(listing)); }
-export function persistAdapterListings(database: ReturnType<typeof openDatabase>, listings: ImportInput[]): void { validateAdapterListings(listings); listings.forEach((listing) => { persist(database, listing); }); }
-export async function importManualJobListing(input: ImportInput): Promise<JobListing> { return database(input, true, (db) => { const id = persist(db, input); return view(db).listings.find((item) => item.id === id)!; }); }
-export async function applyDuplicateOverride(input: Options & { listingId: string; groupId?: string | null; confirmed: boolean }): Promise<{ id: string }> { if (!input.confirmed) throw new WorkspaceError("JOB_LISTING_CONFIRMATION_REQUIRED", "Confirm the duplicate-group change before saving it.", "Review the proposed grouping and select Confirm duplicate change."); return database(input, true, (db) => { const listing = getStoredJobListing(db, input.listingId); if (!listing || activeDuplicateOverride(db, input.listingId)) throw new WorkspaceError("JOB_LISTING_STALE", "The duplicate grouping changed before this update completed.", "Review the current saved opportunity and try again."); const newGroupId = input.groupId && uuid(input.groupId) ? input.groupId : createUuidV7(); const override = { id: createUuidV7(), jobListingId: listing.id, previousGroupId: listing.duplicateGroupId, newGroupId, status: "applied" as const, createdAt: new Date().toISOString(), contentDigest: digest({ listingId: listing.id, previousGroupId: listing.duplicateGroupId, newGroupId }) }; insertDuplicateOverride(db, override); moveListingGroup(db, listing.id, newGroupId); appendAuditEvent(db, createAuditEvent({ actor: "local-os-user", action: "discovery.duplicate_override_applied", outcome: "success", entityId: override.id, contentHash: override.contentDigest })); return { id: override.id }; }); }
-export async function reverseDuplicateOverride(input: Options & { overrideId: string; confirmed: boolean }): Promise<void> { if (!input.confirmed) throw new WorkspaceError("JOB_LISTING_CONFIRMATION_REQUIRED", "Confirm the duplicate-group reversal before saving it.", "Review the prior grouping and select Confirm duplicate change."); await database(input, true, (db) => { const override = getDuplicateOverride(db, input.overrideId); const listing = override && getStoredJobListing(db, override.jobListingId); if (!override || !listing || override.status !== "applied" || listing.duplicateGroupId !== override.newGroupId || activeDuplicateOverride(db, listing.id)?.id !== override.id) throw new WorkspaceError("JOB_LISTING_STALE", "The duplicate override is no longer current.", "Review the current saved opportunity and try again."); moveListingGroup(db, override.jobListingId, override.previousGroupId); reverseStoredDuplicateOverride(db, override.id, new Date().toISOString()); appendAuditEvent(db, createAuditEvent({ actor: "local-os-user", action: "discovery.duplicate_override_reversed", outcome: "success", entityId: override.id, contentHash: override.contentDigest })); }); }
+function view(db: ReturnType<typeof openDatabase>): JobListingsView {
+  const names = new Map(
+    (
+      db
+        .prepare("SELECT id, name FROM source_configuration_revisions")
+        .all() as Array<{ id: string; name: string }>
+    ).map((row) => [row.id, row.name]),
+  );
+  const stored = listStoredJobListings(db);
+  const recordView = (listingId: string) =>
+    listSourceRecords(db, listingId).map((record) => ({
+      id: record.id,
+      jobListingId: record.jobListingId,
+      sourceName: names.get(record.sourceConfigurationRevisionId) ?? "Unknown",
+      originalUrl: record.originalUrl,
+      postedAt: record.postedAt,
+      observedAt: record.observedAt,
+      sourceConfigurationRevisionId: record.sourceConfigurationRevisionId,
+    }));
+  return {
+    listings: stored.map((item) => {
+      const fit = latestFitAssessment(db, item.id);
+      return {
+        id: item.id,
+        title: item.title,
+        company: item.company,
+        workStyle: item.workStyle ?? "Unknown",
+        location: item.location ?? "Unknown",
+        duplicateGroupId: item.duplicateGroupId,
+        activeOverrideId: activeDuplicateOverride(db, item.id)?.id,
+        firstSeenAt: item.firstSeenAt,
+        lastObservedAt: item.lastObservedAt,
+        fitAssessment: fit
+          ? {
+              label: fit.label,
+              confidence: fit.confidence,
+              calculatedAt: fit.calculatedAt,
+            }
+          : undefined,
+        sourceRecords: stored
+          .filter(
+            (candidate) => candidate.duplicateGroupId === item.duplicateGroupId,
+          )
+          .flatMap((candidate) => recordView(candidate.id)),
+      };
+    }),
+    hasListings: stored.length > 0,
+  };
+}
+export async function listJobListings(
+  options: Options = {},
+): Promise<JobListingsView> {
+  return database(options, false, view);
+}
+function normalized(input: ImportInput) {
+  const title = clean(input.title, "job title", 300)!;
+  const company = clean(input.company, "company", 300)!;
+  const workStyle = clean(input.workStyle ?? "", "work style", 120, false);
+  const location = clean(input.location ?? "", "location", 300, false);
+  const originalUrl = url(input.originalUrl);
+  const postedAt = input.postedAt
+    ? new Date(clean(input.postedAt, "posted date", 40)!).toISOString()
+    : undefined;
+  if (postedAt && Number.isNaN(Date.parse(postedAt)))
+    throw new WorkspaceError(
+      "JOB_LISTING_INVALID",
+      "Enter a valid posted date.",
+      "Correct the posted date and try the local import again.",
+    );
+  if (
+    !uuid(input.sourceId) ||
+    !uuid(input.sourceConfigurationRevisionId) ||
+    (input.refreshRunId && !uuid(input.refreshRunId))
+  )
+    throw new WorkspaceError(
+      "JOB_LISTING_INVALID",
+      "The selected source is unavailable.",
+      "Refresh Permitted Sources and select a current local source.",
+    );
+  return { title, company, workStyle, location, originalUrl, postedAt };
+}
+function persist(
+  db: ReturnType<typeof openDatabase>,
+  input: ImportInput,
+  values = normalized(input),
+): string {
+  const current = currentSourceConfigurationRevision(db, input.sourceId);
+  if (!current || current.id !== input.sourceConfigurationRevisionId)
+    throw new WorkspaceError(
+      "JOB_LISTING_STALE",
+      "The selected source changed before this import completed.",
+      "Refresh Permitted Sources, select the current source, and try the local import again.",
+    );
+  if (current.accessPath !== "manual-browser-handoff") {
+    const validRun =
+      input.refreshRunId &&
+      db
+        .prepare(
+          "SELECT 1 FROM refresh_source_outcomes WHERE refresh_run_id = ? AND source_id = ? AND source_configuration_revision_id = ? AND status IN ('completed', 'partial')",
+        )
+        .get(
+          input.refreshRunId,
+          input.sourceId,
+          input.sourceConfigurationRevisionId,
+        );
+    if (!validRun)
+      throw new WorkspaceError(
+        "JOB_LISTING_STALE",
+        "The permitted Refresh Run is unavailable for this source revision.",
+        "Run an approved source refresh again before retaining listings.",
+      );
+  }
+  const duplicateKey = key(values.title, values.company);
+  const existing = findListingByDuplicateKey(db, duplicateKey);
+  const now = new Date().toISOString();
+  const stored: StoredJobListing = {
+    id: createUuidV7(),
+    title: values.title,
+    company: values.company,
+    workStyle: values.workStyle,
+    location: values.location,
+    duplicateKey,
+    duplicateGroupId: existing?.duplicateGroupId ?? createUuidV7(),
+    firstSeenAt: now,
+    lastObservedAt: now,
+    contentDigest: digest({ ...values, duplicateKey }),
+  };
+  insertJobListing(db, stored);
+  insertSourceRecord(db, {
+    id: createUuidV7(),
+    jobListingId: stored.id,
+    sourceId: input.sourceId,
+    sourceConfigurationRevisionId: input.sourceConfigurationRevisionId,
+    refreshRunId: input.refreshRunId,
+    originalUrl: values.originalUrl,
+    postedAt: values.postedAt,
+    observedAt: now,
+    contentDigest: digest({
+      jobListingId: stored.id,
+      sourceId: input.sourceId,
+      revisionId: input.sourceConfigurationRevisionId,
+      originalUrl: values.originalUrl,
+      postedAt: values.postedAt,
+    }),
+  });
+  appendAuditEvent(
+    db,
+    createAuditEvent({
+      actor: "local-os-user",
+      action: "discovery.job_listing_imported",
+      outcome: "success",
+      entityId: stored.id,
+      contentHash: digest({
+        jobListingId: stored.id,
+        sourceId: input.sourceId,
+        revisionId: input.sourceConfigurationRevisionId,
+      }),
+    }),
+  );
+  return stored.id;
+}
+export function validateAdapterListings(listings: ImportInput[]): void {
+  if (listings.length > 100)
+    throw new WorkspaceError(
+      "JOB_LISTING_INVALID",
+      "The source returned too many listings for one bounded refresh.",
+      "Use a narrower permitted source scope and try a later explicit refresh.",
+    );
+  listings.forEach((listing) => normalized(listing));
+}
+export function persistAdapterListings(
+  database: ReturnType<typeof openDatabase>,
+  listings: ImportInput[],
+): void {
+  validateAdapterListings(listings);
+  listings.forEach((listing) => {
+    persist(database, listing);
+  });
+}
+export async function importManualJobListing(
+  input: ImportInput,
+): Promise<JobListing> {
+  return database(input, true, (db) => {
+    const id = persist(db, input);
+    return view(db).listings.find((item) => item.id === id)!;
+  });
+}
+export async function applyDuplicateOverride(
+  input: Options & {
+    listingId: string;
+    groupId?: string | null;
+    confirmed: boolean;
+  },
+): Promise<{ id: string }> {
+  if (!input.confirmed)
+    throw new WorkspaceError(
+      "JOB_LISTING_CONFIRMATION_REQUIRED",
+      "Confirm the duplicate-group change before saving it.",
+      "Review the proposed grouping and select Confirm duplicate change.",
+    );
+  return database(input, true, (db) => {
+    const listing = getStoredJobListing(db, input.listingId);
+    if (!listing || activeDuplicateOverride(db, input.listingId))
+      throw new WorkspaceError(
+        "JOB_LISTING_STALE",
+        "The duplicate grouping changed before this update completed.",
+        "Review the current saved opportunity and try again.",
+      );
+    const newGroupId =
+      input.groupId && uuid(input.groupId) ? input.groupId : createUuidV7();
+    const override = {
+      id: createUuidV7(),
+      jobListingId: listing.id,
+      previousGroupId: listing.duplicateGroupId,
+      newGroupId,
+      status: "applied" as const,
+      createdAt: new Date().toISOString(),
+      contentDigest: digest({
+        listingId: listing.id,
+        previousGroupId: listing.duplicateGroupId,
+        newGroupId,
+      }),
+    };
+    insertDuplicateOverride(db, override);
+    moveListingGroup(db, listing.id, newGroupId);
+    appendAuditEvent(
+      db,
+      createAuditEvent({
+        actor: "local-os-user",
+        action: "discovery.duplicate_override_applied",
+        outcome: "success",
+        entityId: override.id,
+        contentHash: override.contentDigest,
+      }),
+    );
+    return { id: override.id };
+  });
+}
+export async function reverseDuplicateOverride(
+  input: Options & { overrideId: string; confirmed: boolean },
+): Promise<void> {
+  if (!input.confirmed)
+    throw new WorkspaceError(
+      "JOB_LISTING_CONFIRMATION_REQUIRED",
+      "Confirm the duplicate-group reversal before saving it.",
+      "Review the prior grouping and select Confirm duplicate change.",
+    );
+  await database(input, true, (db) => {
+    const override = getDuplicateOverride(db, input.overrideId);
+    const listing = override && getStoredJobListing(db, override.jobListingId);
+    if (
+      !override ||
+      !listing ||
+      override.status !== "applied" ||
+      listing.duplicateGroupId !== override.newGroupId ||
+      activeDuplicateOverride(db, listing.id)?.id !== override.id
+    )
+      throw new WorkspaceError(
+        "JOB_LISTING_STALE",
+        "The duplicate override is no longer current.",
+        "Review the current saved opportunity and try again.",
+      );
+    moveListingGroup(db, override.jobListingId, override.previousGroupId);
+    reverseStoredDuplicateOverride(db, override.id, new Date().toISOString());
+    appendAuditEvent(
+      db,
+      createAuditEvent({
+        actor: "local-os-user",
+        action: "discovery.duplicate_override_reversed",
+        outcome: "success",
+        entityId: override.id,
+        contentHash: override.contentDigest,
+      }),
+    );
+  });
+}

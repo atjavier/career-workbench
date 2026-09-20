@@ -137,10 +137,10 @@ export async function ResumeWorkspace() {
               : undefined;
   const aiMissing = Boolean(
     workspaceState.activeWorkspace &&
-      !localModel.ready &&
-      !("error" in profile) &&
-      profile.revision &&
-      materials.length,
+    !localModel.ready &&
+    !("error" in profile) &&
+    profile.revision &&
+    materials.length,
   );
   if (!workspaceState.activeWorkspace && workspaceState.workspaces.length === 0)
     return (
@@ -186,13 +186,13 @@ export async function ResumeWorkspace() {
         <ResumeCoach
           available={Boolean(
             workspaceState.activeWorkspace &&
-              baselineReady &&
-              localModel.ready &&
-              !("error" in profile) &&
-              profile.revision &&
-              (materials.length ||
-                generationJob?.status === "queued" ||
-                generationJob?.status === "running"),
+            baselineReady &&
+            localModel.ready &&
+            !("error" in profile) &&
+            profile.revision &&
+            (materials.length ||
+              generationJob?.status === "queued" ||
+              generationJob?.status === "running"),
           )}
           unavailableReason={missing}
           showSetupLink={aiMissing}

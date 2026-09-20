@@ -674,7 +674,10 @@ function inferVisibleWorkClaims(
   });
 }
 function splitWorkEntries(text: string): string[] {
-  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const lines = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
   const entries: string[] = [];
   let current: string[] = [];
   let seenBullets = false;
@@ -825,7 +828,8 @@ function coachResponse(
   // newlines, which previously discarded well-formed model resumes and
   // forced the raw-fact fallback instead.
   if (process.env.NODE_ENV === "development") {
-    if (!populatedSections.length) console.error("[coachResponse fail]: populatedSections empty");
+    if (!populatedSections.length)
+      console.error("[coachResponse fail]: populatedSections empty");
     const badSection = populatedSections.find((section) => {
       if (!section || typeof section !== "object") return true;
       const candidate = section as Record<string, unknown>;
@@ -836,14 +840,29 @@ function coachResponse(
           !isExactEmptyBaselineSection(candidate, request.baseline))
       );
     });
-    if (badSection) console.error("[coachResponse fail badSection]:", badSection);
+    if (badSection)
+      console.error("[coachResponse fail badSection]:", badSection);
     const badClaim = claims.find((claim) => {
       if (!claim || typeof claim !== "object") return true;
       const rec = claim as Record<string, unknown>;
-      if (!("text" in rec) || !("evidenceIndexes" in rec) || !plain(rec.text, 1_000)) return true;
+      if (
+        !("text" in rec) ||
+        !("evidenceIndexes" in rec) ||
+        !plain(rec.text, 1_000)
+      )
+        return true;
       if (!Array.isArray(rec.evidenceIndexes)) return true;
-      const cast = claim as { evidenceIndexes: unknown[]; clarificationIndexes?: unknown[]; fileCitations?: unknown[] };
-      if (!cast.evidenceIndexes.length && !cast.clarificationIndexes?.length && !cast.fileCitations?.length) return true;
+      const cast = claim as {
+        evidenceIndexes: unknown[];
+        clarificationIndexes?: unknown[];
+        fileCitations?: unknown[];
+      };
+      if (
+        !cast.evidenceIndexes.length &&
+        !cast.clarificationIndexes?.length &&
+        !cast.fileCitations?.length
+      )
+        return true;
       return false;
     });
     if (badClaim) console.error("[coachResponse fail badClaim]:", badClaim);
@@ -956,7 +975,10 @@ function coachResponse(
       !claim.fileCitations?.length,
   );
   if (ungrounded.length) {
-    console.error("[coachResponse ungrounded claims]:", JSON.stringify(ungrounded, null, 2));
+    console.error(
+      "[coachResponse ungrounded claims]:",
+      JSON.stringify(ungrounded, null, 2),
+    );
     invalid("The local model returned unsupported guidance.");
   }
   const inferredClaims = claims.length
@@ -1109,11 +1131,7 @@ async function nativeText(
       Number(result.headers.get("content-length") ?? 0) > responseLimit * 2
     )
       throw new Error("unavailable");
-    const raw = await readBoundedResponseText(
-      result,
-      responseLimit * 2,
-      code,
-    );
+    const raw = await readBoundedResponseText(result, responseLimit * 2, code);
     const parsed = JSON.parse(raw) as {
       response_id?: unknown;
       output?: unknown;
@@ -1213,7 +1231,9 @@ async function native(
       console.error(
         "[native JSON parse failure]:",
         error instanceof Error ? error.message : error,
-        pos >= 0 ? `\n[error context around pos ${pos}]:\n>>>${snippet}<<<` : "",
+        pos >= 0
+          ? `\n[error context around pos ${pos}]:\n>>>${snippet}<<<`
+          : "",
         "\nraw content tail:",
         content.length > 2_000 ? `…${content.slice(-2_000)}` : content,
       );
@@ -1341,7 +1361,9 @@ async function requestFileAgentResume(
         observations
           .filter(
             (o: any) =>
-              o?.action?.action === "read" && o?.result?.ok && o?.action?.rootId,
+              o?.action?.action === "read" &&
+              o?.result?.ok &&
+              o?.action?.rootId,
           )
           .map((o: any) => o.action.rootId),
       );
@@ -1362,8 +1384,11 @@ async function requestFileAgentResume(
       );
       if (managedProjects.length > 1 && turn < 8) {
         const rawEdits = Array.isArray(value.edits) ? value.edits : [];
-        const projectEdit = rawEdits.find((e: any) =>
-          e && typeof e === "object" && /project/i.test(String(e.slotId ?? "")),
+        const projectEdit = rawEdits.find(
+          (e: any) =>
+            e &&
+            typeof e === "object" &&
+            /project/i.test(String(e.slotId ?? "")),
         );
         const projectText =
           typeof projectEdit?.text === "string"
@@ -1395,8 +1420,7 @@ async function requestFileAgentResume(
           Array.isArray((item as Record<string, unknown>).unknowns),
       )
       .flatMap(
-        (item) =>
-          (item as Record<string, unknown>).unknowns as unknown[],
+        (item) => (item as Record<string, unknown>).unknowns as unknown[],
       );
     if (!Array.isArray(value.unknowns) || !value.unknowns.length) {
       (value as Record<string, unknown>).unknowns = unknownsFromEdits.filter(
@@ -1493,7 +1517,8 @@ async function requestFileAgentResume(
           slotId.replace(/-/g, " ").includes(candidate.heading.toLowerCase()),
       );
       if (!slot) throw new Error("unplanned file agent slot");
-      if (seenSlots.has(slot.slotId)) throw new Error("duplicate file agent slot");
+      if (seenSlots.has(slot.slotId))
+        throw new Error("duplicate file agent slot");
       seenSlots.add(slot.slotId);
       const editClaims = edit.claims.map((item) => {
         if (!item || typeof item !== "object" || Array.isArray(item))
@@ -1975,7 +2000,9 @@ function streamedInterviewResponse(
     .trim();
   if (latestCandidate) {
     const cleanContent = content.toLowerCase().replace(/[^a-z0-9]/g, "");
-    const cleanCandidate = latestCandidate.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const cleanCandidate = latestCandidate
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, "");
     if (
       cleanCandidate.length > 5 &&
       (cleanContent === cleanCandidate ||
@@ -2258,9 +2285,7 @@ function profileValue(value: unknown): string | undefined {
   return typeof value === "string" && plain(value, 240) ? value : undefined;
 }
 function resumeProjectName(sourceDocument?: string): string {
-  const match = sourceDocument?.match(
-    /(?:projects|experiences)\/([^/]+)\//i,
-  );
+  const match = sourceDocument?.match(/(?:projects|experiences)\/([^/]+)\//i);
   return match?.[1]?.replace(/[-_]+/g, " ").trim() || "Documented Project";
 }
 function isInternalResumeManifest(text: string): boolean {
@@ -2675,11 +2700,12 @@ function specialistFallback(
         .trim()
         .replace(/^["']|["']$/g, "")
         .replace(/[.]+$/, "");
-      const actionPrefixed = /^(?:Developed|Designed|Implemented|Integrated|Led|Delivered|Improved|Automated|Produced|Established|Validated|Collaborated|Supported|Engineered|Maintained|Managed|Architected|Built)\b/i.test(
-        clean,
-      )
-        ? clean.charAt(0).toUpperCase() + clean.slice(1)
-        : `Built ${clean.replace(/^(?:i\s+|it\s+was\s+)/i, "")}`;
+      const actionPrefixed =
+        /^(?:Developed|Designed|Implemented|Integrated|Led|Delivered|Improved|Automated|Produced|Established|Validated|Collaborated|Supported|Engineered|Maintained|Managed|Architected|Built)\b/i.test(
+          clean,
+        )
+          ? clean.charAt(0).toUpperCase() + clean.slice(1)
+          : `Built ${clean.replace(/^(?:i\s+|it\s+was\s+)/i, "")}`;
       if (supports(actionPrefixed, [clarification.text])) {
         text = actionPrefixed;
       } else {
@@ -2740,7 +2766,7 @@ function specialistFallback(
     const hasCategoryEvidence = (request.evidence ?? []).some((item) =>
       category === "experience"
         ? /(?:^|\/)experiences\//i.test(item.sourceDocument ?? "")
-        : !(/(?:^|\/)experiences\//i.test(item.sourceDocument ?? "")),
+        : !/(?:^|\/)experiences\//i.test(item.sourceDocument ?? ""),
     );
     return {
       heading: section.heading,
@@ -2748,7 +2774,9 @@ function specialistFallback(
     };
   });
   if (!claims.length) {
-    console.error("[specialistFallback]: !claims.length is true (claims is empty)");
+    console.error(
+      "[specialistFallback]: !claims.length is true (claims is empty)",
+    );
     return undefined;
   }
   const response: ResumeCoachResponse = {
@@ -2788,7 +2816,9 @@ function containsResumeSourceLeak(
     /(?:^|\b)(?:[a-z]+\s+)?projects?\b/i.test(heading),
   );
   const hasExperienceSection = headings.some((heading) =>
-    /(?:^|\b)(?:[a-z]+\s+)?(?:experience|employment|work history)\b/i.test(heading),
+    /(?:^|\b)(?:[a-z]+\s+)?(?:experience|employment|work history)\b/i.test(
+      heading,
+    ),
   );
   const missingProjectSection =
     (categories.has("project") || projectEvidence) && !hasProjectSection;
@@ -2837,16 +2867,15 @@ export async function requestBaseResumeGeneration(
   if (request.fileReadSession) {
     try {
       return retainCandidateClarificationProvenance(
-        await requestFileAgentResume(
-          request,
-          request.fileReadSession,
-          fetcher,
-        ),
+        await requestFileAgentResume(request, request.fileReadSession, fetcher),
         request,
       );
     } catch (error) {
       if (process.env.NODE_ENV === "development") {
-        console.error("[requestBaseResumeGeneration file agent fallback]:", error);
+        console.error(
+          "[requestBaseResumeGeneration file agent fallback]:",
+          error,
+        );
       }
       return retainCandidateClarificationProvenance(
         deterministicResumeCoachResponse(request),
@@ -2900,37 +2929,37 @@ export async function requestBaseResumeGeneration(
       }),
     );
     const generated = await orchestrateResumeGeneration(
-          {
-            baseline,
-            selectionEcho: request.consentFingerprint,
-            profile: request.profileSnapshot,
-            evidence: packetEvidence,
-            candidateClarifications,
-            documentation: packetDocumentation,
-            projectIdentities,
-            opportunity: request.opportunity
-              ? {
-                  title: request.opportunity.title,
-                  company: request.opportunity.company,
-                  requirements: request.opportunity.requirements,
-                  copiedDescription: request.opportunity.copiedDescription,
-                  contentDigest: request.opportunity.contentDigest,
-                }
-              : null,
-            request: request.userRequest,
-          },
-          (instruction, packet, maximumTokens) =>
-            native(
-              request.connection,
-              instruction,
-              packet,
-              maximumTokens,
-              fetcher,
-              "RESUME_COACH_UNAVAILABLE",
-              maxResponse,
-              "off",
-            ),
-        );
+      {
+        baseline,
+        selectionEcho: request.consentFingerprint,
+        profile: request.profileSnapshot,
+        evidence: packetEvidence,
+        candidateClarifications,
+        documentation: packetDocumentation,
+        projectIdentities,
+        opportunity: request.opportunity
+          ? {
+              title: request.opportunity.title,
+              company: request.opportunity.company,
+              requirements: request.opportunity.requirements,
+              copiedDescription: request.opportunity.copiedDescription,
+              contentDigest: request.opportunity.contentDigest,
+            }
+          : null,
+        request: request.userRequest,
+      },
+      (instruction, packet, maximumTokens) =>
+        native(
+          request.connection,
+          instruction,
+          packet,
+          maximumTokens,
+          fetcher,
+          "RESUME_COACH_UNAVAILABLE",
+          maxResponse,
+          "off",
+        ),
+    );
     const response = request.fileReadSession
       ? generated
       : coachResponse(generated, request);
@@ -3318,9 +3347,7 @@ function isSourceFact(text: string, path: string): boolean {
     return /\b(?:route|router|app|api|model|schema|migration|create table|select |insert |update |delete |test|describe|assert|auth|login|register|password|token)\b/i.test(
       text,
     );
-  if (
-    /(?:^|\/)(?:\.github\/workflows|docker-compose(?:\.ya?ml)?)/i.test(path)
-  )
+  if (/(?:^|\/)(?:\.github\/workflows|docker-compose(?:\.ya?ml)?)/i.test(path))
     return /\b(?:services?:|image:|command:|depends_on:|workflow|jobs:|steps:|test|build|deploy|docker|node|python)\b/i.test(
       text,
     );
@@ -4051,7 +4078,6 @@ export async function requestOpportunityAssessment(
   );
 }
 
-
 export type EditableTexArtifact = {
   documentId: string;
   path: string;
@@ -4086,30 +4112,72 @@ const safeRelativeArtifactPath = (value: unknown) =>
   !value.split("/").some((segment) => segment === ".." || segment === ".") &&
   !/^(?:[a-z]:|\/|[a-z][a-z0-9+.-]*:)/i.test(value);
 
-export function editableTexRevisionConsentFingerprint(input: Omit<EditableTexRevisionRequest, "consentFingerprint">): string {
-  return `sha256:${createHash("sha256").update(JSON.stringify({
-    capability: localModelCapabilityVersion("editable-tex-revision"),
-    connection: publicConnection(input.connection), workspaceId: input.workspaceId,
-    displayName: input.displayName,
-    baseline: { id: input.baseline.id, contentDigest: input.baseline.contentDigest },
-    artifacts: input.artifacts.map(({ documentId, path, contentDigest }) => ({ documentId, path, contentDigest })).sort((a, b) => a.path.localeCompare(b.path)),
-    contextLimitTokens: input.contextLimitTokens,
-    consentNonce: input.consentNonce,
-  })).digest("hex")}`;
+export function editableTexRevisionConsentFingerprint(
+  input: Omit<EditableTexRevisionRequest, "consentFingerprint">,
+): string {
+  return `sha256:${createHash("sha256")
+    .update(
+      JSON.stringify({
+        capability: localModelCapabilityVersion("editable-tex-revision"),
+        connection: publicConnection(input.connection),
+        workspaceId: input.workspaceId,
+        displayName: input.displayName,
+        baseline: {
+          id: input.baseline.id,
+          contentDigest: input.baseline.contentDigest,
+        },
+        artifacts: input.artifacts
+          .map(({ documentId, path, contentDigest }) => ({
+            documentId,
+            path,
+            contentDigest,
+          }))
+          .sort((a, b) => a.path.localeCompare(b.path)),
+        contextLimitTokens: input.contextLimitTokens,
+        consentNonce: input.consentNonce,
+      }),
+    )
+    .digest("hex")}`;
 }
 
 /** Calculates the full packet before inference. Callers must not trim artifacts to fit. */
 function editableTexPacket(request: EditableTexRevisionRequest) {
   return {
-    schemaVersion: 1, selectionEcho: request.consentFingerprint,
-    baseline: { id: request.baseline.id, contentDigest: request.baseline.contentDigest, tex: request.baseline.tex },
-    artifacts: request.artifacts.map(({ path, contentDigest, text }) => ({ path, contentDigest, text })),
+    schemaVersion: 1,
+    selectionEcho: request.consentFingerprint,
+    baseline: {
+      id: request.baseline.id,
+      contentDigest: request.baseline.contentDigest,
+      tex: request.baseline.tex,
+    },
+    artifacts: request.artifacts.map(({ path, contentDigest, text }) => ({
+      path,
+      contentDigest,
+      text,
+    })),
     documentPolicy: rawTexDocumentPolicy(request.baseline.tex),
-    responseShape: { schemaVersion: 1, selectionEcho: request.consentFingerprint, tex: "complete TeX document", artifactCitations: request.artifacts.map(({ path, contentDigest }) => ({ path, contentDigest })) },
+    responseShape: {
+      schemaVersion: 1,
+      selectionEcho: request.consentFingerprint,
+      tex: "complete TeX document",
+      artifactCitations: request.artifacts.map(({ path, contentDigest }) => ({
+        path,
+        contentDigest,
+      })),
+    },
   };
 }
 function editableTexTransportBody(request: EditableTexRevisionRequest): string {
-  return JSON.stringify({ model: request.connection.modelIdentifier, input: JSON.stringify(editableTexPacket(request)), system_prompt: editableTexRevisionSystemInstruction, stream: false, store: false, reasoning: "off", temperature: 0.2, max_output_tokens: editableTexOutputTokens });
+  return JSON.stringify({
+    model: request.connection.modelIdentifier,
+    input: JSON.stringify(editableTexPacket(request)),
+    system_prompt: editableTexRevisionSystemInstruction,
+    stream: false,
+    store: false,
+    reasoning: "off",
+    temperature: 0.2,
+    max_output_tokens: editableTexOutputTokens,
+  });
 }
 /**
  * LM Studio exposes a context-token limit but not a tokenizer/chat-template
@@ -4119,44 +4187,153 @@ function editableTexTransportBody(request: EditableTexRevisionRequest): string {
  * `max_output_tokens` value sent in that same body.  This deliberately uses
  * upper-bound units, rather than claiming either value is an exact token count.
  */
-export function editableTexRequestBudget(request: EditableTexRevisionRequest): { serializedRequestBytes: number; responseByteLimit: number; inputTokenUpperBound: number; responseTokenReserve: number; totalContextTokenUpperBound: number } {
-  const serializedRequestBytes = Buffer.byteLength(editableTexTransportBody(request), "utf8");
+export function editableTexRequestBudget(request: EditableTexRevisionRequest): {
+  serializedRequestBytes: number;
+  responseByteLimit: number;
+  inputTokenUpperBound: number;
+  responseTokenReserve: number;
+  totalContextTokenUpperBound: number;
+} {
+  const serializedRequestBytes = Buffer.byteLength(
+    editableTexTransportBody(request),
+    "utf8",
+  );
   const inputTokenUpperBound = serializedRequestBytes;
   const responseTokenReserve = editableTexOutputTokens;
-  return { serializedRequestBytes, responseByteLimit: editableTexMaximumResponseBytes, inputTokenUpperBound, responseTokenReserve, totalContextTokenUpperBound: inputTokenUpperBound + responseTokenReserve };
+  return {
+    serializedRequestBytes,
+    responseByteLimit: editableTexMaximumResponseBytes,
+    inputTokenUpperBound,
+    responseTokenReserve,
+    totalContextTokenUpperBound: inputTokenUpperBound + responseTokenReserve,
+  };
 }
-function editableTexInvalid(message: string, next = "Reduce neither the template nor the approved artifacts; use a model context configured for this complete draft packet."): never {
+function editableTexInvalid(
+  message: string,
+  next = "Reduce neither the template nor the approved artifacts; use a model context configured for this complete draft packet.",
+): never {
   throw new WorkspaceError("RESUME_COACH_INVALID", message, next);
 }
 function validateEditableTexRequest(request: EditableTexRevisionRequest): void {
   const budget = editableTexRequestBudget(request);
   if (
-    !validConnection(request.connection) || !uuid(request.workspaceId) || !plain(request.displayName, 120) ||
-    !uuid(request.baseline.id) || !sha(request.baseline.contentDigest) || !boundedText(request.baseline.tex, editableTexMaximumResponseBytes) ||
-    !plain(request.consentNonce, 128) || !sha(request.consentFingerprint) || !Number.isInteger(request.contextLimitTokens) || request.contextLimitTokens < editableTexOutputTokens + 1 || request.contextLimitTokens > 30_000 || !request.artifacts.length || request.artifacts.length > 200 ||
-    request.artifacts.some((artifact) => !uuid(artifact.documentId) || !safeRelativeArtifactPath(artifact.path) || !sha(artifact.contentDigest) || !boundedText(artifact.text, 2 * 1024 * 1024)) ||
-    new Set(request.artifacts.map((artifact) => artifact.path)).size !== request.artifacts.length ||
-    request.consentFingerprint !== editableTexRevisionConsentFingerprint(request)
-  ) editableTexInvalid("The selected TeX draft material cannot be sent safely.");
-  if (budget.serializedRequestBytes > editableTexMaximumRequestBytes || budget.totalContextTokenUpperBound > request.contextLimitTokens)
-    editableTexInvalid("The complete TeX template and approved artifact packet exceed the configured local-model context.");
+    !validConnection(request.connection) ||
+    !uuid(request.workspaceId) ||
+    !plain(request.displayName, 120) ||
+    !uuid(request.baseline.id) ||
+    !sha(request.baseline.contentDigest) ||
+    !boundedText(request.baseline.tex, editableTexMaximumResponseBytes) ||
+    !plain(request.consentNonce, 128) ||
+    !sha(request.consentFingerprint) ||
+    !Number.isInteger(request.contextLimitTokens) ||
+    request.contextLimitTokens < editableTexOutputTokens + 1 ||
+    request.contextLimitTokens > 30_000 ||
+    !request.artifacts.length ||
+    request.artifacts.length > 200 ||
+    request.artifacts.some(
+      (artifact) =>
+        !uuid(artifact.documentId) ||
+        !safeRelativeArtifactPath(artifact.path) ||
+        !sha(artifact.contentDigest) ||
+        !boundedText(artifact.text, 2 * 1024 * 1024),
+    ) ||
+    new Set(request.artifacts.map((artifact) => artifact.path)).size !==
+      request.artifacts.length ||
+    request.consentFingerprint !==
+      editableTexRevisionConsentFingerprint(request)
+  )
+    editableTexInvalid(
+      "The selected TeX draft material cannot be sent safely.",
+    );
+  if (
+    budget.serializedRequestBytes > editableTexMaximumRequestBytes ||
+    budget.totalContextTokenUpperBound > request.contextLimitTokens
+  )
+    editableTexInvalid(
+      "The complete TeX template and approved artifact packet exceed the configured local-model context.",
+    );
 }
-export function validateEditableTexRevisionResponse(value: unknown, request: EditableTexRevisionRequest): EditableTexRevisionResponse {
-  if (!value || typeof value !== "object" || Array.isArray(value)) editableTexInvalid("The local model returned an unusable TeX revision.");
+export function validateEditableTexRevisionResponse(
+  value: unknown,
+  request: EditableTexRevisionRequest,
+): EditableTexRevisionResponse {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    editableTexInvalid("The local model returned an unusable TeX revision.");
   const item = value as Record<string, unknown>;
   const citations = item.artifactCitations;
-  if (!exactKeys(item, ["schemaVersion", "selectionEcho", "tex", "artifactCitations"]) || item.schemaVersion !== 1 || item.selectionEcho !== request.consentFingerprint || !boundedText(item.tex, editableTexMaximumResponseBytes) || (typeof item.tex === "string" && Buffer.byteLength(item.tex, "utf8") > editableTexMaximumResponseBytes) || !Array.isArray(citations) || citations.length !== request.artifacts.length)
+  if (
+    !exactKeys(item, [
+      "schemaVersion",
+      "selectionEcho",
+      "tex",
+      "artifactCitations",
+    ]) ||
+    item.schemaVersion !== 1 ||
+    item.selectionEcho !== request.consentFingerprint ||
+    !boundedText(item.tex, editableTexMaximumResponseBytes) ||
+    (typeof item.tex === "string" &&
+      Buffer.byteLength(item.tex, "utf8") > editableTexMaximumResponseBytes) ||
+    !Array.isArray(citations) ||
+    citations.length !== request.artifacts.length
+  )
     editableTexInvalid("The local model returned an incomplete TeX revision.");
-  const expected = new Map(request.artifacts.map((artifact) => [artifact.path, artifact.contentDigest]));
-  if (citations.some((citation) => !citation || typeof citation !== "object" || Array.isArray(citation) || !exactKeys(citation as Record<string, unknown>, ["path", "contentDigest"]) || !safeRelativeArtifactPath((citation as { path?: unknown }).path) || !sha((citation as { contentDigest?: unknown }).contentDigest) || expected.get((citation as { path: string }).path) !== (citation as { contentDigest: string }).contentDigest) || new Set(citations.map((citation) => (citation as { path: string }).path)).size !== citations.length)
-    editableTexInvalid("The local model did not cite the complete approved artifact snapshot.");
-  return { schemaVersion: 1, selectionEcho: request.consentFingerprint, tex: String(item.tex), artifactCitations: citations as EditableTexRevisionResponse["artifactCitations"] };
+  const expected = new Map(
+    request.artifacts.map((artifact) => [
+      artifact.path,
+      artifact.contentDigest,
+    ]),
+  );
+  if (
+    citations.some(
+      (citation) =>
+        !citation ||
+        typeof citation !== "object" ||
+        Array.isArray(citation) ||
+        !exactKeys(citation as Record<string, unknown>, [
+          "path",
+          "contentDigest",
+        ]) ||
+        !safeRelativeArtifactPath((citation as { path?: unknown }).path) ||
+        !sha((citation as { contentDigest?: unknown }).contentDigest) ||
+        expected.get((citation as { path: string }).path) !==
+          (citation as { contentDigest: string }).contentDigest,
+    ) ||
+    new Set(citations.map((citation) => (citation as { path: string }).path))
+      .size !== citations.length
+  )
+    editableTexInvalid(
+      "The local model did not cite the complete approved artifact snapshot.",
+    );
+  return {
+    schemaVersion: 1,
+    selectionEcho: request.consentFingerprint,
+    tex: String(item.tex),
+    artifactCitations:
+      citations as EditableTexRevisionResponse["artifactCitations"],
+  };
 }
-export async function requestEditableTexRevision(request: EditableTexRevisionRequest, fetcher: FetchLike = fetch): Promise<EditableTexRevisionResponse> {
+export async function requestEditableTexRevision(
+  request: EditableTexRevisionRequest,
+  fetcher: FetchLike = fetch,
+): Promise<EditableTexRevisionResponse> {
   validateEditableTexRequest(request);
   // validateEditableTexRequest budgets this exact serialization before any transport.
-  const content = await nativeText(request.connection, editableTexRevisionSystemInstruction, editableTexPacket(request), editableTexOutputTokens, fetcher, "RESUME_COACH_UNAVAILABLE", editableTexMaximumResponseBytes);
+  const content = await nativeText(
+    request.connection,
+    editableTexRevisionSystemInstruction,
+    editableTexPacket(request),
+    editableTexOutputTokens,
+    fetcher,
+    "RESUME_COACH_UNAVAILABLE",
+    editableTexMaximumResponseBytes,
+  );
   let parsed: unknown;
-  try { parsed = parseModelJson(content); } catch { editableTexInvalid("The local model returned a malformed TeX response envelope."); }
+  try {
+    parsed = parseModelJson(content);
+  } catch {
+    editableTexInvalid(
+      "The local model returned a malformed TeX response envelope.",
+    );
+  }
   return validateEditableTexRevisionResponse(parsed, request);
 }

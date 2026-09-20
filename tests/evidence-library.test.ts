@@ -753,7 +753,9 @@ test("browser folder snapshots accept only paired, bounded, safe relative source
   );
 });
 
-function testPdfBytes(text = "MetaWatt Internship Report Delivered systems successfully") {
+function testPdfBytes(
+  text = "MetaWatt Internship Report Delivered systems successfully",
+) {
   const objects = [
     "<< /Type /Catalog /Pages 2 0 R >>",
     "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
@@ -768,14 +770,21 @@ function testPdfBytes(text = "MetaWatt Internship Report Delivered systems succe
     output += `${index + 1} 0 obj\n${objects[index]}\nendobj\n`;
   }
   const start = Buffer.byteLength(output);
-  output += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n${offsets.slice(1).map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`).join("")}trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${start}\n%%EOF\n`;
+  output += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n${offsets
+    .slice(1)
+    .map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`)
+    .join(
+      "",
+    )}trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${start}\n%%EOF\n`;
   return new Uint8Array(Buffer.from(output));
 }
 
 test("reads PDF documents and complete multi-week YAML logs without artificial truncation", async () => {
   const root = await mkdtemp(join(tmpdir(), "metawatt-folder-test-"));
   try {
-    const pdfBytes = testPdfBytes("MetaWatt Internship Report Delivered systems successfully");
+    const pdfBytes = testPdfBytes(
+      "MetaWatt Internship Report Delivered systems successfully",
+    );
     await writeFile(join(root, "report.pdf"), pdfBytes);
     await writeFile(
       join(root, "week_1.yaml"),
@@ -807,7 +816,10 @@ test("reads PDF documents and complete multi-week YAML logs without artificial t
     assert.ok(paths.includes("week_3.yaml"), "week_3.yaml should be included");
     assert.ok(paths.includes("week_4.yaml"), "week_4.yaml should be included");
     assert.ok(paths.includes("week_5.yaml"), "week_5.yaml should be included");
-    assert.ok(paths.includes("generator.py"), "generator.py should be included");
+    assert.ok(
+      paths.includes("generator.py"),
+      "generator.py should be included",
+    );
 
     const pdfFile = source.files.find((f) => f.path === "report.pdf");
     assert.ok(pdfFile?.text.includes("MetaWatt Internship Report"));
@@ -818,11 +830,19 @@ test("reads PDF documents and complete multi-week YAML logs without artificial t
       files: [uploadedPdf],
       manifest: JSON.stringify({
         root: "experience",
-        files: [{ path: "experience/report.pdf", name: "report.pdf", size: uploadedPdf.size }],
+        files: [
+          {
+            path: "experience/report.pdf",
+            name: "report.pdf",
+            size: uploadedPdf.size,
+          },
+        ],
       }),
     });
     assert.equal(uploadedSnapshot.files.length, 1);
-    assert.ok(uploadedSnapshot.files[0].text.includes("MetaWatt Internship Report"));
+    assert.ok(
+      uploadedSnapshot.files[0].text.includes("MetaWatt Internship Report"),
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }

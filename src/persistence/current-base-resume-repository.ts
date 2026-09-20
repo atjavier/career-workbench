@@ -1,24 +1,265 @@
 import type { DatabaseSync } from "node:sqlite";
-import { validateResumeDraftContent, type ResumeDraftContent } from "@/adapters/resume-parser/pdf-text-parser";
+import {
+  validateResumeDraftContent,
+  type ResumeDraftContent,
+} from "@/adapters/resume-parser/pdf-text-parser";
 
-export type CurrentBaseResumeSource = { id: string; filename: string; contentDigest: string; byteSize: number; storageLocation: string; importedAt: string };
-export type CurrentBaseResumeDraft = { id: string; sourceId: string; parentDraftId?: string; revisionNumber: number; content: ResumeDraftContent; contentDigest: string; createdAt: string };
-export type CurrentBaseResumeProposal = { id: string; draftId: string; evidenceRevisionId: string; kind: "addition" | "replacement"; proposedText: string; contentDigest: string; createdAt: string; decision: "open" | "approved" | "edited" | "rejected"; decisionRevisionId: string };
-export type CurrentBaseResumeVersion = { id: string; sourceId: string; sourceFilename: string; draftId: string; draftRevisionNumber: number; approvedAt: string; contentDigest: string; evidenceRevisionIds: string[] };
+export type CurrentBaseResumeSource = {
+  id: string;
+  filename: string;
+  contentDigest: string;
+  byteSize: number;
+  storageLocation: string;
+  importedAt: string;
+};
+export type CurrentBaseResumeDraft = {
+  id: string;
+  sourceId: string;
+  parentDraftId?: string;
+  revisionNumber: number;
+  content: ResumeDraftContent;
+  contentDigest: string;
+  createdAt: string;
+};
+export type CurrentBaseResumeProposal = {
+  id: string;
+  draftId: string;
+  evidenceRevisionId: string;
+  kind: "addition" | "replacement";
+  proposedText: string;
+  contentDigest: string;
+  createdAt: string;
+  decision: "open" | "approved" | "edited" | "rejected";
+  decisionRevisionId: string;
+};
+export type CurrentBaseResumeVersion = {
+  id: string;
+  sourceId: string;
+  sourceFilename: string;
+  draftId: string;
+  draftRevisionNumber: number;
+  approvedAt: string;
+  contentDigest: string;
+  evidenceRevisionIds: string[];
+};
 
-const sourceColumns = "id, filename, content_digest, byte_size, storage_location, imported_at";
-const draftColumns = "id, source_id, parent_draft_id, revision_number, content_json, content_digest, created_at";
-function source(row: Record<string, unknown>): CurrentBaseResumeSource { return { id: String(row.id), filename: String(row.filename), contentDigest: String(row.content_digest), byteSize: Number(row.byte_size), storageLocation: String(row.storage_location), importedAt: String(row.imported_at) }; }
-function draft(row: Record<string, unknown>): CurrentBaseResumeDraft { let content: ResumeDraftContent; try { content = validateResumeDraftContent(JSON.parse(String(row.content_json))); } catch { throw new Error("Current Base Resume draft persistence is invalid."); } return { id: String(row.id), sourceId: String(row.source_id), parentDraftId: row.parent_draft_id ? String(row.parent_draft_id) : undefined, revisionNumber: Number(row.revision_number), content, contentDigest: String(row.content_digest), createdAt: String(row.created_at) }; }
-export function findSourceByDigest(db: DatabaseSync, contentDigest: string): CurrentBaseResumeSource | undefined { const row = db.prepare(`SELECT ${sourceColumns} FROM current_base_resume_sources WHERE content_digest = ?`).get(contentDigest) as Record<string, unknown> | undefined; return row && source(row); }
-export function insertSource(db: DatabaseSync, item: CurrentBaseResumeSource): void { db.prepare("INSERT INTO current_base_resume_sources (id, filename, content_digest, byte_size, storage_location, imported_at) VALUES (?, ?, ?, ?, ?, ?)").run(item.id, item.filename, item.contentDigest, item.byteSize, item.storageLocation, item.importedAt); }
-export function insertDraft(db: DatabaseSync, item: CurrentBaseResumeDraft): void { db.prepare("INSERT INTO current_base_resume_drafts (id, source_id, parent_draft_id, revision_number, content_json, content_digest, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(item.id, item.sourceId, item.parentDraftId ?? null, item.revisionNumber, JSON.stringify(item.content), item.contentDigest, item.createdAt); }
-export function currentDraft(db: DatabaseSync): CurrentBaseResumeDraft | undefined { const row = db.prepare(`SELECT ${draftColumns} FROM current_base_resume_drafts d WHERE NOT EXISTS (SELECT 1 FROM current_base_resume_drafts n WHERE n.parent_draft_id = d.id) ORDER BY d.created_at DESC, d.id DESC LIMIT 1`).get() as Record<string, unknown> | undefined; return row && draft(row); }
-export function findDraft(db: DatabaseSync, id: string): CurrentBaseResumeDraft | undefined { const row = db.prepare(`SELECT ${draftColumns} FROM current_base_resume_drafts WHERE id = ?`).get(id) as Record<string, unknown> | undefined; return row && draft(row); }
-export function latestDraftForSource(db: DatabaseSync, sourceId: string): CurrentBaseResumeDraft | undefined { const row = db.prepare(`SELECT ${draftColumns} FROM current_base_resume_drafts WHERE source_id = ? ORDER BY revision_number DESC LIMIT 1`).get(sourceId) as Record<string, unknown> | undefined; return row && draft(row); }
-export function listSources(db: DatabaseSync): CurrentBaseResumeSource[] { return (db.prepare(`SELECT ${sourceColumns} FROM current_base_resume_sources ORDER BY imported_at DESC`).all() as Record<string, unknown>[]).map(source); }
-export function insertProposal(db: DatabaseSync, item: Omit<CurrentBaseResumeProposal, "decision" | "decisionRevisionId">, revisionId: string): void { db.prepare("INSERT INTO current_base_resume_proposals (id, draft_id, evidence_revision_id, kind, proposed_text, content_digest, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(item.id, item.draftId, item.evidenceRevisionId, item.kind, item.proposedText, item.contentDigest, item.createdAt); db.prepare("INSERT INTO current_base_resume_proposal_revisions (id, proposal_id, revision_number, decision, resolved_text, parent_revision_id, created_at) VALUES (?, ?, 1, 'open', NULL, NULL, ?)").run(revisionId, item.id, item.createdAt); }
-export function listProposals(db: DatabaseSync, draftId: string): CurrentBaseResumeProposal[] { return (db.prepare(`SELECT p.id, p.draft_id, p.evidence_revision_id, p.kind, p.proposed_text, p.content_digest, p.created_at, r.decision, r.id AS decision_revision_id FROM current_base_resume_proposals p JOIN current_base_resume_proposal_revisions r ON r.proposal_id = p.id WHERE p.draft_id = ? AND NOT EXISTS (SELECT 1 FROM current_base_resume_proposal_revisions n WHERE n.parent_revision_id = r.id) ORDER BY p.created_at, p.id`).all(draftId) as Record<string, unknown>[]).map((row) => ({ id: String(row.id), draftId: String(row.draft_id), evidenceRevisionId: String(row.evidence_revision_id), kind: row.kind as CurrentBaseResumeProposal["kind"], proposedText: String(row.proposed_text), contentDigest: String(row.content_digest), createdAt: String(row.created_at), decision: row.decision as CurrentBaseResumeProposal["decision"], decisionRevisionId: String(row.decision_revision_id) })); }
-export function appendProposalDecision(db: DatabaseSync, proposal: CurrentBaseResumeProposal, id: string, decision: Exclude<CurrentBaseResumeProposal["decision"], "open">, text: string | undefined, createdAt: string): void { db.prepare("INSERT INTO current_base_resume_proposal_revisions (id, proposal_id, revision_number, decision, resolved_text, parent_revision_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(id, proposal.id, 2, decision, text ?? null, proposal.decisionRevisionId, createdAt); }
-export function insertVersion(db: DatabaseSync, item: CurrentBaseResumeVersion): void { db.prepare("INSERT INTO current_base_resume_versions (id, source_id, draft_id, approved_at, content_digest) VALUES (?, ?, ?, ?, ?)").run(item.id, item.sourceId, item.draftId, item.approvedAt, item.contentDigest); const insert = db.prepare("INSERT INTO current_base_resume_version_evidence_support (version_id, evidence_revision_id) VALUES (?, ?)"); for (const id of item.evidenceRevisionIds) insert.run(item.id, id); }
-export function listVersions(db: DatabaseSync): CurrentBaseResumeVersion[] { return (db.prepare("SELECT v.id, v.source_id, s.filename AS source_filename, v.draft_id, d.revision_number AS draft_revision_number, v.approved_at, v.content_digest FROM current_base_resume_versions v JOIN current_base_resume_sources s ON s.id = v.source_id JOIN current_base_resume_drafts d ON d.id = v.draft_id ORDER BY v.approved_at DESC").all() as Record<string, unknown>[]).map((row) => ({ id: String(row.id), sourceId: String(row.source_id), sourceFilename: String(row.source_filename), draftId: String(row.draft_id), draftRevisionNumber: Number(row.draft_revision_number), approvedAt: String(row.approved_at), contentDigest: String(row.content_digest), evidenceRevisionIds: (db.prepare("SELECT evidence_revision_id FROM current_base_resume_version_evidence_support WHERE version_id = ? ORDER BY evidence_revision_id").all(String(row.id)) as Array<{ evidence_revision_id: string }>).map((support) => support.evidence_revision_id) })); }
+const sourceColumns =
+  "id, filename, content_digest, byte_size, storage_location, imported_at";
+const draftColumns =
+  "id, source_id, parent_draft_id, revision_number, content_json, content_digest, created_at";
+function source(row: Record<string, unknown>): CurrentBaseResumeSource {
+  return {
+    id: String(row.id),
+    filename: String(row.filename),
+    contentDigest: String(row.content_digest),
+    byteSize: Number(row.byte_size),
+    storageLocation: String(row.storage_location),
+    importedAt: String(row.imported_at),
+  };
+}
+function draft(row: Record<string, unknown>): CurrentBaseResumeDraft {
+  let content: ResumeDraftContent;
+  try {
+    content = validateResumeDraftContent(JSON.parse(String(row.content_json)));
+  } catch {
+    throw new Error("Current Base Resume draft persistence is invalid.");
+  }
+  return {
+    id: String(row.id),
+    sourceId: String(row.source_id),
+    parentDraftId: row.parent_draft_id
+      ? String(row.parent_draft_id)
+      : undefined,
+    revisionNumber: Number(row.revision_number),
+    content,
+    contentDigest: String(row.content_digest),
+    createdAt: String(row.created_at),
+  };
+}
+export function findSourceByDigest(
+  db: DatabaseSync,
+  contentDigest: string,
+): CurrentBaseResumeSource | undefined {
+  const row = db
+    .prepare(
+      `SELECT ${sourceColumns} FROM current_base_resume_sources WHERE content_digest = ?`,
+    )
+    .get(contentDigest) as Record<string, unknown> | undefined;
+  return row && source(row);
+}
+export function insertSource(
+  db: DatabaseSync,
+  item: CurrentBaseResumeSource,
+): void {
+  db.prepare(
+    "INSERT INTO current_base_resume_sources (id, filename, content_digest, byte_size, storage_location, imported_at) VALUES (?, ?, ?, ?, ?, ?)",
+  ).run(
+    item.id,
+    item.filename,
+    item.contentDigest,
+    item.byteSize,
+    item.storageLocation,
+    item.importedAt,
+  );
+}
+export function insertDraft(
+  db: DatabaseSync,
+  item: CurrentBaseResumeDraft,
+): void {
+  db.prepare(
+    "INSERT INTO current_base_resume_drafts (id, source_id, parent_draft_id, revision_number, content_json, content_digest, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  ).run(
+    item.id,
+    item.sourceId,
+    item.parentDraftId ?? null,
+    item.revisionNumber,
+    JSON.stringify(item.content),
+    item.contentDigest,
+    item.createdAt,
+  );
+}
+export function currentDraft(
+  db: DatabaseSync,
+): CurrentBaseResumeDraft | undefined {
+  const row = db
+    .prepare(
+      `SELECT ${draftColumns} FROM current_base_resume_drafts d WHERE NOT EXISTS (SELECT 1 FROM current_base_resume_drafts n WHERE n.parent_draft_id = d.id) ORDER BY d.created_at DESC, d.id DESC LIMIT 1`,
+    )
+    .get() as Record<string, unknown> | undefined;
+  return row && draft(row);
+}
+export function findDraft(
+  db: DatabaseSync,
+  id: string,
+): CurrentBaseResumeDraft | undefined {
+  const row = db
+    .prepare(
+      `SELECT ${draftColumns} FROM current_base_resume_drafts WHERE id = ?`,
+    )
+    .get(id) as Record<string, unknown> | undefined;
+  return row && draft(row);
+}
+export function latestDraftForSource(
+  db: DatabaseSync,
+  sourceId: string,
+): CurrentBaseResumeDraft | undefined {
+  const row = db
+    .prepare(
+      `SELECT ${draftColumns} FROM current_base_resume_drafts WHERE source_id = ? ORDER BY revision_number DESC LIMIT 1`,
+    )
+    .get(sourceId) as Record<string, unknown> | undefined;
+  return row && draft(row);
+}
+export function listSources(db: DatabaseSync): CurrentBaseResumeSource[] {
+  return (
+    db
+      .prepare(
+        `SELECT ${sourceColumns} FROM current_base_resume_sources ORDER BY imported_at DESC`,
+      )
+      .all() as Record<string, unknown>[]
+  ).map(source);
+}
+export function insertProposal(
+  db: DatabaseSync,
+  item: Omit<CurrentBaseResumeProposal, "decision" | "decisionRevisionId">,
+  revisionId: string,
+): void {
+  db.prepare(
+    "INSERT INTO current_base_resume_proposals (id, draft_id, evidence_revision_id, kind, proposed_text, content_digest, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  ).run(
+    item.id,
+    item.draftId,
+    item.evidenceRevisionId,
+    item.kind,
+    item.proposedText,
+    item.contentDigest,
+    item.createdAt,
+  );
+  db.prepare(
+    "INSERT INTO current_base_resume_proposal_revisions (id, proposal_id, revision_number, decision, resolved_text, parent_revision_id, created_at) VALUES (?, ?, 1, 'open', NULL, NULL, ?)",
+  ).run(revisionId, item.id, item.createdAt);
+}
+export function listProposals(
+  db: DatabaseSync,
+  draftId: string,
+): CurrentBaseResumeProposal[] {
+  return (
+    db
+      .prepare(
+        `SELECT p.id, p.draft_id, p.evidence_revision_id, p.kind, p.proposed_text, p.content_digest, p.created_at, r.decision, r.id AS decision_revision_id FROM current_base_resume_proposals p JOIN current_base_resume_proposal_revisions r ON r.proposal_id = p.id WHERE p.draft_id = ? AND NOT EXISTS (SELECT 1 FROM current_base_resume_proposal_revisions n WHERE n.parent_revision_id = r.id) ORDER BY p.created_at, p.id`,
+      )
+      .all(draftId) as Record<string, unknown>[]
+  ).map((row) => ({
+    id: String(row.id),
+    draftId: String(row.draft_id),
+    evidenceRevisionId: String(row.evidence_revision_id),
+    kind: row.kind as CurrentBaseResumeProposal["kind"],
+    proposedText: String(row.proposed_text),
+    contentDigest: String(row.content_digest),
+    createdAt: String(row.created_at),
+    decision: row.decision as CurrentBaseResumeProposal["decision"],
+    decisionRevisionId: String(row.decision_revision_id),
+  }));
+}
+export function appendProposalDecision(
+  db: DatabaseSync,
+  proposal: CurrentBaseResumeProposal,
+  id: string,
+  decision: Exclude<CurrentBaseResumeProposal["decision"], "open">,
+  text: string | undefined,
+  createdAt: string,
+): void {
+  db.prepare(
+    "INSERT INTO current_base_resume_proposal_revisions (id, proposal_id, revision_number, decision, resolved_text, parent_revision_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  ).run(
+    id,
+    proposal.id,
+    2,
+    decision,
+    text ?? null,
+    proposal.decisionRevisionId,
+    createdAt,
+  );
+}
+export function insertVersion(
+  db: DatabaseSync,
+  item: CurrentBaseResumeVersion,
+): void {
+  db.prepare(
+    "INSERT INTO current_base_resume_versions (id, source_id, draft_id, approved_at, content_digest) VALUES (?, ?, ?, ?, ?)",
+  ).run(
+    item.id,
+    item.sourceId,
+    item.draftId,
+    item.approvedAt,
+    item.contentDigest,
+  );
+  const insert = db.prepare(
+    "INSERT INTO current_base_resume_version_evidence_support (version_id, evidence_revision_id) VALUES (?, ?)",
+  );
+  for (const id of item.evidenceRevisionIds) insert.run(item.id, id);
+}
+export function listVersions(db: DatabaseSync): CurrentBaseResumeVersion[] {
+  return (
+    db
+      .prepare(
+        "SELECT v.id, v.source_id, s.filename AS source_filename, v.draft_id, d.revision_number AS draft_revision_number, v.approved_at, v.content_digest FROM current_base_resume_versions v JOIN current_base_resume_sources s ON s.id = v.source_id JOIN current_base_resume_drafts d ON d.id = v.draft_id ORDER BY v.approved_at DESC",
+      )
+      .all() as Record<string, unknown>[]
+  ).map((row) => ({
+    id: String(row.id),
+    sourceId: String(row.source_id),
+    sourceFilename: String(row.source_filename),
+    draftId: String(row.draft_id),
+    draftRevisionNumber: Number(row.draft_revision_number),
+    approvedAt: String(row.approved_at),
+    contentDigest: String(row.content_digest),
+    evidenceRevisionIds: (
+      db
+        .prepare(
+          "SELECT evidence_revision_id FROM current_base_resume_version_evidence_support WHERE version_id = ? ORDER BY evidence_revision_id",
+        )
+        .all(String(row.id)) as Array<{ evidence_revision_id: string }>
+    ).map((support) => support.evidence_revision_id),
+  }));
+}

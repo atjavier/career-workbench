@@ -98,15 +98,13 @@ function view(
       .all(workspaceId, workspaceId, workspaceId) as InterviewTurn[]
   )
     .toReversed()
-    .map(
-      (turn): InterviewTurn => ({
-        id: turn.id,
-        taskId: turn.taskId,
-        role: turn.role,
-        content: turn.content,
-        createdAt: turn.createdAt,
-      }),
-    );
+    .map((turn): InterviewTurn => ({
+      id: turn.id,
+      taskId: turn.taskId,
+      role: turn.role,
+      content: turn.content,
+      createdAt: turn.createdAt,
+    }));
   return {
     completed,
     current: pending[0],
@@ -316,8 +314,7 @@ export async function beginResumeInterviewCoachStream(
           "SELECT item_key AS itemKey, question FROM resume_clarification_tasks WHERE id = ? AND workspace_id = ? AND status = 'pending'",
         )
         .get(input.taskId, input.workspaceId) as
-        | { itemKey: string; question: string }
-        | undefined;
+        { itemKey: string; question: string } | undefined;
       if (!task)
         throw new WorkspaceError(
           "RESUME_COACH_INVALID",
@@ -340,8 +337,7 @@ export async function beginResumeInterviewCoachStream(
           "SELECT content FROM resume_interview_candidate_turns WHERE stream_request_id = ? AND workspace_id = ? AND task_id = ?",
         )
         .get(input.streamRequestId, input.workspaceId, input.taskId) as
-        | { content: string }
-        | undefined;
+        { content: string } | undefined;
       if (existing && existing.content !== candidateContent)
         throw new WorkspaceError(
           "RESUME_COACH_INVALID",
@@ -401,16 +397,19 @@ export async function beginResumeInterviewCoachStream(
             `${turn.role === "coach" ? "Coach" : "Candidate"}: ${transcriptContent(turn.content)}`,
         );
       const clarificationUsed = Boolean(
-        (
-          db
-            .prepare(
-              "SELECT 1 FROM resume_interview_stream_reservations completed JOIN resume_interview_candidate_turns candidate ON candidate.stream_request_id = completed.stream_request_id JOIN resume_interview_turns coach ON coach.stream_request_id = completed.stream_request_id WHERE completed.workspace_id = ? AND completed.task_id = ? AND completed.status = 'completed' LIMIT 1",
-            )
-            .get(input.workspaceId, input.taskId) as { 1: number } | undefined
-        ),
+        db
+          .prepare(
+            "SELECT 1 FROM resume_interview_stream_reservations completed JOIN resume_interview_candidate_turns candidate ON candidate.stream_request_id = completed.stream_request_id JOIN resume_interview_turns coach ON coach.stream_request_id = completed.stream_request_id WHERE completed.workspace_id = ? AND completed.task_id = ? AND completed.status = 'completed' LIMIT 1",
+          )
+          .get(input.workspaceId, input.taskId) as { 1: number } | undefined,
       );
       db.exec("COMMIT");
-      return { question: task.question, context, transcript, clarificationUsed };
+      return {
+        question: task.question,
+        context,
+        transcript,
+        clarificationUsed,
+      };
     } catch (error) {
       db.exec("ROLLBACK");
       throw error;
@@ -533,8 +532,7 @@ export async function readPriorResumeInterviewCandidateContent(
         "SELECT content FROM resume_interview_candidate_turns WHERE workspace_id = ? AND task_id = ? AND stream_request_id IS NOT ? ORDER BY created_at DESC, id DESC LIMIT 1",
       )
       .get(input.workspaceId, input.taskId, input.streamRequestId) as
-      | { content: string }
-      | undefined;
+      { content: string } | undefined;
     return candidate?.content;
   } finally {
     db.close();
@@ -601,8 +599,7 @@ export async function respondToResumeClarification(
           "SELECT status, item_key AS itemKey FROM resume_clarification_tasks WHERE id = ? AND workspace_id = ?",
         )
         .get(input.taskId, input.workspaceId) as
-        | { status: Status; itemKey: string }
-        | undefined;
+        { status: Status; itemKey: string } | undefined;
       if (!task || task.status !== "pending")
         throw new WorkspaceError(
           "RESUME_COACH_INVALID",

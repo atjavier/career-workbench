@@ -1,20 +1,180 @@
 import type { DatabaseSync } from "node:sqlite";
 
 export type StoredFitAssessment = {
-  id: string; jobListingId: string; candidateProfileRevisionId?: string; preferenceRevisionId: string;
-  rulesetId: string; rulesetVersion: string; rulesetDigest: string; listingSnapshot: string;
-  evidenceSnapshot: string; preferenceSnapshot: string; factorOutcomes: string; label: "Strong" | "Potential" | "Stretch";
-  confidence: "high" | "medium" | "low"; freshness: string; calculatedAt: string; contentDigest: string;
+  id: string;
+  jobListingId: string;
+  candidateProfileRevisionId?: string;
+  preferenceRevisionId: string;
+  rulesetId: string;
+  rulesetVersion: string;
+  rulesetDigest: string;
+  listingSnapshot: string;
+  evidenceSnapshot: string;
+  preferenceSnapshot: string;
+  factorOutcomes: string;
+  label: "Strong" | "Potential" | "Stretch";
+  confidence: "high" | "medium" | "low";
+  freshness: string;
+  calculatedAt: string;
+  contentDigest: string;
 };
 type Row = Record<string, unknown>;
-const map = (r: Row): StoredFitAssessment => ({ id: String(r.id), jobListingId: String(r.job_listing_id), candidateProfileRevisionId: r.candidate_profile_revision_id ? String(r.candidate_profile_revision_id) : undefined, preferenceRevisionId: String(r.preference_revision_id), rulesetId: String(r.ruleset_id), rulesetVersion: String(r.ruleset_version), rulesetDigest: String(r.ruleset_digest), listingSnapshot: String(r.listing_snapshot), evidenceSnapshot: String(r.evidence_snapshot), preferenceSnapshot: String(r.preference_snapshot), factorOutcomes: String(r.factor_outcomes), label: r.label as StoredFitAssessment["label"], confidence: r.confidence as StoredFitAssessment["confidence"], freshness: String(r.freshness), calculatedAt: String(r.calculated_at), contentDigest: String(r.content_digest) });
-export function insertFitAssessment(db: DatabaseSync, value: StoredFitAssessment): void { db.prepare("INSERT INTO fit_assessments (id, job_listing_id, candidate_profile_revision_id, preference_revision_id, ruleset_id, ruleset_version, ruleset_digest, listing_snapshot, evidence_snapshot, preference_snapshot, factor_outcomes, label, confidence, freshness, calculated_at, content_digest) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(value.id, value.jobListingId, value.candidateProfileRevisionId ?? null, value.preferenceRevisionId, value.rulesetId, value.rulesetVersion, value.rulesetDigest, value.listingSnapshot, value.evidenceSnapshot, value.preferenceSnapshot, value.factorOutcomes, value.label, value.confidence, value.freshness, value.calculatedAt, value.contentDigest); }
-export function listFitAssessments(db: DatabaseSync, listingId: string, limit = 20): StoredFitAssessment[] { const bounded = Math.max(1, Math.min(100, Math.trunc(limit))); return (db.prepare("SELECT * FROM fit_assessments WHERE job_listing_id = ? ORDER BY calculated_at DESC LIMIT ?").all(listingId, bounded) as Row[]).map(map); }
-export function latestFitAssessment(db: DatabaseSync, listingId: string): StoredFitAssessment | undefined { const row = db.prepare("SELECT * FROM fit_assessments WHERE job_listing_id = ? ORDER BY calculated_at DESC LIMIT 1").get(listingId) as Row | undefined; return row ? map(row) : undefined; }
+const map = (r: Row): StoredFitAssessment => ({
+  id: String(r.id),
+  jobListingId: String(r.job_listing_id),
+  candidateProfileRevisionId: r.candidate_profile_revision_id
+    ? String(r.candidate_profile_revision_id)
+    : undefined,
+  preferenceRevisionId: String(r.preference_revision_id),
+  rulesetId: String(r.ruleset_id),
+  rulesetVersion: String(r.ruleset_version),
+  rulesetDigest: String(r.ruleset_digest),
+  listingSnapshot: String(r.listing_snapshot),
+  evidenceSnapshot: String(r.evidence_snapshot),
+  preferenceSnapshot: String(r.preference_snapshot),
+  factorOutcomes: String(r.factor_outcomes),
+  label: r.label as StoredFitAssessment["label"],
+  confidence: r.confidence as StoredFitAssessment["confidence"],
+  freshness: String(r.freshness),
+  calculatedAt: String(r.calculated_at),
+  contentDigest: String(r.content_digest),
+});
+export function insertFitAssessment(
+  db: DatabaseSync,
+  value: StoredFitAssessment,
+): void {
+  db.prepare(
+    "INSERT INTO fit_assessments (id, job_listing_id, candidate_profile_revision_id, preference_revision_id, ruleset_id, ruleset_version, ruleset_digest, listing_snapshot, evidence_snapshot, preference_snapshot, factor_outcomes, label, confidence, freshness, calculated_at, content_digest) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  ).run(
+    value.id,
+    value.jobListingId,
+    value.candidateProfileRevisionId ?? null,
+    value.preferenceRevisionId,
+    value.rulesetId,
+    value.rulesetVersion,
+    value.rulesetDigest,
+    value.listingSnapshot,
+    value.evidenceSnapshot,
+    value.preferenceSnapshot,
+    value.factorOutcomes,
+    value.label,
+    value.confidence,
+    value.freshness,
+    value.calculatedAt,
+    value.contentDigest,
+  );
+}
+export function listFitAssessments(
+  db: DatabaseSync,
+  listingId: string,
+  limit = 20,
+): StoredFitAssessment[] {
+  const bounded = Math.max(1, Math.min(100, Math.trunc(limit)));
+  return (
+    db
+      .prepare(
+        "SELECT * FROM fit_assessments WHERE job_listing_id = ? ORDER BY calculated_at DESC LIMIT ?",
+      )
+      .all(listingId, bounded) as Row[]
+  ).map(map);
+}
+export function latestFitAssessment(
+  db: DatabaseSync,
+  listingId: string,
+): StoredFitAssessment | undefined {
+  const row = db
+    .prepare(
+      "SELECT * FROM fit_assessments WHERE job_listing_id = ? ORDER BY calculated_at DESC LIMIT 1",
+    )
+    .get(listingId) as Row | undefined;
+  return row ? map(row) : undefined;
+}
 
-export type StoredCapturedFitAssessment = { id: string; opportunityId: string; opportunityRevisionId: string; opportunityContentDigest: string; preferenceRevisionId: string; preferenceContentDigest: string; rulesetId: string; rulesetVersion: string; rulesetDigest: string; opportunitySnapshot: string; preferenceSnapshot: string; factorOutcomes: string; label: "Strong" | "Potential" | "Stretch"; confidence: "high" | "medium" | "low"; calculatedAt: string; contentDigest: string };
-const capturedColumns = "id, opportunity_id AS opportunityId, opportunity_revision_id AS opportunityRevisionId, opportunity_content_digest AS opportunityContentDigest, preference_revision_id AS preferenceRevisionId, preference_content_digest AS preferenceContentDigest, ruleset_id AS rulesetId, ruleset_version AS rulesetVersion, ruleset_digest AS rulesetDigest, opportunity_snapshot AS opportunitySnapshot, preference_snapshot AS preferenceSnapshot, factor_outcomes AS factorOutcomes, label, confidence, calculated_at AS calculatedAt, content_digest AS contentDigest";
-function captured(row: Row): StoredCapturedFitAssessment { return { id: String(row.id), opportunityId: String(row.opportunityId), opportunityRevisionId: String(row.opportunityRevisionId), opportunityContentDigest: String(row.opportunityContentDigest), preferenceRevisionId: String(row.preferenceRevisionId), preferenceContentDigest: String(row.preferenceContentDigest), rulesetId: String(row.rulesetId), rulesetVersion: String(row.rulesetVersion), rulesetDigest: String(row.rulesetDigest), opportunitySnapshot: String(row.opportunitySnapshot), preferenceSnapshot: String(row.preferenceSnapshot), factorOutcomes: String(row.factorOutcomes), label: row.label as StoredCapturedFitAssessment["label"], confidence: row.confidence as StoredCapturedFitAssessment["confidence"], calculatedAt: String(row.calculatedAt), contentDigest: String(row.contentDigest) }; }
-export function insertCapturedFitAssessment(db: DatabaseSync, value: StoredCapturedFitAssessment): void { db.prepare("INSERT INTO captured_fit_assessments (id, opportunity_id, opportunity_revision_id, opportunity_content_digest, preference_revision_id, preference_content_digest, ruleset_id, ruleset_version, ruleset_digest, opportunity_snapshot, preference_snapshot, factor_outcomes, label, confidence, calculated_at, content_digest) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(value.id, value.opportunityId, value.opportunityRevisionId, value.opportunityContentDigest, value.preferenceRevisionId, value.preferenceContentDigest, value.rulesetId, value.rulesetVersion, value.rulesetDigest, value.opportunitySnapshot, value.preferenceSnapshot, value.factorOutcomes, value.label, value.confidence, value.calculatedAt, value.contentDigest); }
-export function insertCapturedFitAssessmentEvidence(db: DatabaseSync, assessmentId: string, evidence: Array<{ id: string; contentDigest: string }>): void { const statement = db.prepare("INSERT INTO captured_fit_assessment_evidence (assessment_id, evidence_revision_id, evidence_content_digest, ordinal) VALUES (?, ?, ?, ?)"); evidence.forEach((item, ordinal) => statement.run(assessmentId, item.id, item.contentDigest, ordinal)); }
-export function latestCapturedFitAssessment(db: DatabaseSync, opportunityId: string): StoredCapturedFitAssessment | undefined { const row = db.prepare(`SELECT ${capturedColumns} FROM captured_fit_assessments WHERE opportunity_id = ? ORDER BY calculated_at DESC, id DESC LIMIT 1`).get(opportunityId) as Row | undefined; return row ? captured(row) : undefined; }
+export type StoredCapturedFitAssessment = {
+  id: string;
+  opportunityId: string;
+  opportunityRevisionId: string;
+  opportunityContentDigest: string;
+  preferenceRevisionId: string;
+  preferenceContentDigest: string;
+  rulesetId: string;
+  rulesetVersion: string;
+  rulesetDigest: string;
+  opportunitySnapshot: string;
+  preferenceSnapshot: string;
+  factorOutcomes: string;
+  label: "Strong" | "Potential" | "Stretch";
+  confidence: "high" | "medium" | "low";
+  calculatedAt: string;
+  contentDigest: string;
+};
+const capturedColumns =
+  "id, opportunity_id AS opportunityId, opportunity_revision_id AS opportunityRevisionId, opportunity_content_digest AS opportunityContentDigest, preference_revision_id AS preferenceRevisionId, preference_content_digest AS preferenceContentDigest, ruleset_id AS rulesetId, ruleset_version AS rulesetVersion, ruleset_digest AS rulesetDigest, opportunity_snapshot AS opportunitySnapshot, preference_snapshot AS preferenceSnapshot, factor_outcomes AS factorOutcomes, label, confidence, calculated_at AS calculatedAt, content_digest AS contentDigest";
+function captured(row: Row): StoredCapturedFitAssessment {
+  return {
+    id: String(row.id),
+    opportunityId: String(row.opportunityId),
+    opportunityRevisionId: String(row.opportunityRevisionId),
+    opportunityContentDigest: String(row.opportunityContentDigest),
+    preferenceRevisionId: String(row.preferenceRevisionId),
+    preferenceContentDigest: String(row.preferenceContentDigest),
+    rulesetId: String(row.rulesetId),
+    rulesetVersion: String(row.rulesetVersion),
+    rulesetDigest: String(row.rulesetDigest),
+    opportunitySnapshot: String(row.opportunitySnapshot),
+    preferenceSnapshot: String(row.preferenceSnapshot),
+    factorOutcomes: String(row.factorOutcomes),
+    label: row.label as StoredCapturedFitAssessment["label"],
+    confidence: row.confidence as StoredCapturedFitAssessment["confidence"],
+    calculatedAt: String(row.calculatedAt),
+    contentDigest: String(row.contentDigest),
+  };
+}
+export function insertCapturedFitAssessment(
+  db: DatabaseSync,
+  value: StoredCapturedFitAssessment,
+): void {
+  db.prepare(
+    "INSERT INTO captured_fit_assessments (id, opportunity_id, opportunity_revision_id, opportunity_content_digest, preference_revision_id, preference_content_digest, ruleset_id, ruleset_version, ruleset_digest, opportunity_snapshot, preference_snapshot, factor_outcomes, label, confidence, calculated_at, content_digest) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  ).run(
+    value.id,
+    value.opportunityId,
+    value.opportunityRevisionId,
+    value.opportunityContentDigest,
+    value.preferenceRevisionId,
+    value.preferenceContentDigest,
+    value.rulesetId,
+    value.rulesetVersion,
+    value.rulesetDigest,
+    value.opportunitySnapshot,
+    value.preferenceSnapshot,
+    value.factorOutcomes,
+    value.label,
+    value.confidence,
+    value.calculatedAt,
+    value.contentDigest,
+  );
+}
+export function insertCapturedFitAssessmentEvidence(
+  db: DatabaseSync,
+  assessmentId: string,
+  evidence: Array<{ id: string; contentDigest: string }>,
+): void {
+  const statement = db.prepare(
+    "INSERT INTO captured_fit_assessment_evidence (assessment_id, evidence_revision_id, evidence_content_digest, ordinal) VALUES (?, ?, ?, ?)",
+  );
+  evidence.forEach((item, ordinal) =>
+    statement.run(assessmentId, item.id, item.contentDigest, ordinal),
+  );
+}
+export function latestCapturedFitAssessment(
+  db: DatabaseSync,
+  opportunityId: string,
+): StoredCapturedFitAssessment | undefined {
+  const row = db
+    .prepare(
+      `SELECT ${capturedColumns} FROM captured_fit_assessments WHERE opportunity_id = ? ORDER BY calculated_at DESC, id DESC LIMIT 1`,
+    )
+    .get(opportunityId) as Row | undefined;
+  return row ? captured(row) : undefined;
+}

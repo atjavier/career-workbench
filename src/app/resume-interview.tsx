@@ -8,9 +8,7 @@ const streamPath = "/api/resume-interview/stream";
 const maxStreamFrame = 8_192;
 
 type StreamState =
-  | { kind: "idle" }
-  | { kind: "streaming" }
-  | { kind: "error"; summary: string };
+  { kind: "idle" } | { kind: "streaming" } | { kind: "error"; summary: string };
 
 function randomId(): string {
   return crypto.randomUUID();
@@ -176,21 +174,20 @@ export function ResumeInterview({
         <span>Local only</span>
         <span>Optimization goals</span>
       </div>
-      <div
-        id="coach-chat-panel"
-        className="coach-chat-view"
-      >
+      <div id="coach-chat-panel" className="coach-chat-view">
         <div className="coach-chat-main">
           <div id="coach-chat-content" className="coach-chat-content">
-              {current ? (
-                <div className="coach-chat-context">
-                  <div className="coach-context-header">
-                    <span className="coach-context-tag">Current goal</span>
-                    <span className="coach-context-item">{current.itemName} ({current.itemCategory})</span>
-                  </div>
-                  <p className="coach-context-question">{current.question}</p>
+            {current ? (
+              <div className="coach-chat-context">
+                <div className="coach-context-header">
+                  <span className="coach-context-tag">Current goal</span>
+                  <span className="coach-context-item">
+                    {current.itemName} ({current.itemCategory})
+                  </span>
                 </div>
-              ) : null}
+                <p className="coach-context-question">{current.question}</p>
+              </div>
+            ) : null}
             <div className="coach-messages" ref={messagesRef}>
               <ol
                 aria-label="Coach Resume conversation"
@@ -208,7 +205,9 @@ export function ResumeInterview({
                   >
                     <div
                       className={`message-avatar ${
-                        turn.role === "coach" ? "coach-avatar" : "candidate-avatar"
+                        turn.role === "coach"
+                          ? "coach-avatar"
+                          : "candidate-avatar"
                       }`}
                       aria-hidden="true"
                     >
@@ -226,7 +225,10 @@ export function ResumeInterview({
                 ))}
                 {pendingCandidate ? (
                   <li className="candidate-message-row">
-                    <div className="message-avatar candidate-avatar" aria-hidden="true">
+                    <div
+                      className="message-avatar candidate-avatar"
+                      aria-hidden="true"
+                    >
                       👤
                     </div>
                     <div className="message-bubble-wrapper">
@@ -242,12 +244,17 @@ export function ResumeInterview({
                     className="coach-message-row coach-message-streaming"
                     aria-label="Coach Resume is responding"
                   >
-                    <div className="message-avatar coach-avatar" aria-hidden="true">
+                    <div
+                      className="message-avatar coach-avatar"
+                      aria-hidden="true"
+                    >
                       ✦
                     </div>
                     <div className="message-bubble-wrapper">
                       <div className="message-header-row">
-                        <span className="message-sender-name">Coach Resume</span>
+                        <span className="message-sender-name">
+                          Coach Resume
+                        </span>
                         <span className="typing-indicator" aria-hidden="true">
                           <span className="typing-dot" />
                           <span className="typing-dot" />
@@ -261,11 +268,16 @@ export function ResumeInterview({
                   </li>
                 ) : null}
               </ol>
-              <div ref={messagesEndRef} style={{ height: "1px", width: "100%", pointerEvents: "none" }} aria-hidden="true" />
+              <div
+                ref={messagesEndRef}
+                style={{ height: "1px", width: "100%", pointerEvents: "none" }}
+                aria-hidden="true"
+              />
             </div>
             {interview.completed.some((task) => task.needsReview) ? (
               <p className="coach-inline-status status status-error">
-                Review needed: this answer may conflict with documented evidence.
+                Review needed: this answer may conflict with documented
+                evidence.
               </p>
             ) : null}
             {current ? (
@@ -319,7 +331,16 @@ export function ResumeInterview({
                       {streaming ? (
                         <span className="send-spinner" aria-hidden="true" />
                       ) : (
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <svg
+                          width="16"
+                          height="16"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2.5"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
                           <path d="m22 2-7 20-4-9-9-4Z" />
                           <path d="M22 2 11 13" />
                         </svg>
@@ -359,8 +380,8 @@ export function ResumeInterview({
                 <div className="complete-icon-badge">✓</div>
                 <h3>All Evidence Clarified</h3>
                 <p>
-                  All current questions are complete. Your evidence is ready for the
-                  next resume step.
+                  All current questions are complete. Your evidence is ready for
+                  the next resume step.
                 </p>
               </div>
             )}
@@ -385,14 +406,18 @@ export function ResumeInterview({
               style={{
                 width: `${
                   interview.total > 0
-                    ? Math.round((interview.completed.length / interview.total) * 100)
+                    ? Math.round(
+                        (interview.completed.length / interview.total) * 100,
+                      )
                     : 0
                 }%`,
               }}
             />
           </div>
           <p className="coach-insights-intro">
-            {interview.completed.length} of {interview.total} questions complete. {interview.remaining === 0
+            {interview.completed.length} of {interview.total} questions
+            complete.{" "}
+            {interview.remaining === 0
               ? "All goals complete! Your evidence is fully clarified."
               : `${interview.remaining} goal${interview.remaining === 1 ? "" : "s"} remaining.`}
           </p>

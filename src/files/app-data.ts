@@ -14,7 +14,12 @@ function defaultAppDataRoot(): string {
     return join(process.env.LOCALAPPDATA, "PersonalJobDiscovery");
   }
   if (process.platform === "darwin") {
-    return join(homedir(), "Library", "Application Support", "PersonalJobDiscovery");
+    return join(
+      homedir(),
+      "Library",
+      "Application Support",
+      "PersonalJobDiscovery",
+    );
   }
   if (process.platform === "win32") {
     return join(homedir(), "AppData", "Local", "PersonalJobDiscovery");
@@ -28,11 +33,19 @@ export function privateAppDataRoot(): string {
   return resolve(defaultAppDataRoot());
 }
 
-export async function resolveAppDataPaths(appDataRoot?: string): Promise<AppDataPaths> {
+export async function resolveAppDataPaths(
+  appDataRoot?: string,
+): Promise<AppDataPaths> {
   if (appDataRoot !== undefined && appDataRoot.trim().length === 0) {
-    throw new WorkspaceError("APP_DATA_PATH_INVALID", "The private workspace location is unavailable.", "Choose a private local folder and try workspace setup again.");
+    throw new WorkspaceError(
+      "APP_DATA_PATH_INVALID",
+      "The private workspace location is unavailable.",
+      "Choose a private local folder and try workspace setup again.",
+    );
   }
-  const root = resolve(/* turbopackIgnore: true */ appDataRoot ?? defaultAppDataRoot());
+  const root = resolve(
+    /* turbopackIgnore: true */ appDataRoot ?? defaultAppDataRoot(),
+  );
 
   try {
     const metadata = await lstat(root);

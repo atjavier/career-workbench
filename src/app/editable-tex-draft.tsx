@@ -3,7 +3,10 @@
 import Link from "next/link";
 import { useActionState } from "react";
 
-import { generateEditableTexDraftAction, type EditableTexDraftActionState } from "@/app/actions";
+import {
+  generateEditableTexDraftAction,
+  type EditableTexDraftActionState,
+} from "@/app/actions";
 
 const initial: EditableTexDraftActionState = { status: "idle", summary: "" };
 
@@ -29,7 +32,8 @@ export function EditableTexDraft({
       <div className="editable-tex-head">
         <h3 id="editable-tex-heading">Editable TeX draft</h3>
         <p className="editable-tex-caption">
-          Create a separately named, private TeX revision from the immutable template and every approved documented artifact.
+          Create a separately named, private TeX revision from the immutable
+          template and every approved documented artifact.
         </p>
       </div>
       <form action={action} aria-busy={pending} className="editable-tex-form">
@@ -57,12 +61,17 @@ export function EditableTexDraft({
               className="editable-tex-checkbox"
             />
             <span>
-              I consent to send the complete template and approved artifacts to my loopback-only local AI.
+              I consent to send the complete template and approved artifacts to
+              my loopback-only local AI.
             </span>
           </label>
         </div>
         <div className="editable-tex-button-row">
-          <button type="submit" disabled={pending} className="affirmative-action">
+          <button
+            type="submit"
+            disabled={pending}
+            className="affirmative-action"
+          >
             {pending ? "Creating editable draft…" : "Create editable TeX draft"}
           </button>
           {revisionId ? (

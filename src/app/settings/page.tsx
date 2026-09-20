@@ -4,4 +4,13 @@ import { readLocalModelReadiness } from "@/domain/resume-generation/local-model-
 
 export const dynamic = "force-dynamic";
 
-export default async function SettingsPage() { const readiness = await readLocalModelReadiness(); return <ApplicationShell active="Settings"><div className="workspace-shell"><LocalModelSettings ready={readiness.ready} /></div></ApplicationShell>; }
+export default async function SettingsPage() {
+  const readiness = await readLocalModelReadiness();
+  return (
+    <ApplicationShell active="Settings">
+      <div className="workspace-shell">
+        <LocalModelSettings ready={readiness.ready} />
+      </div>
+    </ApplicationShell>
+  );
+}

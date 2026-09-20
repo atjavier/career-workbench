@@ -11,7 +11,10 @@ const unavailableHeaders = {
   "x-content-type-options": "nosniff",
 };
 
-export async function GET(_request: Request, { params }: { params: Promise<{ draftId: string }> }): Promise<Response> {
+export async function GET(
+  _request: Request,
+  { params }: { params: Promise<{ draftId: string }> },
+): Promise<Response> {
   try {
     const { draftId } = await params;
     const draft = await readActiveWorkspaceMaterialDraft({ draftId });
@@ -27,6 +30,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ dra
       },
     });
   } catch {
-    return new Response("The generated base resume source is unavailable.", { status: 404, headers: unavailableHeaders });
+    return new Response("The generated base resume source is unavailable.", {
+      status: 404,
+      headers: unavailableHeaders,
+    });
   }
 }

@@ -32,7 +32,8 @@ export function CompactNavigation({
     };
     closeForWideViewport();
     narrowViewport.addEventListener("change", closeForWideViewport);
-    return () => narrowViewport.removeEventListener("change", closeForWideViewport);
+    return () =>
+      narrowViewport.removeEventListener("change", closeForWideViewport);
   }, []);
 
   return (
@@ -58,7 +59,10 @@ export function CompactNavigation({
         Menu: {active}
       </button>
       {open ? (
-        <div id="compact-primary-navigation" className="compact-navigation-menu">
+        <div
+          id="compact-primary-navigation"
+          className="compact-navigation-menu"
+        >
           {destinations.map((destination) => (
             <div key={destination.href} className="compact-nav-group">
               <Link

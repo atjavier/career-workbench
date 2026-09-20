@@ -111,7 +111,10 @@ export async function ApplicationShell({
           </div>
           <SidebarCollapseToggle />
         </div>
-        <CompactNavigation destinations={effectiveDestinations} active={active} />
+        <CompactNavigation
+          destinations={effectiveDestinations}
+          active={active}
+        />
         <nav className="primary-navigation" aria-label="Primary navigation">
           {effectiveDestinations.map((destination) => {
             const isMainActive =
@@ -133,7 +136,9 @@ export async function ApplicationShell({
                   <span className="nav-label">{destination.label}</span>
                 </Link>
 
-                {destination.subItems && isResumeActive && isInterviewFinished ? (
+                {destination.subItems &&
+                isResumeActive &&
+                isInterviewFinished ? (
                   <div className="nav-sub-items" aria-label="Resume sections">
                     {destination.subItems.map((sub) => {
                       const isSubActive =

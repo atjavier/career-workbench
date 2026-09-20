@@ -418,10 +418,9 @@ test("workspace clarification packets preserve source evidence and keep answer a
       workspaceId: workspace.workspace.id,
       itemKey: "project:bio",
     });
-    const companion = await (await import("node:fs/promises")).readFile(
-      join(packet, "resume-clarifications.md"),
-      "utf8",
-    );
+    const companion = await (
+      await import("node:fs/promises")
+    ).readFile(join(packet, "resume-clarifications.md"), "utf8");
     assert.match(companion, /I designed the workflow\./);
     assert.match(companion, /Explicit unknown/);
     assert.match(companion, /candidate_interview_answer/);
@@ -554,7 +553,9 @@ test("streaming Coach messages persist the candidate once and the Coach only aft
 });
 
 test("only one independently finalized clarification persists per pending task", async () => {
-  const root = await mkdtemp(join(tmpdir(), "resume-coach-clarification-limit-"));
+  const root = await mkdtemp(
+    join(tmpdir(), "resume-coach-clarification-limit-"),
+  );
   const appDataRoot = join(root, "private");
   try {
     const workspace = await createResumeWorkspace({
@@ -602,8 +603,11 @@ test("only one independently finalized clarification persists per pending task",
       1,
     );
     assert.equal(
-      (finalizations.find((result) => result.status === "rejected") as PromiseRejectedResult)
-        .reason.code,
+      (
+        finalizations.find(
+          (result) => result.status === "rejected",
+        ) as PromiseRejectedResult
+      ).reason.code,
       "RESUME_COACH_INVALID",
     );
     const verify = openDatabase(join(appDataRoot, "workspace.sqlite"));

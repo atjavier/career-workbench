@@ -269,46 +269,59 @@ test("Resume Interview Coach requests a context-aware acknowledgement grounded i
     disposition: "complete",
     answerSource: "latest",
   });
-  const stream = streamResumeInterviewCoach(value, undefined, async (
-    url,
-    init,
-  ) => {
-    assert.equal(url, "http://127.0.0.1:1234/api/v1/chat");
-    const payload = JSON.parse(String(init.body)) as {
-      input: string;
-      system_prompt: string;
-    };
-    const input = JSON.parse(payload.input) as { responseShape: string };
-    assert.match(input.responseShape, /grounded in the candidate's latest message/);
-    assert.match(input.responseShape, /never reuse the same acknowledgement phrasing twice/);
-    assert.doesNotMatch(input.responseShape, /tailored to the question topic/);
-    assert.doesNotMatch(payload.system_prompt, /tailored to the question topic/);
-    assert.doesNotMatch(
-      String(init.body),
-      /that clarifies the delivered capability/,
-    );
-    return new Response(
-      [
-        {
-          name: "message.delta",
-          data: { type: "message.delta", content: rawContent },
-        },
-        {
-          name: "chat.end",
-          data: {
-            type: "chat.end",
-            result: { output: [{ type: "message", content: rawContent }] },
+  const stream = streamResumeInterviewCoach(
+    value,
+    undefined,
+    async (url, init) => {
+      assert.equal(url, "http://127.0.0.1:1234/api/v1/chat");
+      const payload = JSON.parse(String(init.body)) as {
+        input: string;
+        system_prompt: string;
+      };
+      const input = JSON.parse(payload.input) as { responseShape: string };
+      assert.match(
+        input.responseShape,
+        /grounded in the candidate's latest message/,
+      );
+      assert.match(
+        input.responseShape,
+        /never reuse the same acknowledgement phrasing twice/,
+      );
+      assert.doesNotMatch(
+        input.responseShape,
+        /tailored to the question topic/,
+      );
+      assert.doesNotMatch(
+        payload.system_prompt,
+        /tailored to the question topic/,
+      );
+      assert.doesNotMatch(
+        String(init.body),
+        /that clarifies the delivered capability/,
+      );
+      return new Response(
+        [
+          {
+            name: "message.delta",
+            data: { type: "message.delta", content: rawContent },
           },
-        },
-      ]
-        .map(
-          (event) =>
-            `event: ${event.name}\ndata: ${JSON.stringify(event.data)}\n\n`,
-        )
-        .join(""),
-      { status: 200, headers: { "content-type": "text/event-stream" } },
-    );
-  });
+          {
+            name: "chat.end",
+            data: {
+              type: "chat.end",
+              result: { output: [{ type: "message", content: rawContent }] },
+            },
+          },
+        ]
+          .map(
+            (event) =>
+              `event: ${event.name}\ndata: ${JSON.stringify(event.data)}\n\n`,
+          )
+          .join(""),
+        { status: 200, headers: { "content-type": "text/event-stream" } },
+      );
+    },
+  );
   const next = await stream.next();
   assert.equal(next.value, content);
   const complete = await stream.next();
@@ -1372,7 +1385,8 @@ test("Resume Architect accepts list tool actions with extra line bounds and read
   });
   assert.equal(calls, 3);
   assert.match(
-    result.sections.find((section) => section.heading === "Projects")?.text ?? "",
+    result.sections.find((section) => section.heading === "Projects")?.text ??
+      "",
     /Built accessible TypeScript interfaces/,
   );
 });
@@ -1435,9 +1449,11 @@ test("Resume Architect normalizes evidence parentheticals from bullet text to ma
   });
   assert.equal(calls, 2);
   const projectSection = result.sections.find((s) => s.heading === "Projects");
-  assert.match(projectSection?.text ?? "", /- Built accessible TypeScript interfaces$/m);
+  assert.match(
+    projectSection?.text ?? "",
+    /- Built accessible TypeScript interfaces$/m,
+  );
 });
-
 
 test("Resume Architect falls back when LM Studio emits an unsupported native tool response", async () => {
   const session: ResumeFileReadSession = {
@@ -3063,9 +3079,7 @@ test("Resume Coach source leak guard recognizes Selected Projects and Work Exper
     ],
     unknowns: [],
   };
-  const result = await requestResumeCoach(value, async () =>
-    native(response),
-  );
+  const result = await requestResumeCoach(value, async () => native(response));
   assert.match(
     result.sections.find((s) => s.heading === "Selected Projects")?.text ?? "",
     /accessible TypeScript interfaces/,
@@ -3192,16 +3206,17 @@ ${JSON.stringify(response, null, 2)}
 \`\`\`
 Let me know if you need further adjustments!`;
 
-  const result = await requestResumeCoach(value, async () => new Response(
-    JSON.stringify({
-      output: [{ type: "message", content: wrappedContent }],
-    }),
-    { status: 200 },
-  ));
+  const result = await requestResumeCoach(
+    value,
+    async () =>
+      new Response(
+        JSON.stringify({
+          output: [{ type: "message", content: wrappedContent }],
+        }),
+        { status: 200 },
+      ),
+  );
   assert.equal(result.schemaVersion, 1);
   assert.equal(result.selectionEcho, value.consentFingerprint);
   assert.equal(result.sections.length, 4);
 });
-
-
-

@@ -100,10 +100,14 @@ export async function chooseLocalEvidenceFolder(
   const exec = executor ?? (execute as FolderPickerExecutor);
   if (process.platform === "darwin") {
     try {
-      const { stdout } = await exec("osascript", [
-        "-e",
-        'POSIX path of (choose folder with prompt "Choose a local Project or Experience folder")',
-      ], { timeout: 10 * 60_000, maxBuffer: 16 * 1024 });
+      const { stdout } = await exec(
+        "osascript",
+        [
+          "-e",
+          'POSIX path of (choose folder with prompt "Choose a local Project or Experience folder")',
+        ],
+        { timeout: 10 * 60_000, maxBuffer: 16 * 1024 },
+      );
       const folder = stdout.trim().replace(/[\/\\]+$/, "");
       return folder || undefined;
     } catch (error: any) {
@@ -116,7 +120,10 @@ export async function chooseLocalEvidenceFolder(
       if (message.includes("-128") || /user canceled/i.test(message)) {
         return undefined;
       }
-      console.error("macOS native folder picker failed before a folder was selected.", error);
+      console.error(
+        "macOS native folder picker failed before a folder was selected.",
+        error,
+      );
       throw new WorkspaceError(
         "EVIDENCE_DOCUMENTER_INVALID",
         "The local folder picker could not open.",
@@ -127,16 +134,23 @@ export async function chooseLocalEvidenceFolder(
 
   if (process.platform === "linux") {
     try {
-      const { stdout } = await exec("zenity", [
-        "--file-selection",
-        "--directory",
-        "--title=Choose a local Project or Experience folder",
-      ], { timeout: 10 * 60_000, maxBuffer: 16 * 1024 });
+      const { stdout } = await exec(
+        "zenity",
+        [
+          "--file-selection",
+          "--directory",
+          "--title=Choose a local Project or Experience folder",
+        ],
+        { timeout: 10 * 60_000, maxBuffer: 16 * 1024 },
+      );
       const folder = stdout.trim().replace(/[\/\\]+$/, "");
       return folder || undefined;
     } catch (error: any) {
       if (error?.code === 1) return undefined;
-      console.error("Linux folder picker failed before a folder was selected.", error);
+      console.error(
+        "Linux folder picker failed before a folder was selected.",
+        error,
+      );
       throw new WorkspaceError(
         "EVIDENCE_DOCUMENTER_INVALID",
         "The local folder picker could not open.",
@@ -154,11 +168,18 @@ export async function chooseLocalEvidenceFolder(
   }
 
   try {
-    const { stdout } = await exec("powershell.exe", ["-NoProfile", "-NonInteractive", "-STA", "-Command", pickerScript], { timeout: 10 * 60_000, windowsHide: true, maxBuffer: 16 * 1024 });
+    const { stdout } = await exec(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-STA", "-Command", pickerScript],
+      { timeout: 10 * 60_000, windowsHide: true, maxBuffer: 16 * 1024 },
+    );
     const folder = stdout.trim();
     return folder || undefined;
   } catch (error) {
-    console.error("Explorer-style Windows folder picker failed before a folder was selected.", error);
+    console.error(
+      "Explorer-style Windows folder picker failed before a folder was selected.",
+      error,
+    );
     throw new WorkspaceError(
       "EVIDENCE_DOCUMENTER_INVALID",
       "The local folder picker could not open.",

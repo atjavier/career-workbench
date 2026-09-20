@@ -41,9 +41,15 @@ test("local resume file session permits bounded reads and rejects escaping or un
     if (!read.ok || read.type !== "read") throw new Error("expected file read");
     assert.equal(read.text, "Built accessible TypeScript interfaces.");
     assert.equal(session.validateCitation(read.citation), true);
-    assert.equal(await session.validateCitationStability?.(read.citation), true);
+    assert.equal(
+      await session.validateCitationStability?.(read.citation),
+      true,
+    );
     await writeFile(join(root, "README.md"), "# Portfolio\nChanged source.\n");
-    assert.equal(await session.validateCitationStability?.(read.citation), false);
+    assert.equal(
+      await session.validateCitationStability?.(read.citation),
+      false,
+    );
 
     assert.deepEqual(
       await session.execute({ action: "read", rootId, path: "../secret.env" }),
@@ -62,7 +68,10 @@ test("local resume file session refuses linked components and invalid line spans
   const root = await mkdtemp(join(tmpdir(), "resume-file-session-"));
   const outside = await mkdtemp(join(tmpdir(), "resume-file-outside-"));
   try {
-    await writeFile(join(root, "README.md"), "# Portfolio\nBuilt a workflow.\n");
+    await writeFile(
+      join(root, "README.md"),
+      "# Portfolio\nBuilt a workflow.\n",
+    );
     await writeFile(join(outside, "secret.md"), "Do not disclose.\n");
     try {
       await symlink(

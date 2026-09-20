@@ -70,8 +70,7 @@ async function verifyModel(
   } catch {
     unavailable("Local AI is unavailable right now.");
   }
-  if (!response!.ok)
-    unavailable("Local AI could not be verified right now.");
+  if (!response!.ok) unavailable("Local AI could not be verified right now.");
   let body: unknown;
   try {
     body = await response!.json();
@@ -141,9 +140,7 @@ async function verifyModel(
   if (
     contexts.some(
       (value) =>
-        typeof value !== "number" ||
-        !Number.isInteger(value) ||
-        value < 12_001,
+        typeof value !== "number" || !Number.isInteger(value) || value < 12_001,
     )
   )
     invalid(
@@ -238,7 +235,10 @@ export async function readLocalModelGatewayConfiguration(
     applyMigrations(db);
     const state = readResumeGenerationState(db);
     item = state.currentModelConfigurationRevisionId
-      ? findLocalModelConfiguration(db, state.currentModelConfigurationRevisionId)
+      ? findLocalModelConfiguration(
+          db,
+          state.currentModelConfigurationRevisionId,
+        )
       : undefined;
     const row = item
       ? (db

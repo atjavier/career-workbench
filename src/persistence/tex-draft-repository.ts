@@ -180,10 +180,8 @@ export function findLatestTexDraftForWorkspace(
       "SELECT r.id AS revision_id, d.display_name FROM tex_drafts d JOIN tex_draft_revisions r ON r.draft_id = d.id WHERE d.workspace_id = ? ORDER BY r.created_at DESC, r.id DESC LIMIT 1",
     )
     .get(workspaceId) as
-    | { revision_id: string; display_name: string }
-    | undefined;
+    { revision_id: string; display_name: string } | undefined;
   return row
     ? { revisionId: row.revision_id, displayName: row.display_name }
     : undefined;
 }
-

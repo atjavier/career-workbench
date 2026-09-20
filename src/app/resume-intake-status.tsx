@@ -119,7 +119,9 @@ export function ResumeIntakeStatus({
           </h2>
         </div>
         <div className="intake-time-pill" title="Elapsed processing duration">
-          <span className="time-icon" aria-hidden="true">⏱</span>
+          <span className="time-icon" aria-hidden="true">
+            ⏱
+          </span>
           <span>{elapsedSeconds}s elapsed</span>
         </div>
       </div>
@@ -132,7 +134,16 @@ export function ResumeIntakeStatus({
         >
           <div className="step-icon-bubble">
             {activeStep > 1 || isComplete ? (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="3"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
                 <path d="M20 6 9 17l-5-5" />
               </svg>
             ) : (
@@ -152,7 +163,16 @@ export function ResumeIntakeStatus({
         >
           <div className="step-icon-bubble">
             {activeStep > 2 || isComplete ? (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="3"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
                 <path d="M20 6 9 17l-5-5" />
               </svg>
             ) : (
@@ -172,7 +192,16 @@ export function ResumeIntakeStatus({
         >
           <div className="step-icon-bubble">
             {isComplete ? (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="3"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
                 <path d="M20 6 9 17l-5-5" />
               </svg>
             ) : (
@@ -205,8 +234,8 @@ export function ResumeIntakeStatus({
               {message}
             </p>
             <p className="intake-subtext">
-              Your offline local AI is scanning source files directly on this device.
-              No raw folder paths or source code leave your machine.
+              Your offline local AI is scanning source files directly on this
+              device. No raw folder paths or source code leave your machine.
             </p>
           </div>
 
@@ -241,7 +270,8 @@ export function ResumeIntakeStatus({
         {isFailed ? (
           <div className="intake-recovery-box">
             <p className="intake-recovery-text">
-              Your saved work is recoverable. Return to this resume when you can restart evidence intake.
+              Your saved work is recoverable. Return to this resume when you can
+              restart evidence intake.
             </p>
           </div>
         ) : null}

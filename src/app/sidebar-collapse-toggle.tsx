@@ -12,7 +12,9 @@ export function SidebarCollapseToggle() {
       const isSaved = localStorage.getItem(STORAGE_KEY) === "true";
       if (isSaved) {
         setCollapsed(true);
-        document.querySelector(".application-shell")?.classList.add("is-collapsed");
+        document
+          .querySelector(".application-shell")
+          ?.classList.add("is-collapsed");
         document.documentElement.classList.add("sidebar-collapsed");
       }
     } catch {

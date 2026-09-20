@@ -4,30 +4,300 @@ import type { DocumenterProposal } from "@/adapters/evidence-documenter/lm-studi
 import { enumerateMarkdown } from "@/files/evidence-library";
 import { resolveAppDataPaths } from "@/files/app-data";
 import { applyMigrations, openDatabase } from "@/persistence/database";
-import { findById, findSet, insertDecision, insertProposal, insertSet, listAll, listBySet, type StoredDocumenterProposal } from "@/persistence/evidence-documenter-repository";
+import {
+  findById,
+  findSet,
+  insertDecision,
+  insertProposal,
+  insertSet,
+  listAll,
+  listBySet,
+  type StoredDocumenterProposal,
+} from "@/persistence/evidence-documenter-repository";
 import { addUnreviewedEvidenceInTransaction } from "@/domain/evidence/evidence-commands";
 import { appendAuditEvent } from "@/persistence/workspace-repository";
 import { WorkspaceError } from "@/domain/workspace/types";
 
 type Options = { appDataRoot?: string };
-type Document = (input: Array<{ path: string; text: string }>) => Promise<DocumenterProposal[]>;
-const digest = (value: string) => `sha256:${createHash("sha256").update(value).digest("hex")}`;
-function transaction<T>(database: ReturnType<typeof openDatabase>, work: () => T): T { database.exec("BEGIN IMMEDIATE;"); try { const result = work(); database.exec("COMMIT;"); return result; } catch (error) { database.exec("ROLLBACK;"); throw error; } }
-function audit(database: ReturnType<typeof openDatabase>, action: "evidence.documenter_proposed" | "evidence.documenter_resolved" | "evidence.documenter_failed", outcome: "success" | "failure", entityId?: string, contentHash?: string): void { appendAuditEvent(database, createAuditEvent({ actor: "local-os-user", action, outcome, entityId, contentHash })); }
-function safeText(value: string): string { const text = value.trim(); if (!text || text.length > 5000 || /[\u0000-\u001f]/.test(text)) throw new WorkspaceError("EVIDENCE_DOCUMENTER_INVALID", "The proposal text is unavailable or unsafe.", "Review the individual proposal and try again."); return text; }
-function safeProposal(proposal: DocumenterProposal, permittedPaths: Set<string>): DocumenterProposal { if (!Array.isArray(proposal.sourcePaths) || !proposal.sourcePaths.length || proposal.sourcePaths.some((path) => !permittedPaths.has(path) || path.includes("..") || path.includes("\\") || /^\//.test(path)) || !Array.isArray(proposal.unknowns) || !proposal.unknowns.length) throw new WorkspaceError("EVIDENCE_DOCUMENTER_INVALID", "The local model returned unsafe or incomplete proposal metadata.", "Review the selected Markdown files and try Document for Resume again."); const sourcePaths = [...new Set(proposal.sourcePaths)].sort(); const unknowns = [...new Set(proposal.unknowns.map((unknown) => unknown.trim()).filter((unknown) => unknown && unknown.length <= 500))]; const factualText = safeText(proposal.factualText); if (!unknowns.length || JSON.stringify(sourcePaths).length > 10_000 || JSON.stringify(unknowns).length > 10_000) throw new WorkspaceError("EVIDENCE_DOCUMENTER_INVALID", "The local model returned oversized or incomplete proposal metadata.", "Review the selected Markdown files and try Document for Resume again."); return { factualText, sourcePaths, unknowns, contentDigest: digest(factualText) }; }
-
-export async function documentFolderForResume(input: Options & { sourceDirectory: string; disclosed: boolean; document: Document }): Promise<StoredDocumenterProposal[]> {
-  if (!input.disclosed) throw new WorkspaceError("EVIDENCE_DOCUMENTER_INVALID", "Confirm the local-model disclosure before documentation starts.", "Confirm that only the selected folder's Markdown may be sent to the local model.");
-  const documents = await enumerateMarkdown(input.sourceDirectory, "project");
-  const sourceDigest = digest(documents.map((document) => `${document.libraryPath}:${document.contentDigest}`).sort().join("\n"));
-  const paths = await resolveAppDataPaths(input.appDataRoot); const database = openDatabase(paths.databasePath);
-  try { applyMigrations(database); const existing = findSet(database, sourceDigest); if (existing) return listBySet(database, existing.id);
-    const proposals = await input.document(documents.map((document) => ({ path: document.libraryPath, text: document.text })));
-    if (!proposals.length) throw new WorkspaceError("EVIDENCE_DOCUMENTER_INVALID", "The local model returned no usable resume evidence.", "Review the selected Markdown files and try Document for Resume again.");
-    return transaction(database, () => { const raced = findSet(database, sourceDigest); if (raced) return listBySet(database, raced.id); const normalized = new Map<string, DocumenterProposal>(); for (const raw of proposals) { const proposal = safeProposal(raw, new Set(documents.map((document) => document.libraryPath))); const prior = normalized.get(proposal.contentDigest); normalized.set(proposal.contentDigest, prior ? { ...proposal, sourcePaths: [...new Set([...prior.sourcePaths, ...proposal.sourcePaths])].sort(), unknowns: [...new Set([...prior.unknowns, ...proposal.unknowns])].sort() } : proposal); } for (const proposal of normalized.values()) safeProposal(proposal, new Set(documents.map((document) => document.libraryPath))); const setId = createUuidV7(); const now = new Date().toISOString(); insertSet(database, setId, sourceDigest, now); for (const proposal of normalized.values()) insertProposal(database, { id: createUuidV7(), proposalSetId: setId, factualText: proposal.factualText, sourcePaths: proposal.sourcePaths, unknowns: proposal.unknowns, contentDigest: proposal.contentDigest, createdAt: now }); const result = listBySet(database, setId); audit(database, "evidence.documenter_proposed", "success", setId, sourceDigest); return result; });
-  } finally { database.close(); }
+type Document = (
+  input: Array<{ path: string; text: string }>,
+) => Promise<DocumenterProposal[]>;
+const digest = (value: string) =>
+  `sha256:${createHash("sha256").update(value).digest("hex")}`;
+function transaction<T>(
+  database: ReturnType<typeof openDatabase>,
+  work: () => T,
+): T {
+  database.exec("BEGIN IMMEDIATE;");
+  try {
+    const result = work();
+    database.exec("COMMIT;");
+    return result;
+  } catch (error) {
+    database.exec("ROLLBACK;");
+    throw error;
+  }
 }
-export async function recordDocumenterFailure(options: Options = {}): Promise<void> { const paths = await resolveAppDataPaths(options.appDataRoot); const database = openDatabase(paths.databasePath); try { applyMigrations(database); audit(database, "evidence.documenter_failed", "failure"); } finally { database.close(); } }
-export async function listDocumenterProposals(options: Options = {}): Promise<StoredDocumenterProposal[]> { const paths = await resolveAppDataPaths(options.appDataRoot); const database = openDatabase(paths.databasePath); try { applyMigrations(database); return listAll(database); } finally { database.close(); } }
-export async function resolveDocumenterProposal(input: Options & { proposalId: string; expectedRevisionId: string; decision: "accepted" | "edited" | "rejected"; factualText?: string }): Promise<StoredDocumenterProposal> { const paths = await resolveAppDataPaths(input.appDataRoot); const database = openDatabase(paths.databasePath); try { applyMigrations(database); return transaction(database, () => { const proposal = findById(database, input.proposalId); if (!proposal) throw new WorkspaceError("EVIDENCE_DOCUMENTER_NOT_FOUND", "That proposal is unavailable.", "Refresh the Resume & Evidence Library and try again."); if (proposal.revisionId !== input.expectedRevisionId || proposal.state !== "proposed") throw new WorkspaceError("EVIDENCE_DOCUMENTER_STALE", "That proposal was already decided.", "Refresh the Resume & Evidence Library and review the latest proposal state."); const factualText = input.decision === "edited" ? safeText(input.factualText ?? "") : proposal.factualText; const item = input.decision === "rejected" ? undefined : addUnreviewedEvidenceInTransaction(database, { factualText, sourceDocument: `Document for Resume: ${proposal.sourcePaths.join(", ")}`, sourceSection: "Local-model proposal", origin: "extracted" }); const id = createUuidV7(); insertDecision(database, { id, proposalId: proposal.id, decision: input.decision, factualText: item?.factualText, evidenceRevisionId: item?.id, createdAt: new Date().toISOString() }); audit(database, "evidence.documenter_resolved", "success", id, item?.contentDigest); return findById(database, proposal.id)!; }); } finally { database.close(); } }
+function audit(
+  database: ReturnType<typeof openDatabase>,
+  action:
+    | "evidence.documenter_proposed"
+    | "evidence.documenter_resolved"
+    | "evidence.documenter_failed",
+  outcome: "success" | "failure",
+  entityId?: string,
+  contentHash?: string,
+): void {
+  appendAuditEvent(
+    database,
+    createAuditEvent({
+      actor: "local-os-user",
+      action,
+      outcome,
+      entityId,
+      contentHash,
+    }),
+  );
+}
+function safeText(value: string): string {
+  const text = value.trim();
+  if (!text || text.length > 5000 || /[\u0000-\u001f]/.test(text))
+    throw new WorkspaceError(
+      "EVIDENCE_DOCUMENTER_INVALID",
+      "The proposal text is unavailable or unsafe.",
+      "Review the individual proposal and try again.",
+    );
+  return text;
+}
+function safeProposal(
+  proposal: DocumenterProposal,
+  permittedPaths: Set<string>,
+): DocumenterProposal {
+  if (
+    !Array.isArray(proposal.sourcePaths) ||
+    !proposal.sourcePaths.length ||
+    proposal.sourcePaths.some(
+      (path) =>
+        !permittedPaths.has(path) ||
+        path.includes("..") ||
+        path.includes("\\") ||
+        /^\//.test(path),
+    ) ||
+    !Array.isArray(proposal.unknowns) ||
+    !proposal.unknowns.length
+  )
+    throw new WorkspaceError(
+      "EVIDENCE_DOCUMENTER_INVALID",
+      "The local model returned unsafe or incomplete proposal metadata.",
+      "Review the selected Markdown files and try Document for Resume again.",
+    );
+  const sourcePaths = [...new Set(proposal.sourcePaths)].sort();
+  const unknowns = [
+    ...new Set(
+      proposal.unknowns
+        .map((unknown) => unknown.trim())
+        .filter((unknown) => unknown && unknown.length <= 500),
+    ),
+  ];
+  const factualText = safeText(proposal.factualText);
+  if (
+    !unknowns.length ||
+    JSON.stringify(sourcePaths).length > 10_000 ||
+    JSON.stringify(unknowns).length > 10_000
+  )
+    throw new WorkspaceError(
+      "EVIDENCE_DOCUMENTER_INVALID",
+      "The local model returned oversized or incomplete proposal metadata.",
+      "Review the selected Markdown files and try Document for Resume again.",
+    );
+  return {
+    factualText,
+    sourcePaths,
+    unknowns,
+    contentDigest: digest(factualText),
+  };
+}
+
+export async function documentFolderForResume(
+  input: Options & {
+    sourceDirectory: string;
+    disclosed: boolean;
+    document: Document;
+  },
+): Promise<StoredDocumenterProposal[]> {
+  if (!input.disclosed)
+    throw new WorkspaceError(
+      "EVIDENCE_DOCUMENTER_INVALID",
+      "Confirm the local-model disclosure before documentation starts.",
+      "Confirm that only the selected folder's Markdown may be sent to the local model.",
+    );
+  const documents = await enumerateMarkdown(input.sourceDirectory, "project");
+  const sourceDigest = digest(
+    documents
+      .map((document) => `${document.libraryPath}:${document.contentDigest}`)
+      .sort()
+      .join("\n"),
+  );
+  const paths = await resolveAppDataPaths(input.appDataRoot);
+  const database = openDatabase(paths.databasePath);
+  try {
+    applyMigrations(database);
+    const existing = findSet(database, sourceDigest);
+    if (existing) return listBySet(database, existing.id);
+    const proposals = await input.document(
+      documents.map((document) => ({
+        path: document.libraryPath,
+        text: document.text,
+      })),
+    );
+    if (!proposals.length)
+      throw new WorkspaceError(
+        "EVIDENCE_DOCUMENTER_INVALID",
+        "The local model returned no usable resume evidence.",
+        "Review the selected Markdown files and try Document for Resume again.",
+      );
+    return transaction(database, () => {
+      const raced = findSet(database, sourceDigest);
+      if (raced) return listBySet(database, raced.id);
+      const normalized = new Map<string, DocumenterProposal>();
+      for (const raw of proposals) {
+        const proposal = safeProposal(
+          raw,
+          new Set(documents.map((document) => document.libraryPath)),
+        );
+        const prior = normalized.get(proposal.contentDigest);
+        normalized.set(
+          proposal.contentDigest,
+          prior
+            ? {
+                ...proposal,
+                sourcePaths: [
+                  ...new Set([...prior.sourcePaths, ...proposal.sourcePaths]),
+                ].sort(),
+                unknowns: [
+                  ...new Set([...prior.unknowns, ...proposal.unknowns]),
+                ].sort(),
+              }
+            : proposal,
+        );
+      }
+      for (const proposal of normalized.values())
+        safeProposal(
+          proposal,
+          new Set(documents.map((document) => document.libraryPath)),
+        );
+      const setId = createUuidV7();
+      const now = new Date().toISOString();
+      insertSet(database, setId, sourceDigest, now);
+      for (const proposal of normalized.values())
+        insertProposal(database, {
+          id: createUuidV7(),
+          proposalSetId: setId,
+          factualText: proposal.factualText,
+          sourcePaths: proposal.sourcePaths,
+          unknowns: proposal.unknowns,
+          contentDigest: proposal.contentDigest,
+          createdAt: now,
+        });
+      const result = listBySet(database, setId);
+      audit(
+        database,
+        "evidence.documenter_proposed",
+        "success",
+        setId,
+        sourceDigest,
+      );
+      return result;
+    });
+  } finally {
+    database.close();
+  }
+}
+export async function recordDocumenterFailure(
+  options: Options = {},
+): Promise<void> {
+  const paths = await resolveAppDataPaths(options.appDataRoot);
+  const database = openDatabase(paths.databasePath);
+  try {
+    applyMigrations(database);
+    audit(database, "evidence.documenter_failed", "failure");
+  } finally {
+    database.close();
+  }
+}
+export async function listDocumenterProposals(
+  options: Options = {},
+): Promise<StoredDocumenterProposal[]> {
+  const paths = await resolveAppDataPaths(options.appDataRoot);
+  const database = openDatabase(paths.databasePath);
+  try {
+    applyMigrations(database);
+    return listAll(database);
+  } finally {
+    database.close();
+  }
+}
+export async function resolveDocumenterProposal(
+  input: Options & {
+    proposalId: string;
+    expectedRevisionId: string;
+    decision: "accepted" | "edited" | "rejected";
+    factualText?: string;
+  },
+): Promise<StoredDocumenterProposal> {
+  const paths = await resolveAppDataPaths(input.appDataRoot);
+  const database = openDatabase(paths.databasePath);
+  try {
+    applyMigrations(database);
+    return transaction(database, () => {
+      const proposal = findById(database, input.proposalId);
+      if (!proposal)
+        throw new WorkspaceError(
+          "EVIDENCE_DOCUMENTER_NOT_FOUND",
+          "That proposal is unavailable.",
+          "Refresh the Resume & Evidence Library and try again.",
+        );
+      if (
+        proposal.revisionId !== input.expectedRevisionId ||
+        proposal.state !== "proposed"
+      )
+        throw new WorkspaceError(
+          "EVIDENCE_DOCUMENTER_STALE",
+          "That proposal was already decided.",
+          "Refresh the Resume & Evidence Library and review the latest proposal state.",
+        );
+      const factualText =
+        input.decision === "edited"
+          ? safeText(input.factualText ?? "")
+          : proposal.factualText;
+      const item =
+        input.decision === "rejected"
+          ? undefined
+          : addUnreviewedEvidenceInTransaction(database, {
+              factualText,
+              sourceDocument: `Document for Resume: ${proposal.sourcePaths.join(", ")}`,
+              sourceSection: "Local-model proposal",
+              origin: "extracted",
+            });
+      const id = createUuidV7();
+      insertDecision(database, {
+        id,
+        proposalId: proposal.id,
+        decision: input.decision,
+        factualText: item?.factualText,
+        evidenceRevisionId: item?.id,
+        createdAt: new Date().toISOString(),
+      });
+      audit(
+        database,
+        "evidence.documenter_resolved",
+        "success",
+        id,
+        item?.contentDigest,
+      );
+      return findById(database, proposal.id)!;
+    });
+  } finally {
+    database.close();
+  }
+}

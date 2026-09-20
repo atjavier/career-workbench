@@ -10,13 +10,41 @@ import { ResumeIntakeStatus } from "@/app/resume-intake-status";
 export const dynamic = "force-dynamic";
 
 export default async function ResumeInterviewPage() {
-  const state = await readResumeWorkspaceState().catch(() => ({ workspaces: [], activeWorkspace: undefined, revisionNumber: 0 }));
-  const intake = state.activeWorkspace ? await readLatestResumeEvidenceIntake(state.activeWorkspace.id).catch(() => undefined) : undefined;
-  const interview = state.activeWorkspace ? await readResumeClarificationInterview(state.activeWorkspace.id).catch(() => undefined) : undefined;
-  const hasReviewConflict = Boolean(interview?.completed.some((task) => task.needsReview));
-  const shouldShowInterview = Boolean(state.activeWorkspace && interview && (state.activeWorkspace.journey?.phase === "interview" || hasReviewConflict));
-  if (state.activeWorkspace?.journey && !["documenting", "interview", "recovery"].includes(state.activeWorkspace.journey.phase) && !hasReviewConflict) redirect("/resume");
-  const message = state.activeWorkspace?.journey?.message ?? intake?.message ?? "Reading your selected local folders and documenting resume evidence.";
+  const state = await readResumeWorkspaceState().catch(() => ({
+    workspaces: [],
+    activeWorkspace: undefined,
+    revisionNumber: 0,
+  }));
+  const intake = state.activeWorkspace
+    ? await readLatestResumeEvidenceIntake(state.activeWorkspace.id).catch(
+        () => undefined,
+      )
+    : undefined;
+  const interview = state.activeWorkspace
+    ? await readResumeClarificationInterview(state.activeWorkspace.id).catch(
+        () => undefined,
+      )
+    : undefined;
+  const hasReviewConflict = Boolean(
+    interview?.completed.some((task) => task.needsReview),
+  );
+  const shouldShowInterview = Boolean(
+    state.activeWorkspace &&
+    interview &&
+    (state.activeWorkspace.journey?.phase === "interview" || hasReviewConflict),
+  );
+  if (
+    state.activeWorkspace?.journey &&
+    !["documenting", "interview", "recovery"].includes(
+      state.activeWorkspace.journey.phase,
+    ) &&
+    !hasReviewConflict
+  )
+    redirect("/resume");
+  const message =
+    state.activeWorkspace?.journey?.message ??
+    intake?.message ??
+    "Reading your selected local folders and documenting resume evidence.";
   return (
     <ApplicationShell active="Coach Q&A">
       <div className="workspace-shell resume-workspace">
@@ -25,7 +53,10 @@ export default async function ResumeInterviewPage() {
             <p className="eyebrow">Resume Coach</p>
             <h1>Prepare your resume evidence</h1>
             <p>
-              Your local AI coach analyzes your documented work and identifies a few targeted clarification questions. Answer the questions below to establish your verified achievements and metrics before generating your base resume.
+              Your local AI coach analyzes your documented work and identifies a
+              few targeted clarification questions. Answer the questions below
+              to establish your verified achievements and metrics before
+              generating your base resume.
             </p>
           </div>
           <ResumeWorkspacePicker
@@ -35,7 +66,10 @@ export default async function ResumeInterviewPage() {
           />
         </header>
         {shouldShowInterview && state.activeWorkspace && interview ? (
-          <ResumeInterview workspaceId={state.activeWorkspace.id} interview={interview} />
+          <ResumeInterview
+            workspaceId={state.activeWorkspace.id}
+            interview={interview}
+          />
         ) : (
           <ResumeIntakeStatus
             workspaceId={state.activeWorkspace?.id ?? ""}
