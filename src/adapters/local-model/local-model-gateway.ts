@@ -3335,6 +3335,13 @@ function isSourceFact(text: string, path: string): boolean {
     /\benrolled\s+(?:in\s+)?[A-Z]{2,}\s*\d{2,}/i.test(text)
   )
     return false;
+  if (/(?:\s*\.\s*){3,}|\.{3,}\s*\d+$/i.test(text)) return false;
+  if (
+    /^(?:week narrative report|weekly assigned tasks|technical highlights|tools and technologies used|internship report|table of contents)\b/i.test(
+      text,
+    )
+  )
+    return false;
   if (/(?:^|\/)package\.json$/i.test(path))
     return /"(?:name|private|type)"\s*:|"(?:dev|start|build|test|lint|preview)"\s*:|"(?:express|mongoose|mongodb|bcrypt|jsonwebtoken|cors|react|next|vite|prisma|sequelize|typeorm)"\s*:/.test(
       text,
@@ -3441,6 +3448,29 @@ function fallbackProjectOverviewArtifact(
     .slice(0, 5);
   const overview = request.category === "experience" ? "Experience" : "Project";
   return `# ${overview} Overview (Proposed / Unreviewed)\n\n## Directly supported implementation facts\n\n${facts.length ? facts.map((fact) => `- ${fact}`).join("\n") : "- No supported implementation facts were found in the bounded scan."}\n\n## Explicit unknowns\n\n- Ownership, metrics, users, dates, deployment status, outcomes, and skills are not established by the selected source.`;
+}
+function deriveExperienceOverviewArtifact(
+  summary: string,
+  request: ResumeEvidenceDocumenterRequest,
+): string {
+  const lines = summary.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const bullets: string[] = [];
+  for (const line of lines) {
+    if (line.startsWith("#")) continue;
+    if (/^\*\*(?:Role|Organization|Period|Assignment):\*\*/i.test(line)) {
+      bullets.push(line.replace(/^\*\*/, "").replace(/:\*\*/, ":"));
+    } else if (/^[-*]\s+/.test(line)) {
+      const clean = line.replace(/^[-*]\s+/, "").trim();
+      if (clean && !clean.startsWith("#")) {
+        bullets.push(clean);
+      }
+    }
+    if (bullets.length >= 8) break;
+  }
+  if (!bullets.length) {
+    return fallbackProjectOverviewArtifact(request);
+  }
+  return `# Experience Overview (Proposed / Unreviewed)\n\n${bullets.map((b) => `- ${b}`).join("\n")}`;
 }
 function fallbackBulletCandidatesArtifact(): string {
   return "# Resume Bullet Candidates (Proposed / Unreviewed)\n\n- No supported bullet candidates found.";
@@ -3658,12 +3688,12 @@ export async function requestResumeEvidenceDocumentation(
   validateDocumenterRequest(request);
   const evidence = anchoredEvidenceArtifact(request);
   const summary = await documentArtifact(request, "resume-summary.md", fetcher);
+  const overview =
+    request.category === "experience"
+      ? deriveExperienceOverviewArtifact(summary, request)
+      : await documentArtifact(request, "project-overview.md", fetcher);
   const artifacts = {
-    "project-overview.md": await documentArtifact(
-      request,
-      "project-overview.md",
-      fetcher,
-    ),
+    "project-overview.md": overview,
     "resume-evidence.md": evidence,
     "resume-bullet-candidates.md": await documentArtifact(
       request,
