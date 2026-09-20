@@ -22,6 +22,7 @@ export type ResumeEvidenceIntakeWorkItem = {
   sourceDirectory: string;
   startDate?: string;
   endDate?: string;
+  role?: string;
 };
 type Row = {
   id: string;
@@ -208,28 +209,53 @@ export async function runResumeEvidenceIntake(
           .filter(Boolean)
           .join(" - ")
           .trim();
-        if (!dateText) continue;
-        const task = db
-          .prepare(
-            "SELECT id, item_key AS itemKey, item_name AS itemName FROM resume_clarification_tasks WHERE workspace_id = ? AND item_name = ? AND category = 'dates' AND status = 'pending'",
-          )
-          .get(intake.workspaceId, item.name) as
-          { id: string; itemKey: string; itemName: string } | undefined;
-        if (task) {
-          const responseId = createUuidV7();
-          db.prepare(
-            "INSERT INTO resume_clarification_task_responses (id, workspace_id, task_id, disposition, answer_text, created_at) VALUES (?, ?, ?, 'answered', ?, ?)",
-          ).run(responseId, intake.workspaceId, task.id, dateText, now);
-          db.prepare(
-            "UPDATE resume_clarification_tasks SET status = 'answered' WHERE id = ? AND workspace_id = ?",
-          ).run(task.id, intake.workspaceId);
-          persistClarifiedEvidenceForResponseInDatabase(db, {
-            workspaceId: intake.workspaceId,
-            taskId: task.id,
-            responseId,
-            candidateText: dateText,
-            now,
-          });
+        if (dateText) {
+          const task = db
+            .prepare(
+              "SELECT id, item_key AS itemKey, item_name AS itemName FROM resume_clarification_tasks WHERE workspace_id = ? AND item_name = ? AND category = 'dates' AND status = 'pending'",
+            )
+            .get(intake.workspaceId, item.name) as
+            { id: string; itemKey: string; itemName: string } | undefined;
+          if (task) {
+            const responseId = createUuidV7();
+            db.prepare(
+              "INSERT INTO resume_clarification_task_responses (id, workspace_id, task_id, disposition, answer_text, created_at) VALUES (?, ?, ?, 'answered', ?, ?)",
+            ).run(responseId, intake.workspaceId, task.id, dateText, now);
+            db.prepare(
+              "UPDATE resume_clarification_tasks SET status = 'answered' WHERE id = ? AND workspace_id = ?",
+            ).run(task.id, intake.workspaceId);
+            persistClarifiedEvidenceForResponseInDatabase(db, {
+              workspaceId: intake.workspaceId,
+              taskId: task.id,
+              responseId,
+              candidateText: dateText,
+              now,
+            });
+          }
+        }
+        if (item.role) {
+          const roleTask = db
+            .prepare(
+              "SELECT id, item_key AS itemKey, item_name AS itemName FROM resume_clarification_tasks WHERE workspace_id = ? AND item_name = ? AND category = 'role' AND status = 'pending'",
+            )
+            .get(intake.workspaceId, item.name) as
+            { id: string; itemKey: string; itemName: string } | undefined;
+          if (roleTask) {
+            const responseId = createUuidV7();
+            db.prepare(
+              "INSERT INTO resume_clarification_task_responses (id, workspace_id, task_id, disposition, answer_text, created_at) VALUES (?, ?, ?, 'answered', ?, ?)",
+            ).run(responseId, intake.workspaceId, roleTask.id, item.role, now);
+            db.prepare(
+              "UPDATE resume_clarification_tasks SET status = 'answered' WHERE id = ? AND workspace_id = ?",
+            ).run(roleTask.id, intake.workspaceId);
+            persistClarifiedEvidenceForResponseInDatabase(db, {
+              workspaceId: intake.workspaceId,
+              taskId: roleTask.id,
+              responseId,
+              candidateText: item.role,
+              now,
+            });
+          }
         }
       }
     } finally {

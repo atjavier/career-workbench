@@ -361,12 +361,14 @@ export async function resumeOnboardingAction(
       const name = String(formData.get(`itemName-${index}`) ?? "");
       const startDate = String(formData.get(`startDate-${index}`) ?? "").trim();
       const endDate = String(formData.get(`endDate-${index}`) ?? "").trim();
+      const role = String(formData.get(`role-${index}`) ?? "").trim();
       return {
         category: category as "project" | "experience",
         name,
         sourceDirectory,
         startDate: startDate || undefined,
         endDate: endDate || undefined,
+        role: role || undefined,
       };
     });
     if (formData.get("localModelDisclosure") !== "yes")
