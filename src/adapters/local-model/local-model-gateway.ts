@@ -2735,13 +2735,16 @@ function specialistFallback(
         | { text: string; clarificationIndex: number }
       >
     >();
+    const hasExperiences = (grouped.get("experience") ?? []).length > 0;
+    const maxBulletsPerEntry = category === "project" && hasExperiences ? 2 : 3;
+    const maxEntries = category === "project" && hasExperiences ? 3 : 4;
     for (const entry of entries) {
       const current = byName.get(entry.name) ?? [];
-      if (current.length < 3) current.push(entry);
+      if (current.length < maxBulletsPerEntry) current.push(entry);
       byName.set(entry.name, current);
     }
     const text = [...byName.entries()]
-      .slice(0, 4)
+      .slice(0, maxEntries)
       .map(([name, facts]) => {
         for (const fact of facts)
           claims.push(

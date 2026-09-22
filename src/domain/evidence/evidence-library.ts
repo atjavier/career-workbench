@@ -64,6 +64,10 @@ export type ExperienceProjectCollection = {
   category: LibraryCategory;
   summary: string;
   artifactNames: string[];
+  documents?: Array<{
+    name: string;
+    text: string;
+  }>;
   evidence: Array<
     Pick<EvidenceRevision, "factualText" | "reviewState"> & {
       reviewHandle: string;
@@ -942,6 +946,9 @@ function restoreEvidenceDeletionGuards(
   database.exec(
     "CREATE TRIGGER IF NOT EXISTS evidence_documenter_decisions_immutable_delete BEFORE DELETE ON evidence_documenter_proposal_decisions BEGIN SELECT RAISE(ABORT, 'documenter proposal decisions are immutable'); END;",
   );
+  database.exec(
+    "CREATE TRIGGER IF NOT EXISTS tex_draft_revision_artifacts_immutable_delete BEFORE DELETE ON tex_draft_revision_artifacts BEGIN SELECT RAISE(ABORT, 'tex draft artifact snapshots are immutable'); END;",
+  );
 }
 export async function permanentlyDeleteDocumentedEvidenceItem(
   input: Options & {
@@ -1025,6 +1032,7 @@ export async function permanentlyDeleteDocumentedEvidenceItem(
         "evidence_records_immutable_delete",
         "evidence_revisions_immutable_delete",
         "evidence_documenter_decisions_immutable_delete",
+        "tex_draft_revision_artifacts_immutable_delete",
       ])
         database.exec(`DROP TRIGGER IF EXISTS ${trigger}`);
       for (const id of draftIds) {
@@ -1034,18 +1042,17 @@ export async function permanentlyDeleteDocumentedEvidenceItem(
           )
           .run(id);
         database
-          .prepare("DELETE FROM material_draft_claims WHERE draft_id = ?")
-          .run(id);
-        database
           .prepare("DELETE FROM material_draft_evidence WHERE draft_id = ?")
           .run(id);
+      }
+      if (importIds.length) {
         database
-          .prepare("DELETE FROM material_draft_handoffs WHERE draft_id = ?")
-          .run(id);
-        database
-          .prepare("DELETE FROM resume_workspace_drafts WHERE draft_id = ?")
-          .run(id);
-        database.prepare("DELETE FROM material_drafts WHERE id = ?").run(id);
+          .prepare(
+            "DELETE FROM tex_draft_revision_artifacts WHERE document_id IN (SELECT id FROM evidence_library_documents WHERE import_id IN (" +
+              importIds.map(() => "?").join(",") +
+              "))",
+          )
+          .run(...importIds);
       }
       for (const id of evidenceIds) {
         database
@@ -1352,6 +1359,10 @@ export async function listExperienceProjectCollection(
           artifactNames: group.documents
             .map((document) => document.libraryPath.split("/").at(-1)!)
             .sort(),
+          documents: group.documents.map((document) => ({
+            name: document.libraryPath.split("/").at(-1)!,
+            text: document.text,
+          })),
           evidence: evidence
             .filter(
               (item) => item.sourceDocument === evidenceDocument?.libraryPath,

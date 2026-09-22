@@ -137,6 +137,7 @@ export function isLatestWorkspaceMaterialDraftCurrent(
     return false;
   }
   const expected = [...new Set(input.evidenceRevisionIds)].sort();
+  if (expected.length === 0) return false;
   const actual = (
     db
       .prepare(

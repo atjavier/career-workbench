@@ -393,12 +393,22 @@ export async function orchestrateResumeGeneration(
         evidence: input.evidence,
         candidateClarifications: input.candidateClarifications,
         projectIdentities: input.projectIdentities,
-        projectEntryLimits: {
-          maximumEntries: 4,
-          descriptorMaximumWords: 12,
-          maximumBulletsPerEntry: 3,
-          maximumWordsPerBullet: 30,
-        },
+        projectEntryLimits: (() => {
+          const docs = Array.isArray(input.documentation)
+            ? (input.documentation as Array<{ category?: unknown }>)
+            : [];
+          const hasMultipleExperiences =
+            docs.filter((d) => d.category === "experience").length >= 2 ||
+            input.candidateClarifications.filter(
+              (c) => c.itemCategory === "experience",
+            ).length >= 2;
+          return {
+            maximumEntries: hasMultipleExperiences ? 3 : 4,
+            descriptorMaximumWords: 12,
+            maximumBulletsPerEntry: hasMultipleExperiences ? 2 : 3,
+            maximumWordsPerBullet: 30,
+          };
+        })(),
         responseShape: {
           edits: [
             {
