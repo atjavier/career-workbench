@@ -124,6 +124,7 @@ export async function ResumeWorkspace() {
       ).catch(() => undefined)
     : undefined;
   if (
+    !draftState.draft &&
     ["documenting", "interview", "recovery"].includes(
       workspaceState.activeWorkspace?.journey?.phase ?? "",
     )
@@ -208,6 +209,9 @@ export async function ResumeWorkspace() {
             !draftState.current &&
             generationJob?.status !== "queued" &&
             generationJob?.status !== "running"
+          }
+          hasPendingInterview={
+            workspaceState.activeWorkspace?.journey?.phase === "interview"
           }
           generationMessage={
             generationJob?.status === "queued" ||

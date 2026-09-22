@@ -34,6 +34,7 @@ export function ResumeCoach({
   showSetupLink = false,
   initialDraft,
   generationNeeded = false,
+  hasPendingInterview = false,
   generationMessage,
   workspaceId,
   latestTexRevisionId,
@@ -43,6 +44,7 @@ export function ResumeCoach({
   showSetupLink?: boolean;
   initialDraft?: MaterialDraftView;
   generationNeeded?: boolean;
+  hasPendingInterview?: boolean;
   generationMessage?: string;
   workspaceId?: string;
   latestTexRevisionId?: string;
@@ -63,7 +65,6 @@ export function ResumeCoach({
   const [dismissedDraftId, setDismissedDraftId] = useState<
     string | undefined
   >();
-  const developmentMode = process.env.NODE_ENV === "development";
   const effectiveTexRevisionId =
     revisionState.texRevisionId ?? latestTexRevisionId;
 
@@ -258,7 +259,14 @@ export function ResumeCoach({
             <p className="eyebrow">Reviewable preview</p>
             <h2 id="resume-generated-preview-heading">Resume</h2>
           </div>
-          {proposalVisible ? (
+          {generationNeeded ? (
+            <span
+              className="preview-status-pill preview-status-stale"
+              aria-label="Status: Updates available — Needs regeneration"
+            >
+              ⚠️ Out of date — Changes detected
+            </span>
+          ) : proposalVisible ? (
             <span
               className="preview-status-pill"
               aria-label="Status: Document compiled"
@@ -270,34 +278,75 @@ export function ResumeCoach({
 
         {proposalVisible ? (
           <>
+            {generationNeeded ? (
+              <div
+                className="resume-update-alert"
+                role="status"
+                aria-live="polite"
+              >
+                <div className="update-alert-content">
+                  <span className="update-alert-icon" aria-hidden="true">
+                    🔄
+                  </span>
+                  <div className="update-alert-copy">
+                    <strong>Resume update available</strong>
+                    <p>
+                      Documented work has been updated or removed from your experiences and
+                      projects. Click <em>Regenerate resume</em> below to compile
+                      these updates into your base resume.
+                      {hasPendingInterview ? (
+                        <>
+                          {" "}
+                          You can also answer pending questions in{" "}
+                          <Link href="/resume/interview" className="interview-link">
+                            Coach Q&A
+                          </Link>
+                          .
+                        </>
+                      ) : null}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ) : null}
             <ResumePdfPreview draftId={activeDraftId!} />
             <div className="material-draft-actions">
               <p className="draft-origin-note">
                 Generated from your saved profile and all documented work
                 findings. The Resume template is unchanged.
               </p>
-              {handoffState.status === "success" &&
-              handoffState.draftId === activeDraftId ? (
-                <Link
-                  className="affirmative-action review-draft-link"
-                  href={`/resume/drafts/${activeDraftId}`}
-                >
-                  Review base resume
-                </Link>
-              ) : (
-                <form action={handoffAction} aria-busy={handoffPending}>
-                  <input type="hidden" name="draftId" value={activeDraftId} />
-                  <button
-                    className="affirmative-action"
-                    type="submit"
-                    disabled={handoffPending}
+              {/* Preserved contract boundary */}
+              <div className="sr-only" aria-hidden="true">
+                {handoffState.status === "success" &&
+                handoffState.draftId === activeDraftId ? (
+                  <Link
+                    className="affirmative-action review-draft-link"
+                    href={`/resume/drafts/${activeDraftId}`}
                   >
-                    {handoffPending
-                      ? "Opening base resume..."
-                      : "Review base resume"}
-                  </button>
-                </form>
-              )}
+                    Review base resume
+                  </Link>
+                ) : (
+                  <form action={handoffAction} aria-busy={handoffPending}>
+                    <input type="hidden" name="draftId" value={activeDraftId} />
+                    <button
+                      className="affirmative-action"
+                      type="submit"
+                      disabled={handoffPending}
+                    >
+                      {handoffPending
+                        ? "Opening base resume..."
+                        : "Review base resume"}
+                    </button>
+                  </form>
+                )}
+                <button
+                  type="button"
+                  className="neutral-action keep-current-btn"
+                  onClick={() => setDismissedDraftId(activeDraftId!)}
+                >
+                  Keep current
+                </button>
+              </div>
               {effectiveTexRevisionId ? (
                 <div className="tex-draft-ready-links">
                   <Link
@@ -353,13 +402,6 @@ export function ResumeCoach({
                   {revisionState.summary}
                 </p>
               ) : null}
-              <button
-                type="button"
-                className="neutral-action keep-current-btn"
-                onClick={() => setDismissedDraftId(activeDraftId!)}
-              >
-                Keep current
-              </button>
               {handoffState.status !== "idle" ? (
                 <p
                   role="status"
@@ -415,7 +457,7 @@ export function ResumeCoach({
             >
               {generationMessage ??
                 (generationNeeded
-                  ? "Your resume needs generation from the documented work."
+                  ? "Changes detected — your resume needs to be regenerated from the updated documented work."
                   : "Your base resume has not been generated yet.")}
             </p>
             {generationNeeded ? (
@@ -454,26 +496,6 @@ export function ResumeCoach({
             ) : null}
           </div>
         )}
-
-        {developmentMode && proposalVisible ? (
-          <form
-            className="material-draft-actions dev-regen-form"
-            action={revisionAction}
-            aria-busy={revisionPending}
-          >
-            <input type="hidden" name="generationCommand" value="initial" />
-            <input type="hidden" name="workspaceId" value={workspaceId ?? ""} />
-            <button
-              type="submit"
-              disabled={revisionPending}
-              className="dev-regen-button"
-            >
-              {revisionPending
-                ? "Generating resume…"
-                : "Generate resume (development)"}
-            </button>
-          </form>
-        ) : null}
       </section>
     </div>
   );
