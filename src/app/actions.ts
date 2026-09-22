@@ -141,7 +141,10 @@ import {
 import { reconcileResumeWorkspaceJourney } from "@/domain/resume-generation/resume-workspace-journey";
 import { interpretWorkspaceEvidence } from "@/domain/resume-generation/resume-evidence-interpretation";
 import { respondToResumeClarification } from "@/domain/resume-generation/resume-clarification-interview";
-import { listClarifiedEvidenceInDatabase } from "@/domain/resume-generation/resume-clarified-evidence";
+import {
+  listClarifiedEvidenceInDatabase,
+  persistClarifiedEvidenceForResponseInDatabase,
+} from "@/domain/resume-generation/resume-clarified-evidence";
 import {
   readBoundedResumeInterviewContext,
   readBoundedResumeInterviewTranscript,
@@ -156,6 +159,7 @@ export type WorkspaceActionState = {
   summary: string;
   safeNextAction?: string;
   workspaceId?: string;
+  nextUrl?: string;
 };
 
 type CandidateProfileField = keyof CandidateProfileInput;
@@ -1943,9 +1947,14 @@ export async function evidenceLibraryAction(
       } finally {
         database.close();
       }
+      const itemName =
+        String(formData.get("itemName") ?? "").trim() ||
+        String(formData.get("projectName") ?? "").trim() ||
+        String(formData.get("company") ?? "").trim() ||
+        String(formData.get("role") ?? "").trim();
       result = await documentResumeEvidenceFolder({
         category,
-        name: String(formData.get("itemName") ?? ""),
+        name: itemName,
         sourceDirectory,
         expectedWorkspaceId: expectedWorkspaceId!,
         disclosed: formData.get("localModelDisclosure") === "yes",
@@ -1964,12 +1973,29 @@ export async function evidenceLibraryAction(
         name: String(formData.get("itemName") ?? ""),
         confirmation: String(formData.get("confirmation") ?? ""),
       });
+      let nextUrl: string | undefined;
+      let safeNextAction: string | undefined;
+      const paths = await resolveAppDataPaths();
+      const db = openDatabase(paths.databasePath);
+      try {
+        applyMigrations(db);
+        const workspace = readActiveResumeWorkspace(db).workspace;
+        if (workspace) {
+          await reconcileResumeWorkspaceJourney(workspace.id);
+          nextUrl = "/resume";
+          safeNextAction = "Go to Resume to regenerate your draft with updated evidence.";
+        }
+      } finally {
+        db.close();
+      }
       revalidateCareerWorkspaces();
       return {
         status: "success",
+        nextUrl,
+        safeNextAction,
         summary: deleted.artifactCleanupIncomplete
           ? `${deleted.findingsDeleted} documented finding${deleted.findingsDeleted === 1 ? "" : "s"} deleted. Close programs using the managed evidence folder to finish removing its files.`
-          : `${deleted.findingsDeleted} documented finding${deleted.findingsDeleted === 1 ? "" : "s"} and this ${category} were permanently deleted.`,
+          : `${deleted.findingsDeleted} documented finding${deleted.findingsDeleted === 1 ? "" : "s"} and this ${category} were permanently deleted. Changes detected — your base resume needs updating.`,
       };
     } else if (command === "import-documentation-artifacts") {
       const category = String(formData.get("category") ?? "");
@@ -2111,12 +2137,106 @@ export async function evidenceLibraryAction(
     // Documentation is only the evidence stage.  Immediately interpret the
     // curated artifacts for the same still-active workspace so new facts reopen
     // its clarification interview instead of leaving a stale ready/draft state.
-    if (documentedWorkspaceId)
+    if (documentedWorkspaceId) {
       await interpretWorkspaceEvidence(documentedWorkspaceId);
+
+      const startDate = String(formData.get("startDate") ?? "").trim();
+      const endDate = String(formData.get("endDate") ?? "").trim();
+      const dateText = [startDate, endDate].filter(Boolean).join(" - ").trim();
+      const role = String(formData.get("role") ?? "").trim();
+      const itemName =
+        String(formData.get("itemName") ?? "").trim() ||
+        String(formData.get("projectName") ?? "").trim() ||
+        String(formData.get("company") ?? "").trim() ||
+        String(formData.get("role") ?? "").trim();
+
+      if (dateText || role) {
+        const paths = await resolveAppDataPaths();
+        const db = openDatabase(paths.databasePath);
+        try {
+          applyMigrations(db);
+          const now = new Date().toISOString();
+          if (dateText) {
+            const task = db
+              .prepare(
+                "SELECT id, item_key AS itemKey, item_name AS itemName FROM resume_clarification_tasks WHERE workspace_id = ? AND item_name = ? AND category = 'dates' AND status = 'pending'",
+              )
+              .get(documentedWorkspaceId, itemName) as
+              { id: string; itemKey: string; itemName: string } | undefined;
+            if (task) {
+              const responseId = createUuidV7();
+              db.prepare(
+                "INSERT INTO resume_clarification_task_responses (id, workspace_id, task_id, disposition, answer_text, created_at) VALUES (?, ?, ?, 'answered', ?, ?)",
+              ).run(responseId, documentedWorkspaceId, task.id, dateText, now);
+              db.prepare(
+                "UPDATE resume_clarification_tasks SET status = 'answered' WHERE id = ? AND workspace_id = ?",
+              ).run(task.id, documentedWorkspaceId);
+              persistClarifiedEvidenceForResponseInDatabase(db, {
+                workspaceId: documentedWorkspaceId,
+                taskId: task.id,
+                responseId,
+                candidateText: dateText,
+                now,
+              });
+            }
+          }
+          if (role) {
+            const roleTask = db
+              .prepare(
+                "SELECT id, item_key AS itemKey, item_name AS itemName FROM resume_clarification_tasks WHERE workspace_id = ? AND item_name = ? AND category = 'role' AND status = 'pending'",
+              )
+              .get(documentedWorkspaceId, itemName) as
+              { id: string; itemKey: string; itemName: string } | undefined;
+            if (roleTask) {
+              const responseId = createUuidV7();
+              db.prepare(
+                "INSERT INTO resume_clarification_task_responses (id, workspace_id, task_id, disposition, answer_text, created_at) VALUES (?, ?, ?, 'answered', ?, ?)",
+              ).run(responseId, documentedWorkspaceId, roleTask.id, role, now);
+              db.prepare(
+                "UPDATE resume_clarification_tasks SET status = 'answered' WHERE id = ? AND workspace_id = ?",
+              ).run(roleTask.id, documentedWorkspaceId);
+              persistClarifiedEvidenceForResponseInDatabase(db, {
+                workspaceId: documentedWorkspaceId,
+                taskId: roleTask.id,
+                responseId,
+                candidateText: role,
+                now,
+              });
+            }
+          }
+        } finally {
+          db.close();
+        }
+      }
+
+
+    }
     revalidateCareerWorkspaces();
+    let nextUrl: string | undefined;
+    let safeNextAction: string | undefined;
+    let journeyPhase: string | undefined;
+    if (documentedWorkspaceId) {
+      const journey = await reconcileResumeWorkspaceJourney(
+        documentedWorkspaceId,
+      );
+      journeyPhase = journey?.phase;
+      if (journeyPhase === "interview") {
+        nextUrl = "/resume/interview";
+        safeNextAction = "Answer clarification questions in Coach Q&A.";
+      } else {
+        nextUrl = "/resume";
+        safeNextAction = "Go to Resume to regenerate your draft.";
+      }
+    }
     return {
       status: "success",
-      summary: `${result!.documentsAdded} document${result!.documentsAdded === 1 ? "" : "s"} and ${result!.candidatesAdded} unreviewed evidence candidate${result!.candidatesAdded === 1 ? "" : "s"} were added.`,
+      workspaceId: documentedWorkspaceId,
+      nextUrl,
+      safeNextAction,
+      summary:
+        journeyPhase === "interview"
+          ? `${result!.documentsAdded} document${result!.documentsAdded === 1 ? "" : "s"} added. Coach Resume has clarification questions ready.`
+          : `${result!.documentsAdded} document${result!.documentsAdded === 1 ? "" : "s"} and ${result!.candidatesAdded} unreviewed evidence candidate${result!.candidatesAdded === 1 ? "" : "s"} were added.`,
     };
   } catch (error) {
     const command = String(formData.get("libraryCommand") ?? "");
@@ -2135,6 +2255,7 @@ export async function evidenceLibraryAction(
     };
   }
 }
+
 
 export async function dataStorageAction(
   _: WorkspaceActionState,
