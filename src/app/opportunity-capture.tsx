@@ -298,7 +298,9 @@ function OpportunityConfirmation({
         </div>
         <div>
           <dt>Captured</dt>
-          <dd>{new Date(draft.capturedAt).toLocaleString()}</dd>
+          <dd suppressHydrationWarning>
+            {new Date(draft.capturedAt).toLocaleString()}
+          </dd>
         </div>
       </dl>
       <form
@@ -362,8 +364,10 @@ function OpportunityConfirmation({
             {" "}
             A similar saved opportunity, {state.probableDuplicate.title} at{" "}
             {state.probableDuplicate.company} (captured{" "}
-            {new Date(state.probableDuplicate.capturedAt).toLocaleString()}),
-            was found locally. Both records remain separate.
+            <span suppressHydrationWarning>
+              {new Date(state.probableDuplicate.capturedAt).toLocaleString()}
+            </span>
+            ), was found locally. Both records remain separate.
           </>
         ) : null}
         {state.status === "success" ? (

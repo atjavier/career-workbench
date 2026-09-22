@@ -488,8 +488,10 @@ export function CurrentBaseResume({
               <li key={version.id}>
                 {version.sourceFilename}, draft revision{" "}
                 {version.draftRevisionNumber}, approved{" "}
-                {new Date(version.approvedAt).toLocaleString()}. Evidence
-                support:{" "}
+                <span suppressHydrationWarning>
+                  {new Date(version.approvedAt).toLocaleString()}
+                </span>
+                . Evidence support:{" "}
                 {version.evidenceRevisionIds.length
                   ? version.evidenceRevisionIds.map((id, index) => {
                       const support = evidenceByRevision.get(id);

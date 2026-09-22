@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 
 export default function EvidencePage() {
   return (
-    <ApplicationShell active="Resume">
+    <ApplicationShell active="Resume" activeSubItem="Experience & Projects">
       <EvidenceLibraryWorkspace />
     </ApplicationShell>
   );

@@ -358,7 +358,9 @@ function OpportunityCard({
               </h2>
             </div>
           </div>
-          <time className="job-listing-saved">Captured {parsedCaptured}</time>
+          <time className="job-listing-saved" suppressHydrationWarning>
+            Captured {parsedCaptured}
+          </time>
         </header>
         <dl className="job-listing-facts">
           <div>
@@ -371,7 +373,7 @@ function OpportunityCard({
           </div>
           <div>
             <dt>Posted date</dt>
-            <dd>{parsedPosted}</dd>
+            <dd suppressHydrationWarning>{parsedPosted}</dd>
           </div>
         </dl>
         <div className="job-listing-foot">

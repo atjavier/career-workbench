@@ -161,7 +161,11 @@ export function DataStorage({
               item.expiresAt &&
               view.restorableArtifactIds.includes(item.id) ? (
                 <>
-                  Recoverable until {new Date(item.expiresAt).toLocaleString()}.{" "}
+                  Recoverable until{" "}
+                  <span suppressHydrationWarning>
+                    {new Date(item.expiresAt).toLocaleString()}
+                  </span>
+                  .{" "}
                   <Confirm
                     artifactId={item.id}
                     revision={item.localRevision}
@@ -232,7 +236,7 @@ export function DataStorage({
       ) : (
         <ul>
           {view.auditEvents.slice(0, 20).map((event) => (
-            <li key={event.id}>
+            <li key={event.id} suppressHydrationWarning>
               {new Date(event.occurredAt).toLocaleString()}: {event.action} (
               {event.outcome})
             </li>

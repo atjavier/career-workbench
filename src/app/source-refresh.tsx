@@ -111,16 +111,21 @@ export function SourceRefresh({
               <li key={run.id}>
                 <strong>{run.status}</strong> — {run.selectedSourceCount}{" "}
                 selected source{run.selectedSourceCount === 1 ? "" : "s"};
-                started {new Date(run.startedAt).toLocaleString()}
+                started{" "}
+                <span suppressHydrationWarning>
+                  {new Date(run.startedAt).toLocaleString()}
+                </span>
                 <ul>
                   {run.outcomes.map((outcome) => (
                     <li key={outcome.id}>
                       <strong>{outcome.sourceName ?? outcome.sourceId}</strong>:{" "}
                       {outcome.status} — {outcome.requestCount} request
                       {outcome.requestCount === 1 ? "" : "s"};{" "}
-                      {new Date(
-                        outcome.completedAt ?? outcome.startedAt,
-                      ).toLocaleString()}
+                      <span suppressHydrationWarning>
+                        {new Date(
+                          outcome.completedAt ?? outcome.startedAt,
+                        ).toLocaleString()}
+                      </span>
                       . {outcome.recoveryGuidance}
                     </li>
                   ))}

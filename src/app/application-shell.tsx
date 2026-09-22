@@ -44,12 +44,6 @@ const destinations: readonly NavItem[] = [
         description: "Documented collections & folders",
         icon: "🗂",
       },
-      {
-        href: "/resume/interview",
-        label: "Coach Q&A",
-        description: "Interactive evidence clarifications",
-        icon: "✦",
-      },
     ],
   },
   {
@@ -62,9 +56,11 @@ const destinations: readonly NavItem[] = [
 
 export async function ApplicationShell({
   active = "Jobs",
+  activeSubItem,
   children,
 }: {
   active?: string;
+  activeSubItem?: string;
   children: ReactNode;
 }) {
   const workspaceState = await readResumeWorkspaceState().catch(() => ({
@@ -73,23 +69,57 @@ export async function ApplicationShell({
     revisionNumber: 0,
   }));
   const phase = workspaceState.activeWorkspace?.journey?.phase;
-  const isInterviewFinished =
-    phase === "ready_to_generate" || phase === "ready_for_preview";
+
+  const effectiveSubActive =
+    activeSubItem ??
+    (active === "Experience & Projects"
+      ? "Experience & Projects"
+      : active === "Coach Q&A"
+        ? "Coach Q&A"
+        : active === "Resume"
+          ? "Base Resume"
+          : active);
 
   const isResumeActive =
     active === "Resume" ||
     active === "Base Resume" ||
     active === "Experience & Projects" ||
-    active === "Coach Q&A";
+    active === "Coach Q&A" ||
+    effectiveSubActive === "Base Resume" ||
+    effectiveSubActive === "Coach Q&A" ||
+    effectiveSubActive === "Experience & Projects";
+
+  const resumeSubItems: NavSubItem[] = [
+    {
+      href: "/resume",
+      label: "Base Resume",
+      description: "Coach review & live PDF canvas",
+      icon: "▤",
+    },
+    ...(phase === "interview"
+      ? [
+          {
+            href: "/resume/interview",
+            label: "Coach Q&A",
+            description: "Clarification questions & evidence prep",
+            icon: "💬",
+          },
+        ]
+      : []),
+    {
+      href: "/evidence",
+      label: "Experience & Projects",
+      description: "Documented collections & folders",
+      icon: "🗂",
+    },
+  ];
 
   const effectiveDestinations: readonly NavItem[] = destinations.map(
     (destination) => {
-      if (destination.label === "Resume" && !isInterviewFinished) {
+      if (destination.label === "Resume") {
         return {
-          href: destination.href,
-          label: destination.label,
-          description: destination.description,
-          icon: destination.icon,
+          ...destination,
+          subItems: resumeSubItems,
         };
       }
       return destination;
@@ -136,14 +166,10 @@ export async function ApplicationShell({
                   <span className="nav-label">{destination.label}</span>
                 </Link>
 
-                {destination.subItems &&
-                isResumeActive &&
-                isInterviewFinished ? (
+                {destination.subItems && isResumeActive ? (
                   <div className="nav-sub-items" aria-label="Resume sections">
                     {destination.subItems.map((sub) => {
-                      const isSubActive =
-                        active === sub.label ||
-                        (active === "Resume" && sub.label === "Base Resume");
+                      const isSubActive = effectiveSubActive === sub.label;
                       return (
                         <Link
                           key={sub.href}
