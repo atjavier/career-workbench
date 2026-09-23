@@ -148,17 +148,16 @@ export function ResumeCoach({
           </div>
         </div>
         <div className="coach-intro-content">
-          <p className="coach-lead-text">
+          <span className="sr-only">
             Your local employer-side reviewer and Resume Coach independently
             reviews the generated resume against every documented Experience
             &amp; Project. It identifies strengths, missing proof, weak wording,
             and the highest-value revisions; it does not rebuild the resume on
             every visit.
-          </p>
-          <p className="resume-context">
-            The base resume is generated automatically during onboarding, then
-            only again after a material change. Job-specific tailoring will use
-            this same evidence base when you add a job listing.
+          </span>
+          <p className="coach-lead-text">
+            Evidence-backed critique, ATS readability audit, and strategic guidance
+            for your base resume.
           </p>
         </div>
 
@@ -172,7 +171,7 @@ export function ResumeCoach({
               <input type="hidden" name="draftId" value={initialDraft.id} />
               <div className="coach-form-group">
                 <label htmlFor="coach-focus" className="coach-form-label">
-                  What should the coach focus on?
+                  Review focus
                 </label>
                 <textarea
                   id="coach-focus"
@@ -186,11 +185,33 @@ export function ResumeCoach({
               <button
                 type="submit"
                 disabled={reviewPending}
-                className="coach-submit-button"
+                className="coach-submit-button coach-start-button affirmative-action"
               >
-                {reviewPending ? "Reviewing…" : "Ask Resume Coach"}
+                <span className="coach-start-button-label">
+                  {reviewPending ? "Reviewing resume…" : "Start Resume Coach"}
+                </span>
+                <span className="coach-start-button-arrow" aria-hidden="true">
+                  →
+                </span>
               </button>
             </form>
+
+            {hasPendingInterview ? (
+              <div className="coach-interview-callout">
+                <div className="coach-interview-callout-copy">
+                  <span className="coach-interview-badge">Interview Active</span>
+                  <p>
+                    Answer coach clarification questions to verify your achievements.
+                  </p>
+                </div>
+                <Link
+                  href="/resume/interview"
+                  className="coach-interview-callout-link secondary-action"
+                >
+                  Go to Coach Q&amp;A →
+                </Link>
+              </div>
+            ) : null}
 
             {reviewState.status !== "idle" ? (
               <div
@@ -264,14 +285,14 @@ export function ResumeCoach({
               className="preview-status-pill preview-status-stale"
               aria-label="Status: Updates available — Needs regeneration"
             >
-              ⚠️ Out of date — Changes detected
+              Out of date — Changes detected
             </span>
           ) : proposalVisible ? (
             <span
               className="preview-status-pill"
               aria-label="Status: Document compiled"
             >
-              ✓ Document compiled
+              Document compiled
             </span>
           ) : null}
         </div>
@@ -285,9 +306,6 @@ export function ResumeCoach({
                 aria-live="polite"
               >
                 <div className="update-alert-content">
-                  <span className="update-alert-icon" aria-hidden="true">
-                    🔄
-                  </span>
                   <div className="update-alert-copy">
                     <strong>Resume update available</strong>
                     <p>
@@ -438,14 +456,11 @@ export function ResumeCoach({
               <div className="loading-progress-shimmer" />
             </div>
             <span className="loading-privacy-tag">
-              🔒 Running privately on local AI engine
+              Running privately on local AI engine
             </span>
           </div>
         ) : (
           <div className="resume-preview-empty-card">
-            <div className="empty-card-icon" aria-hidden="true">
-              📄
-            </div>
             <p
               className={
                 generationMessage?.startsWith("Your resume")
