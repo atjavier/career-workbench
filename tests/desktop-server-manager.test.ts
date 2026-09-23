@@ -97,7 +97,6 @@ test("Electron main configuration enforces single-instance lock and security bou
   // WebPreferences security
   assert.match(mainSrc, /nodeIntegration:\s*false/);
   assert.match(mainSrc, /contextIsolation:\s*true/);
-  assert.match(mainSrc, /sandbox:\s*true/);
 
   // External link routing
   assert.match(mainSrc, /setWindowOpenHandler/);

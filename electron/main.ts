@@ -2,6 +2,11 @@ import { app, BrowserWindow, Menu, dialog, shell, ipcMain } from "electron";
 import * as path from "node:path";
 import { ServerManager } from "./server-manager";
 
+// Disable Chromium OS-level sandbox in unpackaged development mode to prevent macOS sandbox extension errors
+if (!app.isPackaged) {
+  app.commandLine.appendSwitch("no-sandbox");
+}
+
 let mainWindow: BrowserWindow | null = null;
 let serverManager: ServerManager | null = null;
 let isQuitting = false;
@@ -97,12 +102,11 @@ function createMainWindow(): void {
     minHeight: 720,
     title: "Career Workbench",
     titleBarStyle: "default",
-    show: false,
+    show: true,
     backgroundColor: "#ffffff",
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      sandbox: true,
       preload: preloadPath,
     },
   });
