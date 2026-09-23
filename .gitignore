@@ -1,5 +1,9 @@
 node_modules/
 .next/
+dist-electron/
+release/
+dist/
+.DS_Store
 *.tsbuildinfo
 .env*
 coverage/

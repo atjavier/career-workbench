@@ -2,6 +2,7 @@
   "name": "personal-job-discovery-workspace",
   "version": "0.1.0",
   "private": true,
+  "main": "dist-electron/main.js",
   "engines": {
     "node": ">=24.18.0"
   },
@@ -9,8 +10,12 @@
     "dev": "node scripts/run-local.mjs dev",
     "build": "node scripts/build-local.mjs",
     "start": "node scripts/run-local.mjs start",
+    "desktop:build": "node scripts/build-local.mjs && npx tsc -p electron/tsconfig.json",
+    "desktop:dev": "node scripts/run-desktop-dev.mjs",
+    "desktop:start": "npx tsc -p electron/tsconfig.json && electron dist-electron/main.js",
+    "desktop:pack": "npm run desktop:build && electron-builder --mac --dir",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && npx tsc -p electron/tsconfig.json",
     "test": "node --import tsx --test tests/*.test.ts"
   },
   "dependencies": {
@@ -24,6 +29,8 @@
     "@types/node": "24.10.1",
     "@types/react": "19.2.7",
     "@types/react-dom": "19.2.3",
+    "electron": "^44.4.5",
+    "electron-builder": "^26.15.3",
     "eslint": "9.39.2",
     "eslint-config-next": "16.3.0",
     "tsx": "4.21.0",
