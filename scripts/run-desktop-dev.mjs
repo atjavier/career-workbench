@@ -82,6 +82,13 @@ function cleanup() {
   if (nextChild && !nextChild.killed) {
     try {
       nextChild.kill("SIGTERM");
+      setTimeout(() => {
+        try {
+          if (!nextChild.killed) nextChild.kill("SIGKILL");
+        } catch {
+          // Ignore
+        }
+      }, 1000).unref();
     } catch {
       // Ignore
     }

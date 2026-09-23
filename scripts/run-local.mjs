@@ -13,4 +13,18 @@ const child = spawn(process.execPath, [nextBin, command, "--hostname", "127.0.0.
   env: { ...process.env, NEXT_TELEMETRY_DISABLED: "1" },
 });
 
+function forwardSignal(signal) {
+  if (!child.killed) {
+    try {
+      child.kill(signal);
+    } catch {
+      // Ignore if already terminated
+    }
+  }
+}
+
+process.on("SIGINT", () => forwardSignal("SIGINT"));
+process.on("SIGTERM", () => forwardSignal("SIGTERM"));
+process.on("SIGHUP", () => forwardSignal("SIGHUP"));
+
 child.on("exit", (code) => process.exit(code ?? 1));

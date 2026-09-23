@@ -73,6 +73,10 @@ function initApp(): void {
       isQuitting = true;
       event.preventDefault();
 
+      const forceExitTimer = setTimeout(() => {
+        app.exit(0);
+      }, 2000);
+
       if (serverManager) {
         try {
           await serverManager.stop();
@@ -81,14 +85,13 @@ function initApp(): void {
         }
       }
 
-      app.quit();
+      clearTimeout(forceExitTimer);
+      app.exit(0);
     }
   });
 
   app.on("window-all-closed", () => {
-    if (process.platform !== "darwin") {
-      app.quit();
-    }
+    app.quit();
   });
 }
 
