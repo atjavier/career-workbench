@@ -103,4 +103,30 @@ test("Electron main configuration enforces single-instance lock and security bou
   assert.match(mainSrc, /setWindowOpenHandler/);
   assert.match(mainSrc, /shell\.openExternal/);
   assert.match(mainSrc, /isLoopbackUrl/);
+
+  // Cross-platform window chrome & menu
+  assert.match(mainSrc, /isMac/);
+  assert.match(mainSrc, /titleBarStyle:\s*"hiddenInset"/);
 });
+
+test("electron-builder configuration targets macOS, Windows, and Linux", async () => {
+  const configRaw = await readFile(
+    new URL("../electron-builder.json", import.meta.url),
+    "utf8"
+  );
+  const config = JSON.parse(configRaw);
+
+  // macOS
+  assert.ok(config.mac);
+  assert.ok(Array.isArray(config.mac.target));
+
+  // Windows
+  assert.ok(config.win);
+  assert.ok(Array.isArray(config.win.target));
+  assert.ok(config.nsis);
+
+  // Linux
+  assert.ok(config.linux);
+  assert.ok(Array.isArray(config.linux.target));
+});
+

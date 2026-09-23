@@ -13,7 +13,11 @@
     "desktop:build": "node scripts/build-local.mjs && npx tsc -p electron/tsconfig.json",
     "desktop:dev": "node scripts/run-desktop-dev.mjs",
     "desktop:start": "npx tsc -p electron/tsconfig.json && electron dist-electron/main.js",
-    "desktop:pack": "npm run desktop:build && electron-builder --mac --dir",
+    "desktop:pack": "npm run desktop:build && electron-builder --dir",
+    "desktop:pack:mac": "npm run desktop:build && electron-builder --mac",
+    "desktop:pack:win": "npm run desktop:build && electron-builder --win",
+    "desktop:pack:linux": "npm run desktop:build && electron-builder --linux",
+    "desktop:pack:all": "npm run desktop:build && electron-builder --mac --win --linux",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit && npx tsc -p electron/tsconfig.json",
     "test": "node --import tsx --test tests/*.test.ts"
