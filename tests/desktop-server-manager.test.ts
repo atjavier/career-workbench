@@ -106,7 +106,7 @@ test("Electron main configuration enforces single-instance lock and security bou
 
   // Cross-platform window chrome & menu
   assert.match(mainSrc, /isMac/);
-  assert.match(mainSrc, /titleBarStyle:\s*"hiddenInset"/);
+  assert.match(mainSrc, /titleBarStyle:\s*"default"/);
 });
 
 test("electron-builder configuration targets macOS, Windows, and Linux", async () => {

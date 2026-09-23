@@ -89,7 +89,6 @@ function initApp(): void {
 
 function createMainWindow(): void {
   const preloadPath = path.join(__dirname, "preload.js");
-  const isMac = process.platform === "darwin";
 
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -97,7 +96,7 @@ function createMainWindow(): void {
     minWidth: 1024,
     minHeight: 720,
     title: "Career Workbench",
-    ...(isMac ? { titleBarStyle: "hiddenInset" } : {}),
+    titleBarStyle: "default",
     show: false,
     backgroundColor: "#ffffff",
     webPreferences: {
