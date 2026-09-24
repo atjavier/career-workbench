@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { InterviewView } from "@/domain/resume-generation/resume-clarification-interview";
 
@@ -211,7 +212,34 @@ export function ResumeInterview({
                       }`}
                       aria-hidden="true"
                     >
-                      {turn.role === "coach" ? "✦" : "👤"}
+                      {turn.role === "coach" ? (
+                        <svg
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          width="12"
+                          height="12"
+                        >
+                          <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
+                        </svg>
+                      ) : (
+                        <svg
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          width="12"
+                          height="12"
+                        >
+                          <circle cx="12" cy="8" r="4" />
+                          <path d="M20 21a8 8 0 0 0-16 0" />
+                        </svg>
+                      )}
                     </div>
                     <div className="message-bubble-wrapper">
                       <div className="message-header-row">
@@ -229,7 +257,19 @@ export function ResumeInterview({
                       className="message-avatar candidate-avatar"
                       aria-hidden="true"
                     >
-                      👤
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        width="12"
+                        height="12"
+                      >
+                        <circle cx="12" cy="8" r="4" />
+                        <path d="M20 21a8 8 0 0 0-16 0" />
+                      </svg>
                     </div>
                     <div className="message-bubble-wrapper">
                       <div className="message-header-row">
@@ -248,7 +288,18 @@ export function ResumeInterview({
                       className="message-avatar coach-avatar"
                       aria-hidden="true"
                     >
-                      ✦
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        width="12"
+                        height="12"
+                      >
+                        <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
+                      </svg>
                     </div>
                     <div className="message-bubble-wrapper">
                       <div className="message-header-row">
@@ -377,12 +428,23 @@ export function ResumeInterview({
               </>
             ) : (
               <div className="coach-chat-complete">
-                <div className="complete-icon-badge">✓</div>
+                <div className="complete-icon-badge" aria-hidden="true">
+                  <svg viewBox="0 0 20 20" fill="currentColor" width="22" height="22">
+                    <path
+                      fillRule="evenodd"
+                      d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                </div>
                 <h3>All Evidence Clarified</h3>
                 <p>
                   All current questions are complete. Your evidence is ready for
                   the next resume step.
                 </p>
+                <Link href="/resume" className="coach-complete-cta affirmative-action">
+                  Go to Base Resume →
+                </Link>
               </div>
             )}
           </div>
@@ -425,7 +487,13 @@ export function ResumeInterview({
             {interview.completed.map((task) => (
               <li key={task.id} className="coach-goal coach-goal-complete">
                 <span className="goal-check-icon" aria-hidden="true">
-                  ✓
+                  <svg viewBox="0 0 16 16" fill="currentColor" width="10" height="10">
+                    <path
+                      fillRule="evenodd"
+                      d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 0 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
                 </span>
                 <div className="goal-item-body">
                   <span className="goal-item-badge">
@@ -438,7 +506,7 @@ export function ResumeInterview({
             {current ? (
               <li className="coach-goal coach-goal-current" aria-current="step">
                 <span className="goal-current-icon" aria-hidden="true">
-                  •
+                  <span className="goal-pulse-dot" />
                 </span>
                 <div className="goal-item-body">
                   <span className="goal-item-badge active-badge">

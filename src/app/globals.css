@@ -4422,7 +4422,8 @@ body {
 
 .coach-goals-sidebar {
   align-self: stretch;
-  background: #e9f0e9;
+  background: var(--surface-subtle);
+  border-left: 1px solid var(--border);
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
@@ -4453,8 +4454,8 @@ body {
   margin: 0.3rem 0 0;
 }
 .insights-counter {
-  background: #fbfdfb;
-  border: 1px solid #d4e0d7;
+  background: var(--surface-base);
+  border: 1px solid var(--border);
   border-radius: 999px;
   color: var(--accent);
   flex-shrink: 0;
@@ -4463,8 +4464,8 @@ body {
   padding: 0.3rem 0.75rem;
 }
 .coach-progress-bar-track {
-  background: #dce7dc;
-  border: 1px solid #c8d8cb;
+  background: rgba(0, 0, 0, 0.08);
+  border: 1px solid var(--border);
   border-radius: 999px;
   height: 7px;
   margin: 0.1rem 0;
@@ -4472,14 +4473,14 @@ body {
   width: 100%;
 }
 .coach-progress-bar-fill {
-  background: linear-gradient(90deg, var(--color-olive-soft), var(--accent));
+  background: linear-gradient(90deg, var(--color-moss-med), var(--accent));
   border-radius: 999px;
   height: 100%;
   transition: width 0.4s ease;
 }
 .coach-insights-intro {
-  background: #fbfdfb;
-  border: 1px solid #d4e0d7;
+  background: var(--surface-base);
+  border: 1px solid var(--border);
   border-radius: 10px;
   color: var(--muted-ink);
   font-size: 0.84rem;
@@ -4498,8 +4499,8 @@ body {
 }
 .coach-goal {
   align-items: flex-start;
-  background: #fbfdfb;
-  border: 1px solid #d4e0d7;
+  background: var(--surface-base);
+  border: 1px solid var(--border);
   border-radius: 8px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
   display: grid;
@@ -4523,8 +4524,6 @@ body {
   border-radius: 50%;
   color: var(--accent);
   display: flex;
-  font-size: 0.65rem;
-  font-weight: 800;
   height: 1.25rem;
   justify-content: center;
   margin-top: 0.1rem;
@@ -4536,15 +4535,31 @@ body {
   border-radius: 50%;
   color: #ffffff;
   display: flex;
-  font-size: 0.7rem;
-  font-weight: 800;
   height: 1.25rem;
   justify-content: center;
   margin-top: 0.1rem;
   width: 1.25rem;
 }
-.coach-goal-current {
+.goal-pulse-dot {
   background: #ffffff;
+  border-radius: 50%;
+  display: inline-block;
+  height: 5px;
+  width: 5px;
+  animation: pulseGoalDot 1.6s ease-in-out infinite;
+}
+@keyframes pulseGoalDot {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.4;
+    transform: scale(0.65);
+  }
+}
+.coach-goal-current {
+  background: var(--surface-base);
   border: 1.5px solid var(--accent);
   box-shadow: 0 3px 10px rgba(77, 122, 54, 0.14);
 }
@@ -4750,21 +4765,27 @@ body {
   margin-top: auto;
   padding: 0.75rem 1.25rem 0.45rem;
 }
+.coach-card .coach-composer {
+  background: var(--surface-base);
+  border-top: 1px solid var(--border);
+  margin-top: auto;
+  padding: 0.75rem 1.25rem 0.45rem;
+}
 .coach-input-row {
   align-items: center;
-  background: var(--canvas);
+  background: var(--surface-base);
   border: 1.5px solid var(--border);
   border-radius: 0.85rem;
   display: flex;
   gap: 0.5rem;
   margin-top: 0;
   min-height: 2.85rem;
-  padding: 0.25rem 0.35rem 0.25rem 0.85rem;
+  padding: 0.35rem 0.45rem 0.35rem 0.85rem;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 .coach-input-row:focus-within {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(77, 122, 54, 0.18);
+  border-color: var(--primary-olive);
+  box-shadow: 0 0 0 3px rgba(69, 109, 46, 0.18);
 }
 .coach-input-row textarea {
   align-self: center;
@@ -4777,13 +4798,13 @@ body {
   font-size: 0.88rem;
   line-height: 1.45;
   margin: 0;
-  min-height: 1.45rem;
-  height: 1.45rem;
+  min-height: 1.6rem;
+  max-height: 8rem;
   outline: none !important;
   outline-offset: 0 !important;
   box-shadow: none !important;
-  padding: 0;
-  resize: none;
+  padding: 0.15rem 0;
+  resize: vertical;
 }
 .coach-input-row textarea:focus,
 .coach-input-row textarea:focus-visible {
@@ -4792,29 +4813,80 @@ body {
   box-shadow: none !important;
 }
 .coach-send-button {
-  align-self: center;
+  align-self: flex-end;
   background: var(--primary-olive);
+  border: none;
   border-radius: 0.65rem;
   box-shadow: 0 2px 8px rgba(69, 109, 46, 0.2);
+  color: #ffffff;
+  cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   font-size: 0.82rem;
+  font-weight: 600;
   gap: 0.35rem;
   height: 2.35rem;
   min-height: 2.35rem;
-  padding-inline: 0.9rem;
+  padding-inline: 0.95rem;
   transition: all 0.15s ease;
 }
 .coach-send-button:hover:not(:disabled) {
   background: var(--color-forest-deep);
   transform: translateY(-1px);
 }
+.coach-send-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
 .coach-composer-note {
   color: var(--muted-ink);
   font-size: 0.65rem;
   margin: 0.2rem 0 0;
   text-align: center;
+}
+
+.complete-icon-badge {
+  align-items: center;
+  background: rgba(69, 109, 46, 0.12);
+  border: 1px solid rgba(69, 109, 46, 0.28);
+  border-radius: 50%;
+  color: var(--primary-olive);
+  display: inline-flex;
+  height: 3.5rem;
+  justify-content: center;
+  margin-bottom: 0.75rem;
+  width: 3.5rem;
+}
+.coach-chat-complete {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  margin: auto;
+  max-width: 24rem;
+  padding: 3rem 1.5rem;
+  text-align: center;
+}
+.coach-chat-complete h3 {
+  color: var(--ink);
+  font-size: 1.25rem;
+  font-weight: 700;
+  margin: 0 0 0.5rem;
+}
+.coach-chat-complete p {
+  color: var(--muted-ink);
+  font-size: 0.88rem;
+  line-height: 1.5;
+  margin: 0 0 1.25rem;
+}
+.coach-complete-cta {
+  border-radius: 0.55rem;
+  display: inline-flex;
+  font-size: 0.9rem;
+  font-weight: 600;
+  padding: 0.65rem 1.35rem;
+  text-decoration: none;
 }
 
 
