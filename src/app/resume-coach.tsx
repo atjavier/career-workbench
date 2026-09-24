@@ -138,7 +138,7 @@ export function ResumeCoach({
   return (
     <div className="resume-coach-preview-layout">
       <section
-        className="resume-coach-unavailable"
+        className="resume-coach-unavailable resume-coach-column"
         aria-labelledby="resume-coach-heading"
       >
         <div className="resume-pane-head">
@@ -199,7 +199,10 @@ export function ResumeCoach({
             {hasPendingInterview ? (
               <div className="coach-interview-callout">
                 <div className="coach-interview-callout-copy">
-                  <span className="coach-interview-badge">Interview Active</span>
+                  <span className="coach-interview-badge">
+                    <span className="coach-badge-dot" aria-hidden="true" />
+                    Interview Active
+                  </span>
                   <p>
                     Answer coach clarification questions to verify your achievements.
                   </p>
@@ -306,6 +309,20 @@ export function ResumeCoach({
                 aria-live="polite"
               >
                 <div className="update-alert-content">
+                  <div className="update-alert-icon" aria-hidden="true">
+                    <svg
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                      width="18"
+                      height="18"
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
+                  </div>
                   <div className="update-alert-copy">
                     <strong>Resume update available</strong>
                     <p>
@@ -365,48 +382,50 @@ export function ResumeCoach({
                   Keep current
                 </button>
               </div>
-              {effectiveTexRevisionId ? (
-                <div className="tex-draft-ready-links">
-                  <Link
-                    href={`/api/tex-drafts/${effectiveTexRevisionId}/pdf`}
-                    target="_blank"
-                    className="affirmative-action"
-                  >
-                    Review PDF
-                  </Link>
-                  <a
-                    href={`/api/tex-drafts/${effectiveTexRevisionId}/tex`}
-                    className="affirmative-action"
-                  >
-                    Download TeX
-                  </a>
-                </div>
-              ) : null}
-              <form
-                action={revisionAction}
-                aria-busy={revisionPending}
-                className="revision-request-form"
-              >
-                <input
-                  type="hidden"
-                  name="generationCommand"
-                  value="revision"
-                />
-                <input
-                  type="hidden"
-                  name="workspaceId"
-                  value={workspaceId ?? ""}
-                />
-                <button
-                  type="submit"
-                  disabled={revisionPending}
-                  className="revision-submit-button"
+              <div className="material-draft-controls">
+                <form
+                  action={revisionAction}
+                  aria-busy={revisionPending}
+                  className="revision-request-form"
                 >
-                  {revisionPending
-                    ? "Regenerating resume…"
-                    : "Regenerate resume"}
-                </button>
-              </form>
+                  <input
+                    type="hidden"
+                    name="generationCommand"
+                    value="revision"
+                  />
+                  <input
+                    type="hidden"
+                    name="workspaceId"
+                    value={workspaceId ?? ""}
+                  />
+                  <button
+                    type="submit"
+                    disabled={revisionPending}
+                    className={`revision-submit-button ${generationNeeded ? "affirmative-action" : "secondary-action"}`}
+                  >
+                    {revisionPending
+                      ? "Regenerating resume…"
+                      : "Regenerate resume"}
+                  </button>
+                </form>
+                {effectiveTexRevisionId ? (
+                  <div className="tex-draft-ready-links">
+                    <Link
+                      href={`/api/tex-drafts/${effectiveTexRevisionId}/pdf`}
+                      target="_blank"
+                      className="secondary-action preview-utility-btn"
+                    >
+                      Review PDF ↗
+                    </Link>
+                    <a
+                      href={`/api/tex-drafts/${effectiveTexRevisionId}/tex`}
+                      className="secondary-action preview-utility-btn"
+                    >
+                      Download TeX ↓
+                    </a>
+                  </div>
+                ) : null}
+              </div>
               {revisionState.status !== "idle" ? (
                 <p
                   role="status"

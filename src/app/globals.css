@@ -3015,23 +3015,49 @@ button.card-delete-icon-btn:hover:not(:disabled) {
   padding: 24px;
 }
 .resume-generated-pdf-frame {
-  background: #fbfdfb;
-  border: 1px solid #d4e0d7;
-  border-radius: 10px;
-  display: grid;
-  gap: 10px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
   min-width: 0;
   overflow: hidden;
-  padding: 10px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+.resume-pdf-toolbar {
+  align-items: center;
+  background: var(--surface-subtle);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: 0.75rem;
+  justify-content: space-between;
+  padding: 0.6rem 1rem;
+}
+.resume-pdf-title-block {
+  align-items: center;
+  display: flex;
+  gap: 0.5rem;
+}
+.pdf-doc-icon {
+  color: var(--primary-olive);
+  flex-shrink: 0;
+}
+.pdf-doc-name {
+  color: var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 .resume-pdf-viewport-container {
+  background: #3c4043;
+  min-height: clamp(600px, 70vh, 860px);
   position: relative;
-  min-height: 24rem;
   width: 100%;
 }
 .resume-pdf-loading-overlay {
   align-items: center;
-  background: rgba(251, 253, 251, 0.92);
+  background: rgba(251, 253, 251, 0.94);
   backdrop-filter: blur(4px);
   display: flex;
   flex-direction: column;
@@ -3051,13 +3077,13 @@ button.card-delete-icon-btn:hover:not(:disabled) {
 }
 .pdf-loading-text {
   color: var(--muted-ink);
-  font-size: 0.8rem;
+  font-size: 0.82rem;
   font-weight: 600;
 }
 .resume-generated-pdf-viewer {
   border: 0;
   display: block;
-  height: 600px;
+  height: clamp(600px, 70vh, 860px);
   min-height: 24rem;
   width: 100%;
   transition: opacity 0.25s ease;
@@ -3072,15 +3098,25 @@ button.card-delete-icon-btn:hover:not(:disabled) {
   align-items: center;
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
-  justify-content: space-between;
+  gap: 0.65rem;
 }
 .resume-generated-pdf-fallback,
 .resume-generated-tex-link {
-  color: var(--accent);
-  font-size: 0.875rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-base);
+  color: var(--primary-olive);
+  font-size: 0.78rem;
   font-weight: 600;
-  text-decoration: underline;
+  padding: 0.3rem 0.65rem;
+  text-decoration: none;
+  transition: all 0.15s ease;
+}
+.resume-generated-pdf-fallback:hover,
+.resume-generated-tex-link:hover {
+  background: var(--primary-olive);
+  border-color: var(--primary-olive);
+  color: #ffffff;
 }
 
 /* Loading & Empty State Cards in Preview Column */
@@ -5270,29 +5306,30 @@ html.sidebar-collapsed .application-shell .navigation-icon svg {
   color: var(--ink);
 }
 
-/* Resume Review export: a narrow coaching column alongside the paper preview. */
+/* Resume Review export: a balanced coaching column alongside the paper preview. */
 .resume-coach-preview-layout {
   background: var(--canvas);
   border-color: var(--border);
   border-radius: 0.75rem;
-  grid-template-columns: minmax(17rem, 0.7fr) minmax(24rem, 1.3fr);
+  grid-template-columns: minmax(18rem, 0.82fr) minmax(22rem, 1.18fr);
 }
-.resume-coach-unavailable {
+.resume-coach-unavailable,
+.resume-coach-column {
   background: var(--surface-base);
   border-right: 1px solid var(--border);
 }
-.resume-coach-unavailable .resume-pane-head {
+.resume-coach-unavailable .resume-pane-head,
+.resume-coach-column .resume-pane-head {
   border-bottom: 1px solid var(--border);
   margin-bottom: 1rem;
   padding-bottom: 1rem;
 }
-.resume-coach-request,
-.material-draft-actions {
-  background: var(--surface-base);
+.resume-coach-request {
+  background: var(--surface-subtle);
   border: 1px solid var(--border);
   border-radius: 0.65rem;
   color: var(--ink);
-  padding: 0.9rem;
+  padding: 1rem 1.15rem;
 }
 .coach-form-group {
   display: flex;
@@ -5307,7 +5344,7 @@ html.sidebar-collapsed .application-shell .navigation-icon svg {
   letter-spacing: -0.01em;
 }
 .coach-textarea {
-  background: var(--canvas);
+  background: var(--surface-base);
   border: 1px solid var(--border);
   border-radius: 0.5rem;
   color: var(--ink);
@@ -5386,11 +5423,32 @@ html.sidebar-collapsed .application-shell .navigation-icon svg {
   gap: 0.2rem;
 }
 .coach-interview-badge {
+  align-items: center;
   color: var(--primary-olive);
+  display: inline-flex;
   font-size: 0.75rem;
   font-weight: 700;
   letter-spacing: 0.02em;
   text-transform: uppercase;
+}
+.coach-badge-dot {
+  background: #22c55e;
+  border-radius: 50%;
+  display: inline-block;
+  height: 6px;
+  margin-right: 0.4rem;
+  width: 6px;
+  animation: pulseBadgeDot 2s ease-in-out infinite;
+}
+@keyframes pulseBadgeDot {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scale(0.85);
+  }
 }
 .coach-interview-callout-copy p {
   color: var(--muted-ink);
@@ -5406,15 +5464,165 @@ html.sidebar-collapsed .application-shell .navigation-icon svg {
   text-decoration: none;
   white-space: nowrap;
 }
+
+/* Coach review result card styles */
+.review-results-card {
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  margin-top: 1.25rem;
+  padding: 1.15rem 1.25rem;
+}
+.review-summary-headline {
+  color: var(--ink);
+  font-size: 0.92rem;
+  font-weight: 600;
+  line-height: 1.45;
+  margin: 0 0 1rem;
+}
+.review-detailed-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.review-group-title {
+  color: var(--ink);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  margin: 0 0 0.5rem;
+  text-transform: uppercase;
+}
+.review-ratings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.review-rating-item {
+  align-items: baseline;
+  display: flex;
+  font-size: 0.84rem;
+  gap: 0.65rem;
+  line-height: 1.45;
+}
+.rating-pill {
+  background: rgba(69, 109, 46, 0.12);
+  border: 1px solid rgba(69, 109, 46, 0.28);
+  border-radius: 999px;
+  color: var(--primary-olive);
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  font-weight: 800;
+  padding: 0.15rem 0.5rem;
+}
+.review-concerns-block {
+  background: rgba(217, 119, 6, 0.06);
+  border: 1px solid rgba(217, 119, 6, 0.22);
+  border-left: 3px solid #d97706;
+  border-radius: 0.55rem;
+  padding: 0.85rem 1rem;
+}
+.review-recommendations-block {
+  background: rgba(69, 109, 46, 0.06);
+  border: 1px solid rgba(69, 109, 46, 0.22);
+  border-left: 3px solid var(--primary-olive);
+  border-radius: 0.55rem;
+  padding: 0.85rem 1rem;
+}
+.review-bullet-list {
+  color: var(--ink);
+  font-size: 0.84rem;
+  line-height: 1.5;
+  margin: 0;
+  padding-left: 1.25rem;
+}
+.review-bullet-list li {
+  margin-bottom: 0.35rem;
+}
+.review-bullet-list li:last-child {
+  margin-bottom: 0;
+}
+
+/* Material draft action footer */
+.material-draft-actions {
+  background: var(--surface-base);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  color: var(--ink);
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  margin-top: 1rem;
+  padding: 1.15rem 1.25rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+.draft-origin-note {
+  color: var(--muted-ink);
+  font-size: 0.84rem;
+  line-height: 1.45;
+  margin: 0;
+}
+.material-draft-controls {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+.material-draft-controls form {
+  margin: 0;
+}
+.revision-submit-button {
+  align-items: center;
+  border-radius: 0.55rem;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 0.88rem;
+  font-weight: 600;
+  gap: 0.45rem;
+  justify-content: center;
+  min-height: 2.35rem;
+  padding: 0.55rem 1.15rem;
+  transition: all 0.15s ease;
+}
+.preview-utility-btn {
+  align-items: center;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  border-radius: 0.55rem;
+  color: var(--ink);
+  display: inline-flex;
+  font-size: 0.84rem;
+  font-weight: 600;
+  gap: 0.35rem;
+  justify-content: center;
+  min-height: 2.35rem;
+  padding: 0.5rem 0.95rem;
+  text-decoration: none;
+  transition: all 0.15s ease;
+}
+.preview-utility-btn:hover {
+  background: var(--border);
+  color: var(--ink);
+}
+.tex-draft-ready-links {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
 .resume-generated-preview {
   background: var(--canvas);
   padding: clamp(1rem, 3vw, 2rem);
 }
 .resume-generated-pdf-frame {
   background: var(--surface-base);
-  border-color: var(--border);
-  border-radius: 0.35rem;
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.6);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
 }
 @media (max-width: 64rem) {
   .application-shell,
