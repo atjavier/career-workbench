@@ -32,7 +32,6 @@ export async function EvidenceLibraryWorkspace() {
     <div className="workspace-shell resume-workspace experience-projects-workspace">
       <header className="resume-page-head">
         <div className="resume-head-copy">
-          <p className="eyebrow">Resume</p>
           <h1>Experience &amp; Projects</h1>
           <p>
             Keep source folders separate from the reviewable evidence behind

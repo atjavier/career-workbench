@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   startTransition,
   useActionState,
@@ -160,6 +161,23 @@ function renderFormattedMarkdown(text: string): ReactNode {
   return elements;
 }
 
+function sanitizeFilePathsAndCode(text: string): string {
+  return text
+    .replace(/\s*\(`?(?:GET|POST|PUT|PATCH|DELETE)\s+[^)]+`?\)/gi, "")
+    .replace(/`?(?:GET|POST|PUT|PATCH|DELETE)\s+\/[a-zA-Z0-9_./<-]+`?/gi, "")
+    .replace(/(?:under|in|from|at|into)\s+`?[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_./-]+`?(?:\s+(?:with|and)\s+(?:API\s+routes|routes|entry points|files)\s+(?:in|under)\s+`?[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_./-]+`?)?/gi, "")
+    .replace(/entry points are [^;.]+[;.]?/gi, "")
+    .replace(/\s*\(`?[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_./-]+`?\)/gi, "")
+    .replace(/`[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_./-]+`/g, "")
+    .replace(/\b(?:src|app|api|components|instance|tests?|lib|utils|pages)\/[a-zA-Z0-9_./-]+\b/gi, "")
+    .replace(/\b[a-zA-Z0-9_-]+\.(?:db|sqlite|md|tex|json|ts|tsx|js|mjs|py|go|html|css)\b/gi, "")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s+([,.;:])/g, "$1")
+    .replace(/;\s*;/g, ";")
+    .trim();
+}
+
 function cleanCardDescription(text: string): string {
   if (!text) return "";
   let cleaned = text.trim();
@@ -173,7 +191,7 @@ function cleanCardDescription(text: string): string {
     "",
   );
   cleaned = cleaned.replace(/^[:\s-]+/, "");
-  return cleaned.trim();
+  return sanitizeFilePathsAndCode(cleaned.trim());
 }
 
 function getCardDescription(item: ExperienceProjectCollection): string {
@@ -276,7 +294,15 @@ function getCardTechStack(item: ExperienceProjectCollection): string[] {
       if (line.startsWith("|") && !line.includes("---") && !line.includes("Category")) {
         const parts = line.split("|").map((p) => p.trim()).filter(Boolean);
         if (parts.length >= 2) {
+          const categoryCol = parts[0].toLowerCase();
           const rawDetail = parts[1];
+
+          // If container orchestration or an image reference, map to Docker and skip container name
+          if (categoryCol.includes("container") || /image:/i.test(rawDetail)) {
+            techSet.add("Docker");
+            continue;
+          }
+
           const cleanName = rawDetail
             .replace(/^`([^`]+)`.*$/, "$1")
             .replace(/^[a-z]+:\s*/i, "")
@@ -287,6 +313,8 @@ function getCardTechStack(item: ExperienceProjectCollection): string[] {
             cleanName.length <= 25 &&
             !cleanName.includes("/") &&
             !cleanName.includes(" ") &&
+            !cleanName.includes(":") &&
+            !/latest|nightly/i.test(cleanName) &&
             !/^(@types|eslint)/i.test(cleanName) &&
             !/^(react-dom|next|pdfjs-dist|tsx|ts-node|vitest|jest|nodemon)$/i.test(cleanName)
           ) {
@@ -304,6 +332,25 @@ function getCardTechStack(item: ExperienceProjectCollection): string[] {
   return Array.from(techSet).slice(0, 8);
 }
 
+function getBulletCount(item: ExperienceProjectCollection): number {
+  const docs = item.documents ?? [];
+  const bulletDoc = docs.find((d) => d.name === "resume-bullet-candidates.md");
+  if (!bulletDoc) return 0;
+  const blocks = bulletDoc.text.split(/###\s+(B-\d+)/i);
+  if (blocks.length > 1) {
+    let count = 0;
+    for (let i = 1; i < blocks.length; i += 2) {
+      const content = blocks[i + 1] ?? "";
+      if (/-\s*(?:Candidate:)?\s*\S/i.test(content)) {
+        count++;
+      }
+    }
+    return count;
+  }
+  const lines = bulletDoc.text.split(/\r?\n/);
+  return lines.filter((line) => /^[-*]\s*(?:Candidate:)?\s*\S/i.test(line)).length;
+}
+
 export function EvidenceLibrary({
   collection,
   error,
@@ -311,6 +358,7 @@ export function EvidenceLibrary({
   collection: ExperienceProjectCollection[];
   error?: { summary: string; safeNextAction: string };
 }) {
+  const router = useRouter();
   const [category, setCategory] = useState<"all" | "project" | "experience">("all");
   const [docCategorySelection, setDocCategorySelection] = useState<"project" | "experience">("project");
   const [open, setOpen] = useState(false);
@@ -664,6 +712,8 @@ export function EvidenceLibrary({
               const role = getExperienceRole(item);
               const formattedDescription = getCardDescription(item);
               const techStack = getCardTechStack(item);
+              const bulletCount = getBulletCount(item);
+              const detailsUrl = `/evidence/details?category=${item.category}&name=${encodeURIComponent(item.name)}`;
 
               return (
                 <li
@@ -671,12 +721,12 @@ export function EvidenceLibrary({
                   className={`experience-project-row experience-project-card ${item.category === "experience" ? "is-experience" : "is-project"}`}
                   tabIndex={0}
                   role="button"
-                  aria-label={`View documentation for ${item.name}`}
-                  onClick={() => setExpanded(key)}
+                  aria-label={`View details for ${item.name}`}
+                  onClick={() => router.push(detailsUrl)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {
                       e.preventDefault();
-                      setExpanded(key);
+                      router.push(detailsUrl);
                     }
                   }}
                 >
@@ -718,14 +768,24 @@ export function EvidenceLibrary({
                           )}
                         </div>
                         <div className="experience-card-title-group">
-                          <h3 className="experience-card-title" title={item.name}>
-                            {item.name}
-                          </h3>
+                          <Link
+                            href={detailsUrl}
+                            className="experience-card-title-link"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <h3 className="experience-card-title" title={item.name}>
+                              {item.name}
+                            </h3>
+                          </Link>
                           {role ? (
                             <span className="experience-card-role-subtitle">
                               {role}
                             </span>
-                          ) : null}
+                          ) : (
+                            <span className="experience-card-category-stamp">
+                              {item.category === "project" ? "Project" : "Work Experience"}
+                            </span>
+                          )}
                         </div>
                       </div>
                       <button
@@ -756,45 +816,66 @@ export function EvidenceLibrary({
                       </button>
                     </div>
 
-                    {/* Tech stack placed immediately below title and role */}
+                    {/* Compact Tech stack placed beneath title & role */}
                     {techStack.length > 0 ? (
                       <div
                         className="experience-card-tech-stack"
                         aria-label="Technologies used"
                       >
-                        {techStack.slice(0, 5).map((tech) => (
+                        {techStack.slice(0, 4).map((tech) => (
                           <span key={tech} className="tech-pill">
                             {tech}
                           </span>
                         ))}
-                        {techStack.length > 5 ? (
+                        {techStack.length > 4 ? (
                           <span className="tech-pill-more">
-                            +{techStack.length - 5}
+                            +{techStack.length - 4}
                           </span>
                         ) : null}
                       </div>
                     ) : null}
 
+                    {/* Narrative overview summary */}
                     <p className="experience-card-summary">
                       {formatInlineText(formattedDescription)}
                     </p>
                   </div>
 
                   <div className="experience-card-bottom">
+                    <div className="experience-card-meta-left">
+                      {bulletCount > 0 ? (
+                        <span
+                          className="card-bullet-yield-pill"
+                          title={`${bulletCount} candidate bullets extracted`}
+                        >
+                          <span className="yield-dot" aria-hidden="true">
+                            •
+                          </span>
+                          <span>
+                            {bulletCount} {bulletCount === 1 ? "bullet" : "bullets"}
+                          </span>
+                        </span>
+                      ) : (
+                        <span className="card-bullet-yield-pill is-empty">
+                          <span>Ready to review</span>
+                        </span>
+                      )}
+                    </div>
                     <div className="experience-card-actions">
-                      <button
-                        type="button"
+                      <Link
+                        href={detailsUrl}
                         className="neutral-action view-details-button"
-                        aria-expanded={expanded === key}
+                        aria-expanded={false}
                         aria-controls={`${key}-details`}
                         onClick={(e) => {
                           e.stopPropagation();
-                          setExpanded(key);
                         }}
                       >
-                        View documentation
-                        <span className="btn-arrow" aria-hidden="true">→</span>
-                      </button>
+                        <span>View details</span>
+                        <span className="btn-arrow" aria-hidden="true">
+                          →
+                        </span>
+                      </Link>
                     </div>
                   </div>
                 </li>
@@ -891,150 +972,26 @@ export function EvidenceLibrary({
           </div>
         ) : null}
 
-        {/* Global Documentation Viewer Modal Dialog */}
-        {viewingItem ? (() => {
-          const vKey = `${viewingItem.category}-${viewingItem.name}`;
-          const vRole = getExperienceRole(viewingItem);
-          const generatorDocs = (viewingItem.documents ?? [])
-            .filter((doc) => doc.name in GENERATOR_FILE_ORDER)
-            .sort(
-              (a, b) =>
-                (GENERATOR_FILE_ORDER[a.name] ?? 99) -
-                (GENERATOR_FILE_ORDER[b.name] ?? 99),
-            );
-          const defaultTab =
-            generatorDocs[0]?.name ?? "resume-bullet-candidates.md";
-          const currentTab = activeDocTab[vKey] ?? defaultTab;
-          const selectedDoc =
-            generatorDocs.find((d) => d.name === currentTab) ??
-            generatorDocs[0];
-
-          return (
-            <div
-              className="modal-backdrop doc-modal-backdrop"
-              role="presentation"
-              onClick={() => setExpanded(undefined)}
-            >
-              <div
-                id={`${vKey}-details`}
-                className="modal-card doc-modal-dialog"
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby={`doc-modal-heading-${vKey}`}
-                onClick={(e) => e.stopPropagation()}
+        {/* Preserved citation removal boundary */}
+        <div className="sr-only" aria-hidden="true">
+          {collection.flatMap((item) => item.evidence).map((evidence) => (
+            <form key={evidence.reviewHandle} action={findingAction}>
+              <input
+                type="hidden"
+                name="reviewHandle"
+                value={evidence.reviewHandle}
+              />
+              <button
+                type="submit"
+                name="evidenceCommand"
+                value="remove"
+                disabled={findingPending}
               >
-                <div className="modal-header">
-                  <div className="modal-header-titles">
-                    <h3 id={`doc-modal-heading-${vKey}`}>
-                      {viewingItem.name}
-                    </h3>
-                    {vRole ? (
-                      <span className="experience-role-badge">
-                        <span className="role-icon" aria-hidden="true">
-                          💼
-                        </span>
-                        {vRole}
-                      </span>
-                    ) : null}
-                  </div>
-                  <button
-                    type="button"
-                    className="modal-close-button"
-                    onClick={() => setExpanded(undefined)}
-                    aria-label="Close dialog"
-                  >
-                    ✕
-                  </button>
-                </div>
-
-                <div className="doc-modal-body">
-                  {/* File Tabs Switcher - Strictly Generator Files */}
-                  <div
-                    className="doc-switcher-tabs"
-                    role="tablist"
-                    aria-label="Resume generator documents"
-                  >
-                    {generatorDocs.map((doc) => {
-                      const isSelected =
-                        (currentTab ?? generatorDocs[0]?.name) === doc.name;
-                      return (
-                        <button
-                          key={doc.name}
-                          type="button"
-                          role="tab"
-                          aria-selected={isSelected}
-                          className={`doc-tab-button ${isSelected ? "is-active" : ""}`}
-                          onClick={() =>
-                            setActiveDocTab((prev) => ({
-                              ...prev,
-                              [vKey]: doc.name,
-                            }))
-                          }
-                        >
-                          {friendlyDocName(doc.name)}
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  {/* Document Viewer Pane */}
-                  <div className="doc-viewer-panel">
-                    {selectedDoc ? (
-                      <div className="markdown-doc-content">
-                        <div className="markdown-doc-header">
-                          <span className="doc-filename-badge">
-                            <code>{selectedDoc.name}</code>
-                          </span>
-                          <span className="doc-character-count">
-                            {selectedDoc.text.length.toLocaleString()} characters
-                          </span>
-                        </div>
-                        <div className="markdown-doc-body">
-                          {renderFormattedMarkdown(selectedDoc.text)}
-                        </div>
-                      </div>
-                    ) : (
-                      <p className="doc-empty-hint">
-                        Select a document above to inspect your bullet proposals.
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                {/* Preserved citation removal boundary */}
-                <div className="sr-only" aria-hidden="true">
-                  {viewingItem.evidence.map((evidence) => (
-                    <form key={evidence.reviewHandle} action={findingAction}>
-                      <input
-                        type="hidden"
-                        name="reviewHandle"
-                        value={evidence.reviewHandle}
-                      />
-                      <button
-                        type="submit"
-                        name="evidenceCommand"
-                        value="remove"
-                        disabled={findingPending}
-                      >
-                        Remove citation
-                      </button>
-                    </form>
-                  ))}
-                </div>
-
-                <div className="modal-actions">
-                  <button
-                    type="button"
-                    className="neutral-action"
-                    onClick={() => setExpanded(undefined)}
-                  >
-                    Close
-                  </button>
-                </div>
-              </div>
-            </div>
-          );
-        })() : null}
+                Remove citation
+              </button>
+            </form>
+          ))}
+        </div>
 
         {/* Document Source Folder Modal Dialog */}
         {open ? (
