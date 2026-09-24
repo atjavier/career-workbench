@@ -1,69 +1,209 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { PDFDocumentProxy } from "pdfjs-dist/legacy/build/pdf.mjs";
 
-export function ResumePdfPreview({ draftId }: { draftId: string }) {
-  const [iframeLoading, setIframeLoading] = useState(true);
-  const url = `/api/resume-drafts/${encodeURIComponent(draftId)}/pdf`;
-  const texUrl = `/api/resume-drafts/${encodeURIComponent(draftId)}/tex`;
+interface ResumePdfPreviewProps {
+  draftId: string;
+  scale?: number;
+}
+
+interface PdfPageCanvasProps {
+  pageNum: number;
+  pdfDoc: PDFDocumentProxy;
+  scale: number;
+}
+
+function PdfPageCanvas({
+  pageNum,
+  pdfDoc,
+  scale,
+}: PdfPageCanvasProps) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const renderTaskRef = useRef<any>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function renderPage() {
+      if (!canvasRef.current || !pdfDoc) return;
+
+      if (renderTaskRef.current) {
+        try {
+          renderTaskRef.current.cancel();
+        } catch {
+          // ignore previous cancelled task
+        }
+      }
+
+      try {
+        const page = await pdfDoc.getPage(pageNum);
+        if (cancelled || !canvasRef.current) return;
+
+        const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
+        const viewport = page.getViewport({ scale: scale * dpr });
+        const logicalViewport = page.getViewport({ scale });
+
+        const canvas = canvasRef.current;
+        canvas.width = Math.floor(viewport.width);
+        canvas.height = Math.floor(viewport.height);
+        canvas.style.width = `${Math.floor(logicalViewport.width)}px`;
+        canvas.style.height = `${Math.floor(logicalViewport.height)}px`;
+
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+
+        const renderTask = page.render({
+          canvas,
+          canvasContext: ctx,
+          viewport,
+        });
+        renderTaskRef.current = renderTask;
+
+        await renderTask.promise;
+      } catch (err: any) {
+        if (err?.name !== "RenderingCancelledException") {
+          console.error(`Page ${pageNum} render error:`, err);
+        }
+      }
+    }
+
+    renderPage();
+
+    return () => {
+      cancelled = true;
+      if (renderTaskRef.current) {
+        try {
+          renderTaskRef.current.cancel();
+        } catch {
+          // ignore
+        }
+      }
+    };
+  }, [pageNum, pdfDoc, scale]);
 
   return (
-    <div className="resume-generated-pdf-frame">
-      <div className="resume-pdf-toolbar">
-        <div className="resume-pdf-title-block">
-          <svg
-            className="pdf-doc-icon"
-            viewBox="0 0 20 20"
-            fill="currentColor"
-            width="15"
-            height="15"
-            aria-hidden="true"
+    <div
+      className="pdf-paper-sheet"
+      aria-label={`Resume Page ${pageNum}`}
+      style={{
+        width: `${Math.floor(612 * scale)}px`,
+        height: `${Math.floor(792 * scale)}px`,
+      }}
+    >
+      <canvas ref={canvasRef} className="pdf-page-canvas" />
+    </div>
+  );
+}
+
+export function ResumePdfPreview({
+  draftId,
+  scale = 1.0,
+}: ResumePdfPreviewProps) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [pdfDoc, setPdfDoc] = useState<PDFDocumentProxy | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let isCancelled = false;
+    const abortController = new AbortController();
+
+    async function loadPdf() {
+      setLoading(true);
+      setError(null);
+
+      try {
+        const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
+        if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
+          pdfjsLib.GlobalWorkerOptions.workerSrc = "/api/pdf-worker";
+        }
+
+        const url = `/api/resume-drafts/${encodeURIComponent(draftId)}/pdf`;
+        const res = await fetch(url, { signal: abortController.signal });
+
+        if (!res.ok) {
+          if (res.status === 409) {
+            throw new Error(
+              "Resume template has changed. Please click Regenerate resume.",
+            );
+          }
+          throw new Error("Base resume document is unavailable.");
+        }
+
+        const arrayBuffer = await res.arrayBuffer();
+        if (isCancelled) return;
+
+        const loadingTask = pdfjsLib.getDocument({
+          data: new Uint8Array(arrayBuffer),
+        });
+
+        const doc = await loadingTask.promise;
+        if (isCancelled) return;
+
+        setPdfDoc(doc);
+        setLoading(false);
+      } catch (err: any) {
+        if (isCancelled || err?.name === "AbortError") return;
+        setError(err?.message || "Failed to render PDF preview.");
+        setLoading(false);
+      }
+    }
+
+    loadPdf();
+
+    return () => {
+      isCancelled = true;
+      abortController.abort();
+    };
+  }, [draftId]);
+
+  const numPages = pdfDoc?.numPages || 1;
+
+  return (
+    <div
+      className="resume-pdf-viewport-container custom-pdf-preview-container"
+      ref={containerRef}
+    >
+      {loading ? (
+        <div
+          className="resume-pdf-loading-overlay custom-pdf-loading-overlay"
+          aria-label="Loading PDF document"
+          style={{
+            width: `${Math.floor(612 * scale)}px`,
+            height: `${Math.floor(792 * scale)}px`,
+          }}
+        >
+          <div className="pdf-mini-spinner" />
+          <span className="pdf-loading-text">Rendering base-resume.pdf…</span>
+        </div>
+      ) : null}
+
+      {error ? (
+        <div className="custom-pdf-error-state" role="alert">
+          <p>{error}</p>
+          <a
+            href={`/api/resume-drafts/${encodeURIComponent(draftId)}/pdf`}
+            download="base-resume.pdf"
+            className="toolbar-btn toolbar-btn-subtle"
           >
-            <path
-              fillRule="evenodd"
-              d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z"
-              clipRule="evenodd"
+            Download PDF directly
+          </a>
+        </div>
+      ) : null}
+
+      {!loading && !error && pdfDoc ? (
+        <div className="custom-pdf-pages-list">
+          {Array.from({ length: numPages }, (_, i) => i + 1).map((pageNum) => (
+            <PdfPageCanvas
+              key={pageNum}
+              pageNum={pageNum}
+              pdfDoc={pdfDoc}
+              scale={scale}
             />
-          </svg>
-          <span className="pdf-doc-name">base-resume.pdf</span>
+          ))}
         </div>
-        <div className="resume-preview-links">
-          <a
-            className="resume-generated-pdf-fallback"
-            href={url}
-            target="_blank"
-            rel="noopener noreferrer"
-            title="Open in new window"
-          >
-            Open in new tab ↗
-          </a>
-          <a
-            className="resume-generated-tex-link"
-            href={texUrl}
-            download="base-resume.tex"
-            title="Download TeX source file"
-          >
-            Download .tex ↓
-          </a>
-        </div>
-      </div>
-      <div className="resume-pdf-viewport-container">
-        {iframeLoading ? (
-          <div
-            className="resume-pdf-loading-overlay"
-            aria-label="Loading PDF document"
-          >
-            <div className="pdf-mini-spinner" />
-            <span className="pdf-loading-text">Rendering base-resume.pdf…</span>
-          </div>
-        ) : null}
-        <iframe
-          className={`resume-generated-pdf-viewer ${iframeLoading ? "is-rendering" : "is-ready"}`}
-          src={url}
-          title="Generated base resume PDF preview"
-          onLoad={() => setIframeLoading(false)}
-        />
-      </div>
+      ) : null}
     </div>
   );
 }
