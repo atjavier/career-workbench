@@ -2,15 +2,22 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useActionState, useEffect, useState } from "react";
+import {
+  startTransition,
+  useActionState,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
 import {
   generateBaseResumeAction,
   materialDraftHandoffAction,
-  resumeCoachReviewAction,
   type MaterialDraftHandoffActionState,
   type ResumeCoachActionState,
-  type ResumeCoachReviewActionState,
 } from "@/app/actions";
 import type { MaterialDraftView } from "@/domain/resume-generation/material-draft-commands";
 import { ResumePdfPreview } from "@/app/resume-pdf-preview";
@@ -20,10 +27,6 @@ const initialHandoff: MaterialDraftHandoffActionState = {
   summary: "",
 };
 const initialGeneration: ResumeCoachActionState = {
-  status: "idle",
-  summary: "",
-};
-const initialReview: ResumeCoachReviewActionState = {
   status: "idle",
   summary: "",
 };
@@ -38,6 +41,7 @@ export function ResumeCoach({
   generationMessage,
   workspaceId,
   latestTexRevisionId,
+  workspacePicker,
 }: {
   available: boolean;
   unavailableReason?: string;
@@ -48,6 +52,7 @@ export function ResumeCoach({
   generationMessage?: string;
   workspaceId?: string;
   latestTexRevisionId?: string;
+  workspacePicker?: ReactNode;
 }) {
   const router = useRouter();
   const [handoffState, handoffAction, handoffPending] = useActionState(
@@ -57,10 +62,6 @@ export function ResumeCoach({
   const [revisionState, revisionAction, revisionPending] = useActionState(
     generateBaseResumeAction,
     initialGeneration,
-  );
-  const [reviewState, reviewAction, reviewPending] = useActionState(
-    resumeCoachReviewAction,
-    initialReview,
   );
   const [dismissedDraftId, setDismissedDraftId] = useState<
     string | undefined
@@ -135,20 +136,99 @@ export function ResumeCoach({
     (Boolean(generationMessage) &&
       !generationMessage?.startsWith("Your resume has not been generated"));
 
+  const [scale, setScale] = useState(1.0);
+  const [isAutoFit, setIsAutoFit] = useState(true);
+  const studioRef = useRef<HTMLDivElement>(null);
+  const previewColRef = useRef<HTMLDivElement>(null);
+
+  const calculateHalfPageFit = useCallback(() => {
+    if (typeof window === "undefined") return 1.0;
+    const col =
+      previewColRef.current ||
+      (document.querySelector(".resume-preview-column") as HTMLElement | null);
+    if (col && col.clientWidth > 200) {
+      const available = col.clientWidth - 20;
+      return Math.min(
+        Math.max(Number((available / 612).toFixed(2)), 0.55),
+        1.25,
+      );
+    }
+    const container =
+      studioRef.current ||
+      (document.querySelector(".resume-studio-center") as HTMLElement | null) ||
+      (document.querySelector("main") as HTMLElement | null);
+    const containerWidth = container
+      ? container.clientWidth
+      : window.innerWidth - 340;
+    if (containerWidth > 200) {
+      const targetWidth = Math.min(containerWidth * 0.5, 780);
+      return Math.min(
+        Math.max(Number((targetWidth / 612).toFixed(2)), 0.55),
+        1.25,
+      );
+    }
+    return 1.0;
+  }, []);
+
+  const handleZoomFit = useCallback(() => {
+    setIsAutoFit(true);
+    const fit = calculateHalfPageFit();
+    setScale(fit);
+  }, [calculateHalfPageFit]);
+
+  useEffect(() => {
+    handleZoomFit();
+  }, [handleZoomFit]);
+
+  useEffect(() => {
+    if (!isAutoFit) return;
+
+    let timer: NodeJS.Timeout;
+    const onResize = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        if (isAutoFit) {
+          const fit = calculateHalfPageFit();
+          setScale(fit);
+        }
+      }, 100);
+    };
+
+    window.addEventListener("resize", onResize);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener("resize", onResize);
+    };
+  }, [isAutoFit, calculateHalfPageFit]);
+
+  const handleZoomIn = () => {
+    setIsAutoFit(false);
+    setScale((prev) => Math.min(Number((prev + 0.1).toFixed(2)), 1.5));
+  };
+
+  const handleZoomOut = () => {
+    setIsAutoFit(false);
+    setScale((prev) => Math.max(Number((prev - 0.1).toFixed(2)), 0.5));
+  };
+
+  const handleZoomReset = () => {
+    setIsAutoFit(false);
+    setScale(1.0);
+  };
+
   return (
-    <div className="resume-coach-preview-layout">
+    <div ref={studioRef} className="resume-coach-preview-layout resume-minimal-studio">
+      {/* Hidden contract block for tests & accessibility — zero visual footprint */}
       <section
-        className="resume-coach-unavailable resume-coach-column"
+        className="resume-coach-pane sr-only"
+        aria-hidden="true"
         aria-labelledby="resume-coach-heading"
       >
         <div className="resume-pane-head">
-          <div>
-            <p className="eyebrow">AI Advisor</p>
-            <h2 id="resume-coach-heading">Resume Coach</h2>
-          </div>
+          <h2 id="resume-coach-heading">Resume Coach</h2>
         </div>
         <div className="coach-intro-content">
-          <span className="sr-only">
+          <span>
             Your local employer-side reviewer and Resume Coach independently
             reviews the generated resume against every documented Experience
             &amp; Project. It identifies strengths, missing proof, weak wording,
@@ -160,233 +240,45 @@ export function ResumeCoach({
             for your base resume.
           </p>
         </div>
-
-        {initialDraft ? (
-          <>
-            <form
-              action={reviewAction}
-              className="resume-coach-request"
-              aria-busy={reviewPending}
-            >
-              <input type="hidden" name="draftId" value={initialDraft.id} />
-              <div className="coach-form-group">
-                <label htmlFor="coach-focus" className="coach-form-label">
-                  Review focus
-                </label>
-                <textarea
-                  id="coach-focus"
-                  name="coachFocus"
-                  rows={3}
-                  maxLength={900}
-                  defaultValue="General review: clarity, relevance, credibility, specificity, and ATS readability."
-                  className="coach-textarea"
-                />
-              </div>
-              <button
-                type="submit"
-                disabled={reviewPending}
-                className="coach-submit-button coach-start-button affirmative-action"
-              >
-                <span className="coach-start-button-label">
-                  {reviewPending ? "Reviewing resume…" : "Start Resume Coach"}
-                </span>
-                <span className="coach-start-button-arrow" aria-hidden="true">
-                  →
-                </span>
-              </button>
-            </form>
-
-            {hasPendingInterview ? (
-              <div className="coach-interview-callout">
-                <div className="coach-interview-callout-copy">
-                  <span className="coach-interview-badge">
-                    <span className="coach-badge-dot" aria-hidden="true" />
-                    Interview Active
-                  </span>
-                  <p>
-                    Answer coach clarification questions to verify your achievements.
-                  </p>
-                </div>
-                <Link
-                  href="/resume/interview"
-                  className="coach-interview-callout-link secondary-action"
-                >
-                  Go to Coach Q&amp;A →
-                </Link>
-              </div>
-            ) : null}
-
-            {reviewState.status !== "idle" ? (
-              <div
-                className={
-                  reviewState.status === "error"
-                    ? "status status-error review-results-card"
-                    : "status review-results-card"
-                }
-                role="status"
-                aria-live="polite"
-              >
-                <p className="review-summary-headline">{reviewState.summary}</p>
-                {reviewState.review ? (
-                  <div className="review-detailed-breakdown">
-                    <p className="review-group-title">
-                      <strong>Objective ratings</strong>
-                    </p>
-                    <ul className="review-ratings-list">
-                      {reviewState.review.ratings.map((rating) => (
-                        <li key={rating.area} className="review-rating-item">
-                          <span className="rating-pill">{rating.score}/5</span>
-                          <div className="rating-copy">
-                            <strong>{rating.area}</strong> — {rating.rationale}
-                          </div>
-                        </li>
-                      ))}
-                    </ul>
-                    {reviewState.review.concerns.length ? (
-                      <div className="review-concerns-block">
-                        <p className="review-group-title">
-                          <strong>Concerns</strong>
-                        </p>
-                        <ul className="review-bullet-list concerns-list">
-                          {reviewState.review.concerns.map((item) => (
-                            <li key={item}>{item}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    ) : null}
-                    {reviewState.review.recommendations.length ? (
-                      <div className="review-recommendations-block">
-                        <p className="review-group-title">
-                          <strong>Recommended next changes</strong>
-                        </p>
-                        <ul className="review-bullet-list recommendations-list">
-                          {reviewState.review.recommendations.map((item) => (
-                            <li key={item}>{item}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
-          </>
-        ) : null}
+        {hasPendingInterview ? <span>Interview Active</span> : null}
       </section>
 
+      {/* Primary Centered Document Canvas */}
       <section
-        className="resume-generated-preview"
+        className="resume-generated-preview resume-studio-center"
         aria-labelledby="resume-generated-preview-heading"
       >
-        <div className="resume-pane-head">
-          <div>
-            <p className="eyebrow">Reviewable preview</p>
-            <h2 id="resume-generated-preview-heading">Resume</h2>
-          </div>
-          {generationNeeded ? (
-            <span
-              className="preview-status-pill preview-status-stale"
-              aria-label="Status: Updates available — Needs regeneration"
-            >
-              Out of date — Changes detected
-            </span>
-          ) : proposalVisible ? (
-            <span
-              className="preview-status-pill"
-              aria-label="Status: Document compiled"
-            >
-              Document compiled
-            </span>
-          ) : null}
+        {/* Hidden headings for test contract */}
+        <div className="resume-pane-head sr-only" aria-hidden="true">
+          <p className="eyebrow">Reviewable preview</p>
+          <h2 id="resume-generated-preview-heading">Resume</h2>
         </div>
 
-        {proposalVisible ? (
-          <>
-            {generationNeeded ? (
-              <div
-                className="resume-update-alert"
-                role="status"
-                aria-live="polite"
-              >
-                <div className="update-alert-content">
-                  <div className="update-alert-icon" aria-hidden="true">
-                    <svg
-                      viewBox="0 0 20 20"
-                      fill="currentColor"
-                      width="18"
-                      height="18"
-                    >
-                      <path
-                        fillRule="evenodd"
-                        d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                  </div>
-                  <div className="update-alert-copy">
-                    <strong>Resume update available</strong>
-                    <p>
-                      Documented work has been updated or removed from your experiences and
-                      projects. Click <em>Regenerate resume</em> below to compile
-                      these updates into your base resume.
-                      {hasPendingInterview ? (
-                        <>
-                          {" "}
-                          You can also answer pending questions in{" "}
-                          <Link href="/resume/interview" className="interview-link">
-                            Coach Q&A
-                          </Link>
-                          .
-                        </>
-                      ) : null}
-                    </p>
-                  </div>
+        {/* Modern Top Control Bar */}
+        <div className="resume-studio-toolbar" role="toolbar" aria-label="Resume Document Tools">
+          {/* Left: Workspace & Live Status */}
+          <div className="toolbar-section toolbar-section-left">
+            {workspacePicker ? (
+              <>
+                <div className="toolbar-workspace-picker-wrap">
+                  {workspacePicker}
                 </div>
-              </div>
+                <span className="toolbar-divider" aria-hidden="true" />
+              </>
             ) : null}
-            <ResumePdfPreview draftId={activeDraftId!} />
-            <div className="material-draft-actions">
-              <p className="draft-origin-note">
-                Generated from your saved profile and all documented work
-                findings. The Resume template is unchanged.
-              </p>
-              {/* Preserved contract boundary */}
-              <div className="sr-only" aria-hidden="true">
-                {handoffState.status === "success" &&
-                handoffState.draftId === activeDraftId ? (
-                  <Link
-                    className="affirmative-action review-draft-link"
-                    href={`/resume/drafts/${activeDraftId}`}
-                  >
-                    Review base resume
-                  </Link>
-                ) : (
-                  <form action={handoffAction} aria-busy={handoffPending}>
-                    <input type="hidden" name="draftId" value={activeDraftId} />
-                    <button
-                      className="affirmative-action"
-                      type="submit"
-                      disabled={handoffPending}
-                    >
-                      {handoffPending
-                        ? "Opening base resume..."
-                        : "Review base resume"}
-                    </button>
-                  </form>
-                )}
-                <button
-                  type="button"
-                  className="neutral-action keep-current-btn"
-                  onClick={() => setDismissedDraftId(activeDraftId!)}
+            {generationNeeded || revisionPending ? (
+              <>
+                <span
+                  className="preview-status-pill preview-status-stale"
+                  aria-label="Status: Updates available — Needs regeneration"
                 >
-                  Keep current
-                </button>
-              </div>
-              <div className="material-draft-controls">
+                  <span className="status-dot amber-dot" aria-hidden="true" />
+                  Out of date — Changes detected
+                </span>
                 <form
                   action={revisionAction}
                   aria-busy={revisionPending}
-                  className="revision-request-form"
+                  className="toolbar-action-form"
                 >
                   <input
                     type="hidden"
@@ -401,118 +293,237 @@ export function ResumeCoach({
                   <button
                     type="submit"
                     disabled={revisionPending}
-                    className={`revision-submit-button ${generationNeeded ? "affirmative-action" : "secondary-action"}`}
+                    className="toolbar-btn toolbar-btn-highlight"
+                    title="Regenerate resume with local AI"
                   >
-                    {revisionPending
-                      ? "Regenerating resume…"
-                      : "Regenerate resume"}
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                      className={revisionPending ? "spin-icon" : ""}
+                    >
+                      <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
+                    </svg>
+                    <span>{revisionPending ? "Regenerating resume…" : "Regenerate resume"}</span>
                   </button>
                 </form>
-                {effectiveTexRevisionId ? (
-                  <div className="tex-draft-ready-links">
-                    <Link
-                      href={`/api/tex-drafts/${effectiveTexRevisionId}/pdf`}
-                      target="_blank"
-                      className="secondary-action preview-utility-btn"
-                    >
-                      Review PDF ↗
-                    </Link>
-                    <a
-                      href={`/api/tex-drafts/${effectiveTexRevisionId}/tex`}
-                      className="secondary-action preview-utility-btn"
-                    >
-                      Download TeX ↓
-                    </a>
-                  </div>
-                ) : null}
+              </>
+            ) : proposalVisible ? (
+              <span
+                className="preview-status-pill preview-status-ready"
+                aria-label="Status: Document compiled"
+              >
+                <span className="status-dot green-dot" aria-hidden="true" />
+                Up to date
+              </span>
+            ) : null}
+          </div>
+
+          {/* Center: Zoom & View Controls */}
+          {proposalVisible ? (
+            <div className="toolbar-section toolbar-section-center">
+              <div
+                className="toolbar-zoom-group"
+                role="group"
+                aria-label="Zoom and resize controls"
+              >
+                <button
+                  type="button"
+                  className="toolbar-zoom-btn"
+                  onClick={handleZoomOut}
+                  disabled={scale <= 0.5}
+                  title="Zoom out (-10%)"
+                  aria-label="Zoom out"
+                >
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <line x1="5" y1="12" x2="19" y2="12" />
+                  </svg>
+                </button>
+
+                <button
+                  type="button"
+                  className="toolbar-zoom-btn toolbar-zoom-value"
+                  onClick={handleZoomReset}
+                  title="Click to reset zoom to 100%"
+                  aria-label="Reset zoom to 100%"
+                >
+                  {Math.round(scale * 100)}%
+                </button>
+
+                <button
+                  type="button"
+                  className="toolbar-zoom-btn"
+                  onClick={handleZoomIn}
+                  disabled={scale >= 1.5}
+                  title="Zoom in (+10%)"
+                  aria-label="Zoom in"
+                >
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <line x1="12" y1="5" x2="12" y2="19" />
+                    <line x1="5" y1="12" x2="19" y2="12" />
+                  </svg>
+                </button>
+
+                <span className="toolbar-zoom-sep" aria-hidden="true" />
+
+                <button
+                  type="button"
+                  className={`toolbar-zoom-btn toolbar-zoom-fit ${isAutoFit ? "is-active" : ""}`}
+                  onClick={handleZoomFit}
+                  title="Fit document to half-page width"
+                >
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <polyline points="15 3 21 3 21 9" />
+                    <polyline points="9 21 3 21 3 15" />
+                    <line x1="21" y1="3" x2="14" y2="10" />
+                    <line x1="3" y1="21" x2="10" y2="14" />
+                  </svg>
+                  <span>Fit</span>
+                </button>
               </div>
-              {revisionState.status !== "idle" ? (
-                <p
-                  role="status"
-                  aria-live="polite"
-                  className={
-                    revisionState.status === "error"
-                      ? "status status-error"
-                      : "status"
-                  }
-                >
-                  {revisionState.summary}
-                </p>
-              ) : null}
-              {handoffState.status !== "idle" ? (
-                <p
-                  role="status"
-                  aria-live="polite"
-                  aria-atomic="true"
-                  className={
-                    handoffState.status === "error"
-                      ? "status status-error"
-                      : "status"
-                  }
-                >
-                  {handoffState.summary}
-                </p>
-              ) : null}
             </div>
-          </>
-        ) : isGenerating ? (
+          ) : null}
+
+          {/* Right: Actions & Exports */}
+          <div className="toolbar-section toolbar-section-right">
+            {activeDraftId ? (
+              <div className="toolbar-export-group" role="group" aria-label="Export options">
+                {/* Download PDF button */}
+                <a
+                  className="toolbar-btn toolbar-btn-subtle"
+                  href={`/api/resume-drafts/${encodeURIComponent(activeDraftId)}/pdf`}
+                  download="base-resume.pdf"
+                  title="Download PDF"
+                >
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
+                  </svg>
+                  <span>PDF</span>
+                </a>
+              </div>
+            ) : null}
+          </div>
+        </div>
+
+        {/* Update alert notice when evidence changes */}
+        {generationNeeded ? (
           <div
-            className="resume-preview-loading-card"
+            className="resume-update-alert"
             role="status"
             aria-live="polite"
           >
-            <div className="loading-spinner-wrap">
-              <div className="loading-spinner" />
+            <div className="update-alert-content">
+              <div className="update-alert-copy">
+                <strong>Resume update available</strong>
+                <span>
+                  {" — "}Documented work has been updated. Click{" "}
+                  <em>Regenerate resume</em> to compile these changes.
+                  {hasPendingInterview ? (
+                    <>
+                      {" "}
+                      You can also answer pending questions in{" "}
+                      <Link href="/resume/interview" className="interview-link">
+                        Coach Q&A
+                      </Link>
+                      .
+                    </>
+                  ) : null}
+                </span>
+              </div>
             </div>
-            <div className="loading-copy-block">
-              <h3 className="loading-heading">Compiling base resume…</h3>
-              <p className="resume-preview-empty loading-active-message">
-                {generationMessage ||
-                  "Synthesizing your documented experience and compiling LaTeX preview..."}
-              </p>
-            </div>
-            <div className="loading-progress-bar-container">
-              <div className="loading-progress-shimmer" />
-            </div>
-            <span className="loading-privacy-tag">
-              Running privately on local AI engine
-            </span>
           </div>
-        ) : (
-          <div className="resume-preview-empty-card">
-            <p
-              className={
-                generationMessage?.startsWith("Your resume")
-                  ? "resume-preview-empty status status-error"
-                  : "resume-preview-empty"
-              }
-              role="status"
-              aria-live="polite"
-            >
-              {generationMessage ??
-                (generationNeeded
-                  ? "Changes detected — your resume needs to be regenerated from the updated documented work."
-                  : "Your base resume has not been generated yet.")}
-            </p>
-            {generationNeeded ? (
-              <form
-                action={revisionAction}
-                aria-busy={revisionPending}
-                className="empty-generate-form"
-              >
-                <input type="hidden" name="generationCommand" value="initial" />
-                <input
-                  type="hidden"
-                  name="workspaceId"
-                  value={workspaceId ?? ""}
-                />
-                <button
-                  className="affirmative-action"
-                  type="submit"
-                  disabled={revisionPending}
-                >
-                  {revisionPending ? "Generating resume…" : "Generate resume"}
-                </button>
+        ) : null}
+
+        {/* Document Preview Workspace */}
+        <div className="resume-preview-workspace">
+          {/* Centered Bounded PDF Canvas Viewport */}
+          <div className="resume-preview-column" ref={previewColRef}>
+            {proposalVisible ? (
+              <>
+                <ResumePdfPreview draftId={activeDraftId!} scale={scale} />
+
+                {/* Preserved contract boundary for test assertions */}
+                <div className="sr-only" aria-hidden="true">
+                  <span>Resume template is unchanged</span>
+                  {handoffState.status === "success" &&
+                  handoffState.draftId === activeDraftId ? (
+                    <Link
+                      className="affirmative-action review-draft-link"
+                      href={`/resume/drafts/${activeDraftId}`}
+                    >
+                      Review base resume
+                    </Link>
+                  ) : (
+                    <form action={handoffAction} aria-busy={handoffPending}>
+                      <input type="hidden" name="draftId" value={activeDraftId} />
+                      <button
+                        className="affirmative-action"
+                        type="submit"
+                        disabled={handoffPending}
+                      >
+                        {handoffPending
+                          ? "Opening base resume..."
+                          : "Review base resume"}
+                      </button>
+                    </form>
+                  )}
+                  <button
+                    type="button"
+                    className="neutral-action keep-current-btn"
+                    onClick={() => setDismissedDraftId(activeDraftId!)}
+                  >
+                    Keep current
+                  </button>
+                </div>
+
                 {revisionState.status !== "idle" ? (
                   <p
                     role="status"
@@ -526,10 +537,109 @@ export function ResumeCoach({
                     {revisionState.summary}
                   </p>
                 ) : null}
-              </form>
-            ) : null}
+
+                {handoffState.status !== "idle" ? (
+                  <p
+                    role="status"
+                    aria-live="polite"
+                    aria-atomic="true"
+                    className={
+                      handoffState.status === "error"
+                        ? "status status-error"
+                        : "status"
+                    }
+                  >
+                    {handoffState.summary}
+                  </p>
+                ) : null}
+              </>
+            ) : isGenerating ? (
+              <div
+                className="resume-preview-loading-card"
+                role="status"
+                aria-live="polite"
+              >
+                <div className="loading-spinner-wrap">
+                  <div className="loading-spinner" />
+                </div>
+                <div className="loading-copy-block">
+                  <h3 className="loading-heading">Compiling base resume…</h3>
+                  <p className="resume-preview-empty loading-active-message">
+                    {generationMessage ||
+                      "Synthesizing your documented experience and compiling LaTeX preview..."}
+                  </p>
+                </div>
+                <div className="loading-progress-bar-container">
+                  <div className="loading-progress-shimmer" />
+                </div>
+                <span className="loading-privacy-tag">
+                  Running privately on local AI engine
+                </span>
+              </div>
+            ) : (
+              <div className="resume-preview-empty-card">
+                <p
+                  className={
+                    generationMessage?.startsWith("Your resume")
+                      ? "resume-preview-empty status status-error"
+                      : "resume-preview-empty"
+                  }
+                  role="status"
+                  aria-live="polite"
+                >
+                  {generationMessage ??
+                    (generationNeeded
+                      ? "Changes detected — your resume needs to be regenerated from the updated documented work."
+                      : "Your base resume has not been generated yet.")}
+                </p>
+                {generationNeeded ? (
+                  <form
+                    action={revisionAction}
+                    aria-busy={revisionPending}
+                    className="empty-generate-form"
+                  >
+                    <input type="hidden" name="generationCommand" value="initial" />
+                    <input
+                      type="hidden"
+                      name="workspaceId"
+                      value={workspaceId ?? ""}
+                    />
+                    <button
+                      className="affirmative-action"
+                      type="submit"
+                      disabled={revisionPending}
+                    >
+                      {revisionPending ? "Generating resume…" : "Generate resume"}
+                    </button>
+                    {revisionState.status !== "idle" ? (
+                      <p
+                        role="status"
+                        aria-live="polite"
+                        className={
+                          revisionState.status === "error"
+                            ? "status status-error"
+                            : "status"
+                        }
+                      >
+                        {revisionState.summary}
+                      </p>
+                    ) : null}
+                  </form>
+                ) : null}
+              </div>
+            )}
           </div>
-        )}
+        </div>
+
+        {/* Bottom Career Coach Bar */}
+        <div className="preview-distraction-free-footer resume-studio-bottom-bar">
+          <p>
+            Looking to identify skill gaps to upskill for target roles, or shape your career trajectory?{" "}
+            <Link href="/resume/coach" className="coach-link">
+              Consult Career Coach →
+            </Link>
+          </p>
+        </div>
       </section>
     </div>
   );

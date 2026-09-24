@@ -92,14 +92,19 @@ const destinations: readonly NavItem[] = [
     icon: <ResumeIcon />,
     subItems: [
       {
-        href: "/resume",
-        label: "Base Resume",
-        description: "Coach review & live PDF canvas",
-      },
-      {
         href: "/evidence",
         label: "Experience & Projects",
         description: "Documented collections & folders",
+      },
+      {
+        href: "/resume",
+        label: "Resume Preview",
+        description: "Coach review & live PDF canvas",
+      },
+      {
+        href: "/resume/coach",
+        label: "Career Coach",
+        description: "Interactive advisor & ATS audits (Pro)",
       },
     ],
   },
@@ -133,24 +138,38 @@ export async function ApplicationShell({
       ? "Experience & Projects"
       : active === "Coach Q&A"
         ? "Coach Q&A"
-        : active === "Resume"
-          ? "Base Resume"
-          : active);
+        : active === "Career Coach"
+          ? "Career Coach"
+          : active === "Resume Preview"
+            ? "Resume Preview"
+            : active === "Resume Studio"
+              ? "Resume Preview"
+              : active === "Resume"
+                ? "Resume Preview"
+                : active === "Base Resume"
+                  ? "Resume Preview"
+                  : active);
 
   const isResumeActive =
     active === "Resume" ||
+    active === "Resume Preview" ||
+    active === "Resume Studio" ||
     active === "Base Resume" ||
     active === "Experience & Projects" ||
     active === "Coach Q&A" ||
+    active === "Career Coach" ||
+    effectiveSubActive === "Resume Preview" ||
+    effectiveSubActive === "Resume Studio" ||
     effectiveSubActive === "Base Resume" ||
     effectiveSubActive === "Coach Q&A" ||
-    effectiveSubActive === "Experience & Projects";
+    effectiveSubActive === "Experience & Projects" ||
+    effectiveSubActive === "Career Coach";
 
   const resumeSubItems: NavSubItem[] = [
     {
-      href: "/resume",
-      label: "Base Resume",
-      description: "Coach review & live PDF canvas",
+      href: "/evidence",
+      label: "Experience & Projects",
+      description: "Documented collections & folders",
     },
     ...(phase === "interview"
       ? [
@@ -162,9 +181,14 @@ export async function ApplicationShell({
         ]
       : []),
     {
-      href: "/evidence",
-      label: "Experience & Projects",
-      description: "Documented collections & folders",
+      href: "/resume",
+      label: "Resume Preview",
+      description: "Coach review & live PDF canvas",
+    },
+    {
+      href: "/resume/coach",
+      label: "Career Coach",
+      description: "Interactive advisor & ATS audits (Pro)",
     },
   ];
 

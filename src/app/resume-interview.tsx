@@ -27,12 +27,32 @@ export function ResumeInterview({
   const [partial, setPartial] = useState("");
   const [pendingCandidate, setPendingCandidate] = useState("");
   const [progress, setProgress] = useState("");
+  const [goalsCollapsed, setGoalsCollapsed] = useState(false);
   const lastAnnouncement = useRef(0);
   const openingTaskId = useRef<string | null>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const current = interview.current;
   const streaming = streamState.kind === "streaming";
+
+  useEffect(() => {
+    try {
+      if (localStorage.getItem("career_workspace_interview_goals_collapsed") === "true") {
+        setGoalsCollapsed(true);
+      }
+    } catch {
+      // ignore localStorage
+    }
+  }, []);
+
+  const toggleGoals = useCallback((next: boolean) => {
+    setGoalsCollapsed(next);
+    try {
+      localStorage.setItem("career_workspace_interview_goals_collapsed", next ? "true" : "false");
+    } catch {
+      // ignore localStorage
+    }
+  }, []);
 
   const sendStream = useCallback(
     async (message: string, opening = false) => {
@@ -175,7 +195,10 @@ export function ResumeInterview({
         <span>Local only</span>
         <span>Optimization goals</span>
       </div>
-      <div id="coach-chat-panel" className="coach-chat-view">
+      <div
+        id="coach-chat-panel"
+        className={`coach-chat-view ${goalsCollapsed ? "is-goals-collapsed" : ""}`}
+      >
         <div className="coach-chat-main">
           <div id="coach-chat-content" className="coach-chat-content">
             {current ? (
@@ -185,6 +208,16 @@ export function ResumeInterview({
                   <span className="coach-context-item">
                     {current.itemName} ({current.itemCategory})
                   </span>
+                  {goalsCollapsed ? (
+                    <button
+                      type="button"
+                      className="coach-inline-expand-goals"
+                      onClick={() => toggleGoals(false)}
+                      title="Expand Goals & Progress"
+                    >
+                      Show Goals ({interview.completed.length}/{interview.total})
+                    </button>
+                  ) : null}
                 </div>
                 <p className="coach-context-question">{current.question}</p>
               </div>
@@ -450,73 +483,165 @@ export function ResumeInterview({
           </div>
         </div>
         <aside
-          className="coach-goals-sidebar coach-insights coach-insight-goals coach-goals-view"
+          className={`coach-goals-sidebar coach-insights coach-insight-goals coach-goals-view ${
+            goalsCollapsed ? "is-collapsed" : ""
+          }`}
           aria-label="Clarification goals"
         >
-          <div className="coach-insights-head">
-            <div>
-              <p className="eyebrow">Goals &amp; Progress</p>
-              <h3 className="coach-insights-title">Clarification Roadmap</h3>
-            </div>
-            <span className="insights-counter">
-              {interview.completed.length}/{interview.total}
-            </span>
-          </div>
-          <div className="coach-progress-bar-track" aria-hidden="true">
-            <div
-              className="coach-progress-bar-fill"
-              style={{
-                width: `${
-                  interview.total > 0
-                    ? Math.round(
-                        (interview.completed.length / interview.total) * 100,
-                      )
-                    : 0
-                }%`,
-              }}
-            />
-          </div>
-          <p className="coach-insights-intro">
-            {interview.completed.length} of {interview.total} questions
-            complete.{" "}
-            {interview.remaining === 0
-              ? "All goals complete! Your evidence is fully clarified."
-              : `${interview.remaining} goal${interview.remaining === 1 ? "" : "s"} remaining.`}
-          </p>
-          <ol className="coach-goals" aria-label="Clarification goals">
-            {interview.completed.map((task) => (
-              <li key={task.id} className="coach-goal coach-goal-complete">
-                <span className="goal-check-icon" aria-hidden="true">
-                  <svg viewBox="0 0 16 16" fill="currentColor" width="10" height="10">
-                    <path
-                      fillRule="evenodd"
-                      d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 0 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0z"
-                      clipRule="evenodd"
-                    />
+          {goalsCollapsed ? (
+            <div className="coach-rail-content">
+              <div className="coach-rail-header">
+                <button
+                  type="button"
+                  className="sidebar-collapse-button coach-sidebar-toggle-btn"
+                  onClick={() => toggleGoals(false)}
+                  title="Expand sidebar"
+                  aria-label="Expand sidebar"
+                >
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <rect width="18" height="18" x="3" y="3" rx="2" />
+                    <path d="M15 3v18" />
                   </svg>
+                </button>
+                <span
+                  className="insights-counter rail-counter"
+                  title={`${interview.completed.length} of ${interview.total} questions complete`}
+                >
+                  {interview.completed.length}/{interview.total}
                 </span>
-                <div className="goal-item-body">
-                  <span className="goal-item-badge">
-                    {task.itemName || task.itemCategory}
-                  </span>
-                  <span className="goal-item-question">{task.question}</span>
+              </div>
+              <ol className="coach-goals-rail" aria-label="Clarification goals">
+                {interview.completed.map((task) => (
+                  <li
+                    key={task.id}
+                    className="coach-goal-rail-item coach-goal-complete"
+                    title={`${task.itemName || task.itemCategory}: ${task.question} (Completed)`}
+                  >
+                    <span className="goal-check-icon" aria-hidden="true">
+                      <svg viewBox="0 0 16 16" fill="currentColor" width="10" height="10">
+                        <path
+                          fillRule="evenodd"
+                          d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 0 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0z"
+                          clipRule="evenodd"
+                        />
+                      </svg>
+                    </span>
+                  </li>
+                ))}
+                {current ? (
+                  <li
+                    className="coach-goal-rail-item coach-goal-current"
+                    title={`${current.itemName || current.itemCategory}: ${current.question} (Current)`}
+                  >
+                    <span className="goal-current-icon" aria-hidden="true">
+                      <span className="goal-pulse-dot" />
+                    </span>
+                  </li>
+                ) : null}
+              </ol>
+            </div>
+          ) : (
+            <>
+              <div className="coach-insights-head">
+                <div>
+                  <p className="eyebrow">Goals &amp; Progress</p>
+                  <h3 className="coach-insights-title">Clarification Roadmap</h3>
                 </div>
-              </li>
-            ))}
-            {current ? (
-              <li className="coach-goal coach-goal-current" aria-current="step">
-                <span className="goal-current-icon" aria-hidden="true">
-                  <span className="goal-pulse-dot" />
-                </span>
-                <div className="goal-item-body">
-                  <span className="goal-item-badge active-badge">
-                    {current.itemName || current.itemCategory}
+                <div className="coach-insights-head-actions">
+                  <span className="insights-counter">
+                    {interview.completed.length}/{interview.total}
                   </span>
-                  <span className="goal-item-question">{current.question}</span>
+                  <button
+                    type="button"
+                    className="sidebar-collapse-button coach-sidebar-toggle-btn"
+                    onClick={() => toggleGoals(true)}
+                    title="Collapse sidebar"
+                    aria-label="Collapse sidebar"
+                  >
+                    <svg
+                      width="18"
+                      height="18"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <rect width="18" height="18" x="3" y="3" rx="2" />
+                      <path d="M15 3v18" />
+                    </svg>
+                  </button>
                 </div>
-              </li>
-            ) : null}
-          </ol>
+              </div>
+              <div className="coach-progress-bar-track" aria-hidden="true">
+                <div
+                  className="coach-progress-bar-fill"
+                  style={{
+                    width: `${
+                      interview.total > 0
+                        ? Math.round(
+                            (interview.completed.length / interview.total) * 100,
+                          )
+                        : 0
+                    }%`,
+                  }}
+                />
+              </div>
+              <p className="coach-insights-intro">
+                {interview.completed.length} of {interview.total} questions
+                complete.{" "}
+                {interview.remaining === 0
+                  ? "All goals complete! Your evidence is fully clarified."
+                  : `${interview.remaining} goal${interview.remaining === 1 ? "" : "s"} remaining.`}
+              </p>
+              <ol className="coach-goals" aria-label="Clarification goals">
+                {interview.completed.map((task) => (
+                  <li key={task.id} className="coach-goal coach-goal-complete">
+                    <span className="goal-check-icon" aria-hidden="true">
+                      <svg viewBox="0 0 16 16" fill="currentColor" width="10" height="10">
+                        <path
+                          fillRule="evenodd"
+                          d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 0 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0z"
+                          clipRule="evenodd"
+                        />
+                      </svg>
+                    </span>
+                    <div className="goal-item-body">
+                      <span className="goal-item-badge">
+                        {task.itemName || task.itemCategory}
+                      </span>
+                      <span className="goal-item-question">{task.question}</span>
+                    </div>
+                  </li>
+                ))}
+                {current ? (
+                  <li className="coach-goal coach-goal-current" aria-current="step">
+                    <span className="goal-current-icon" aria-hidden="true">
+                      <span className="goal-pulse-dot" />
+                    </span>
+                    <div className="goal-item-body">
+                      <span className="goal-item-badge active-badge">
+                        {current.itemName || current.itemCategory}
+                      </span>
+                      <span className="goal-item-question">{current.question}</span>
+                    </div>
+                  </li>
+                ) : null}
+              </ol>
+            </>
+          )}
         </aside>
         <p
           className="sr-only"

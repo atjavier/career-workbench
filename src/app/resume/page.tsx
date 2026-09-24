@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 
 export default function ResumePage() {
   return (
-    <ApplicationShell active="Resume" activeSubItem="Base Resume">
+    <ApplicationShell active="Resume" activeSubItem="Resume Preview">
       <ResumeWorkspace />
     </ApplicationShell>
   );

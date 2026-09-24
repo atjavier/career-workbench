@@ -173,7 +173,7 @@ export async function ResumeWorkspace() {
     );
   return (
     <div className="workspace-shell resume-workspace">
-      <header className="resume-page-head">
+      <header className="sr-only" aria-hidden="true">
         <div className="resume-head-copy">
           <p className="eyebrow">Resume</p>
           <h1 aria-label="Shape your base resume">Shape your base resume</h1>
@@ -183,15 +183,17 @@ export async function ResumeWorkspace() {
             <Link href="/evidence">Experience &amp; Projects</Link>.
           </p>
         </div>
-        <ResumeWorkspacePicker
-          workspaces={workspaceState.workspaces}
-          activeWorkspaceId={workspaceState.activeWorkspace?.id}
-          revisionNumber={workspaceState.revisionNumber}
-        />
       </header>
       {!baselineReady ? <BaseResumeImporter /> : null}
       <section id="resume-edit" aria-label="Resume Edit">
         <ResumeCoach
+          workspacePicker={
+            <ResumeWorkspacePicker
+              workspaces={workspaceState.workspaces}
+              activeWorkspaceId={workspaceState.activeWorkspace?.id}
+              revisionNumber={workspaceState.revisionNumber}
+            />
+          }
           available={Boolean(
             workspaceState.activeWorkspace &&
             baselineReady &&
