@@ -4970,12 +4970,19 @@ body {
   width: 3px;
 }
 .navigation-icon {
+  align-items: center;
   color: currentcolor;
   display: inline-flex;
+  flex-shrink: 0;
   font-size: 1.15rem;
   justify-content: center;
   width: 1.25rem;
+}
+.navigation-icon svg {
+  display: block;
   flex-shrink: 0;
+  height: 1.15rem;
+  width: 1.15rem;
 }
 
 .nav-group {
@@ -5121,6 +5128,11 @@ html.sidebar-collapsed .application-shell .navigation-icon {
   justify-content: center;
   margin: 0;
   width: auto;
+}
+.application-shell.is-collapsed .navigation-icon svg,
+html.sidebar-collapsed .application-shell .navigation-icon svg {
+  height: 1.35rem;
+  width: 1.35rem;
 }
 .workspace-shell {
   margin: 0;

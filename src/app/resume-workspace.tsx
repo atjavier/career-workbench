@@ -178,9 +178,9 @@ export async function ResumeWorkspace() {
           <p className="eyebrow">Resume</p>
           <h1 aria-label="Shape your base resume">Shape your base resume</h1>
           <p>
-            Resume Coach is on the left and your automatically generated
-            base-resume preview is on the right. Manage{" "}
-            <Link href="/evidence">Experience &amp; Projects</Link> separately.
+            Critique and compile your evidence-backed base resume. Manage your
+            documented findings in{" "}
+            <Link href="/evidence">Experience &amp; Projects</Link>.
           </p>
         </div>
         <ResumeWorkspacePicker
