@@ -51,9 +51,8 @@ The "edits" array must contain AT MOST one entry per target slot in "slots" (max
      * Employers and technical resume specialists expect distinct capability pillars per major project (Pillar 1: Feature Scope & User Workflow, Pillar 2: Backend/Architecture & Data Integrity Constraints, Pillar 3: Pipeline Reliability / Integration / Async Processing).
      * When NO employment experience is present (projects-only resume), produce EXACTLY 3 substantive bullets per project to give the candidate's engineering work full credibility and achieve optimal 1-page visual balance.
      * When employment experience IS present:
-       - Produce 3 substantive bullets per project (covering Pillar 1: Feature Scope & User Workflow, Pillar 2: Backend/Architecture & Data Integrity Constraints, Pillar 3: Pipeline Reliability / Integration / Async Processing) for EACH documented candidate project in "roots".
-       - Target 3 substantive bullets per documented role/project so the resume achieves complete technical depth and balanced visual weight while cleanly fitting on 1 page.
-       CRITICAL: NEVER omit any candidate project. You MUST include ALL documented candidate projects from "roots", writing 3 substantive bullets for each.
+       - Target 2 to 3 substantive bullets per documented role/project (prioritizing 3 bullets for primary roles and 2 for secondary) so the resume achieves complete technical depth and balanced visual weight while cleanly fitting on 1 page.
+       CRITICAL: NEVER omit any candidate project. You MUST include ALL documented candidate projects from "roots", writing 2 to 3 substantive bullets for each.
    - If multiple projects exist, include ALL documented projects in the single "projects" edit, separating each project entry with a blank line ("\n\n").
 
 [BULLET STYLE & SUBSTANTIAL 2-LINE DENSITY]

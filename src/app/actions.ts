@@ -687,9 +687,20 @@ export async function generateBaseResumeAction(
           ownedDocumentPaths.has(document.libraryPath),
         ),
     );
+    // Enforce 1-page LaTeX printable budget: prioritize experiences (up to 3),
+    // then fill remaining slots with top projects, capped at 5 items total.
+    const experiences = managedGroups.filter(
+      (g) => g.category === "experience",
+    );
+    const projects = managedGroups.filter((g) => g.category === "project");
+    const budgetedExperiences = experiences.slice(0, 3);
+    const remainingSlots = Math.max(0, 5 - budgetedExperiences.length);
+    const budgetedProjects = projects.slice(0, remainingSlots);
+    const budgetedGroups = [...budgetedExperiences, ...budgetedProjects];
+
     const managedRoots = [
       ...new Set(
-        managedGroups.map((group) => {
+        budgetedGroups.map((group) => {
           const representativePath = group.documents[0]?.absolutePath ?? "";
           return dirname(representativePath);
         }),
@@ -701,7 +712,7 @@ export async function generateBaseResumeAction(
         "The active resume workspace has no authorized managed source folders.",
         "Refresh Experience & Projects and try generating the resume again.",
       );
-    const documentation: ResumeCoachDocumentation[] = managedGroups
+    const documentation: ResumeCoachDocumentation[] = budgetedGroups
       .map((group) => ({
         name: group.name,
         category: group.category,
