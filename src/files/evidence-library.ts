@@ -1210,10 +1210,10 @@ type ResumeFileRoot = {
 const fileToolLimits = {
   maxCalls: 24,
   maxFiles: 120,
-  maxBytes: 64_000,
+  maxBytes: 160_000,
   maxFileBytes: 256_000,
-  maxReadBytes: 24_000,
-  maxReadLines: 400,
+  maxReadBytes: 32_000,
+  maxReadLines: 600,
   maxDepth: 20,
   maxListEntries: 80,
   maxElapsedMs: 90_000,

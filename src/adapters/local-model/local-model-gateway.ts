@@ -147,6 +147,39 @@ function resumeGenerationDocumentation(
     })
     .filter((group) => group.documents.length > 0);
 }
+function extractFirstJsonObject(str: string): string | null {
+  const start = str.indexOf("{");
+  if (start === -1) return null;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < str.length; i++) {
+    const char = str[i];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (!inString) {
+      if (char === "{") depth++;
+      else if (char === "}") {
+        depth--;
+        if (depth === 0) {
+          return str.slice(start, i + 1);
+        }
+      }
+    }
+  }
+  return null;
+}
+
 function parseModelJson(content: string): Record<string, unknown> {
   const cleaned = content.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
   const fenced = /```(?:json)?\s*([\s\S]*?)\s*```/i.exec(cleaned);
@@ -221,6 +254,10 @@ function parseModelJson(content: string): Record<string, unknown> {
       repaired.replace(/(?<=})\s*,\s*"unknowns"\s*:/g, '],"unknowns":'),
       repaired.replace(/(?<=\])\s*\}\s*,\s*"unknowns"\s*:/g, ',"unknowns":'),
     ];
+    const balancedRepaired = extractFirstJsonObject(repaired);
+    if (balancedRepaired && !candidates.includes(balancedRepaired)) {
+      candidates.push(balancedRepaired);
+    }
     const lastBrace = repaired.lastIndexOf("}");
     if (lastBrace > 0 && lastBrace < repaired.length - 1) {
       candidates.push(repaired.slice(0, lastBrace + 1));
@@ -228,6 +265,21 @@ function parseModelJson(content: string): Record<string, unknown> {
     for (const candidate of candidates) {
       try {
         return JSON.parse(candidate);
+      } catch {}
+    }
+    const firstBalanced = extractFirstJsonObject(source);
+    if (firstBalanced && firstBalanced !== source) {
+      try {
+        return JSON.parse(firstBalanced);
+      } catch {}
+    }
+    const posMatch = /after JSON at position (\d+)/i.exec(
+      (firstError as Error)?.message ?? "",
+    );
+    if (posMatch) {
+      const truncated = source.slice(0, Number(posMatch[1])).trim();
+      try {
+        return JSON.parse(truncated);
       } catch {}
     }
     throw firstError;
@@ -712,12 +764,25 @@ function specialistStructureIsValid(
   const actionLed =
     /^(?:Addressed|Built|Created|Developed|Designed|Implemented|Integrated|Led|Delivered|Improved|Automated|Produced|Configured|Established|Validated|Collaborated|Supported|Refactored|Engineered|Authored|Architected|Optimized|Deployed|Migrated|Scaled)\b/;
   return response.sections.every((section, index) => {
+    const baselineSection = baseline.sections[index]!;
     const work = isWorkSection(section.heading);
     const isSkill = /(?:technical skills|skills|technologies)/i.test(
       section.heading,
     );
-    const baselineSection = baseline.sections[index]!;
     if (isSkill) {
+      if (section.text.trim() === baselineSection.existingDetail.trim()) {
+        return !containsUnsafeResumeContent(section.text);
+      }
+      return (
+        Boolean(section.text.trim()) &&
+        !containsUnsafeResumeContent(section.text)
+      );
+    }
+    const isEducation = /education/i.test(section.heading);
+    if (isEducation) {
+      if (section.text.trim() === baselineSection.existingDetail.trim()) {
+        return !containsUnsafeResumeContent(section.text);
+      }
       return (
         Boolean(section.text.trim()) &&
         !containsUnsafeResumeContent(section.text)
@@ -1245,6 +1310,107 @@ async function native(
     );
   }
 }
+function synthesizeSkills(request: ResumeCoachRequest): string {
+  const skillCorpus = `${request.evidence.map((item) => item.factualText).join(" ")} ${(request.documentation ?? []).flatMap((group) => group.documents.map((document) => document.text)).join(" ")} ${(request.clarifications ?? []).map((c) => c.text).join(" ")}`;
+  const skillCategories = [
+    [
+      "Languages",
+      [
+        "TypeScript",
+        "JavaScript",
+        "Go",
+        "Python",
+        "C",
+        "C++",
+        "Rust",
+        "Java",
+        "SQL",
+        "HTML",
+        "CSS",
+      ],
+    ],
+    [
+      "Frameworks",
+      [
+        "React",
+        "Next.js",
+        "React Router",
+        "Node.js",
+        "Express",
+        "Flask",
+        "FastAPI",
+        "Vite",
+        "Tailwind CSS",
+      ],
+    ],
+    [
+      "Data & APIs",
+      [
+        "SQLite",
+        "PostgreSQL",
+        "MySQL",
+        "MongoDB",
+        "Mongoose",
+        "Supabase",
+        "REST APIs",
+        "Server-Sent Events",
+        "Swagger",
+      ],
+    ],
+    [
+      "Tools",
+      [
+        "Git",
+        "GitHub",
+        "Docker",
+        "Docker Compose",
+        "Bruno",
+        "Postman",
+        "SendGrid",
+        "n8n",
+        "Trello",
+        "ClickUp",
+        "VS Code",
+        "LM Studio",
+      ],
+    ],
+  ];
+  return skillCategories
+    .map(
+      ([label, names]) =>
+        `${label}: ${(names as string[]).filter((item) => new RegExp(`\\b${item.replace(/[.+]/g, "\\$&")}\\b`, "i").test(skillCorpus)).join(", ")}`,
+    )
+    .filter((line) => !line.endsWith(": "))
+    .join("\n");
+}
+function synthesizeEducation(request: ResumeCoachRequest): string {
+  let profile: ResumeProfileSnapshot = {};
+  try {
+    const parsed = JSON.parse(request.profileSnapshot);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed))
+      profile = parsed as ResumeProfileSnapshot;
+  } catch {
+    return "";
+  }
+  const school = profileValue(profile.school);
+  const program = profileValue(profile.program);
+  if (!school && !program) return "";
+  const headerParts = [
+    school,
+    program,
+    profile.graduationYear !== undefined && profile.graduationYear !== null
+      ? String(profile.graduationYear)
+      : undefined,
+  ].filter(Boolean);
+  const honorParts = [
+    profileValue(profile.latinHonors),
+    profileValue(profile.gwa) ? `GWA ${profileValue(profile.gwa)}` : undefined,
+  ].filter(Boolean);
+  if (honorParts.length > 0) {
+    return `${headerParts.join(" | ")}\n- ${honorParts.join(" | ")}`;
+  }
+  return headerParts.join(" | ");
+}
 async function requestFileAgentResume(
   request: ResumeCoachRequest,
   session: ResumeFileReadSession,
@@ -1352,7 +1518,7 @@ async function requestFileAgentResume(
         executedReadCitations.push(result.citation);
       }
       observations.push({ action: normalizedAction, result });
-      if (JSON.stringify(observations).length > 48_000)
+      if (JSON.stringify(observations).length > 200_000)
         throw new Error("file tool budget exhausted");
       continue;
     }
@@ -1537,16 +1703,45 @@ async function requestFileAgentResume(
             !item ||
             typeof item !== "object" ||
             Array.isArray(item) ||
-            !exactKeys(item as Record<string, unknown>, [
-              "citationId",
-              "path",
-              "startLine",
-              "endLine",
-              "contentDigest",
-            ])
+            !allowedKeys(
+              item as Record<string, unknown>,
+              ["path"],
+              ["citationId", "startLine", "endLine", "contentDigest", "rootId"],
+            )
           )
             throw new Error("invalid file citation");
+          const candidate = item as Record<string, unknown>;
+          const citationId =
+            typeof candidate.citationId === "string" ? candidate.citationId : "";
+          const path =
+            typeof candidate.path === "string" ? candidate.path : "";
+          const contentDigest =
+            typeof candidate.contentDigest === "string"
+              ? candidate.contentDigest
+              : "";
           let citation = item as ResumeFileCitation;
+          if (!session.validateCitation(citation)) {
+            const matchingRead =
+              executedReadCitations.find(
+                (r) =>
+                  r.citationId === citationId &&
+                  r.path === path,
+              ) ??
+              executedReadCitations.find(
+                (r) =>
+                  r.path === path &&
+                  r.contentDigest === contentDigest,
+              ) ??
+              executedReadCitations.find(
+                (r) => r.citationId === citationId,
+              ) ??
+              (executedReadCitations.filter((r) => r.path === path).length === 1
+                ? executedReadCitations.find((r) => r.path === path)
+                : undefined);
+            if (matchingRead && session.validateCitation(matchingRead)) {
+              citation = matchingRead;
+            }
+          }
           if (
             !plain(citation.citationId, 80) ||
             !plain(citation.path, 600) ||
@@ -1554,7 +1749,8 @@ async function requestFileAgentResume(
             !Number.isInteger(citation.endLine) ||
             citation.startLine < 1 ||
             citation.endLine < citation.startLine ||
-            !sha(citation.contentDigest)
+            !sha(citation.contentDigest) ||
+            !session.validateCitation(citation)
           ) {
             if (process.env.NODE_ENV === "development")
               console.error(
@@ -1562,23 +1758,6 @@ async function requestFileAgentResume(
                 JSON.stringify(item),
               );
             throw new Error("unverified file citation");
-          }
-          if (!session.validateCitation(citation)) {
-            const matchingRead = executedReadCitations.find(
-              (r) =>
-                r.path === citation.path &&
-                r.contentDigest === citation.contentDigest,
-            );
-            if (matchingRead && session.validateCitation(matchingRead)) {
-              citation = matchingRead;
-            } else {
-              if (process.env.NODE_ENV === "development")
-                console.error(
-                  "[file agent citation session failure]:",
-                  JSON.stringify(citation),
-                );
-              throw new Error("unverified file citation");
-            }
           }
           const citedText = readCitationText.get(citation.citationId);
           if (!citedText || !supports(String(claim.text), [citedText]))
@@ -1761,77 +1940,7 @@ async function requestFileAgentResume(
         if (!(await session.validateCitationStability(citation)))
           throw new Error("file source changed before final validation");
     }
-    const skillCorpus = `${request.evidence.map((item) => item.factualText).join(" ")} ${(request.documentation ?? []).flatMap((group) => group.documents.map((document) => document.text)).join(" ")} ${(request.clarifications ?? []).map((c) => c.text).join(" ")}`;
-    const skillCategories = [
-      [
-        "Languages",
-        [
-          "TypeScript",
-          "JavaScript",
-          "Go",
-          "Python",
-          "C",
-          "C++",
-          "Rust",
-          "Java",
-          "SQL",
-          "HTML",
-          "CSS",
-        ],
-      ],
-      [
-        "Frameworks",
-        [
-          "React",
-          "Next.js",
-          "React Router",
-          "Node.js",
-          "Express",
-          "Flask",
-          "FastAPI",
-          "Vite",
-          "Tailwind CSS",
-        ],
-      ],
-      [
-        "Data & APIs",
-        [
-          "SQLite",
-          "PostgreSQL",
-          "MySQL",
-          "MongoDB",
-          "Mongoose",
-          "Supabase",
-          "REST APIs",
-          "Server-Sent Events",
-          "Swagger",
-        ],
-      ],
-      [
-        "Tools",
-        [
-          "Git",
-          "GitHub",
-          "Docker",
-          "Docker Compose",
-          "Bruno",
-          "Postman",
-          "SendGrid",
-          "n8n",
-          "Trello",
-          "ClickUp",
-          "VS Code",
-          "LM Studio",
-        ],
-      ],
-    ];
-    const synthesizedSkills = skillCategories
-      .map(
-        ([label, names]) =>
-          `${label}: ${(names as string[]).filter((item) => new RegExp(`\\b${item.replace(/[.+]/g, "\\$&")}\\b`, "i").test(skillCorpus)).join(", ")}`,
-      )
-      .filter((line) => !line.endsWith(": "))
-      .join("\n");
+    const synthesizedSkills = synthesizeSkills(request);
     const response = {
       schemaVersion: 1 as const,
       selectionEcho: request.consentFingerprint,
@@ -1844,6 +1953,7 @@ async function requestFileAgentResume(
         const isSkill = /(?:technical skills|skills|technologies)/i.test(
           section.heading,
         );
+        const isEducation = /education/i.test(section.heading);
         const hasManagedProject = session.roots.some(
           (r) =>
             r.label === "managed-work" &&
@@ -1868,6 +1978,8 @@ async function requestFileAgentResume(
             text = "No experience entries were documented.";
           } else if (isSkill) {
             text = synthesizedSkills || section.existingDetail;
+          } else if (isEducation) {
+            text = section.existingDetail.trim() || synthesizeEducation(request);
           } else {
             text = section.existingDetail;
           }
@@ -2720,6 +2832,19 @@ function specialistFallback(
   });
   const claims: ResumeCoachResponse["claims"] = [];
   const sections = baseline.sections.map((section) => {
+    const isSkill = /(?:technical skills|skills|technologies)/i.test(
+      section.heading,
+    );
+    if (isSkill) {
+      const skills = synthesizeSkills(request) || section.existingDetail;
+      return { heading: section.heading, text: skills };
+    }
+    const isEducation = /education/i.test(section.heading);
+    if (isEducation) {
+      const education =
+        section.existingDetail.trim() || synthesizeEducation(request);
+      return { heading: section.heading, text: education };
+    }
     const category = /(?:experience|employment|work)/i.test(section.heading)
       ? "experience"
       : /project/i.test(section.heading)

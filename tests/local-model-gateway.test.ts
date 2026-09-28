@@ -1165,6 +1165,235 @@ test("Resume Architect resolves model citation with customized citationId agains
   assert.deepEqual(result.unknowns, ["Ownership not established"]);
 });
 
+test("Resume Architect resolves model citation with sha256 placeholder against matching executed read file", async () => {
+  const executedCitation: ResumeFileCitation = {
+    citationId: "citation-3",
+    path: "resume-evidence.md",
+    startLine: 1,
+    endLine: 361,
+    contentDigest: `sha256:${"f".repeat(64)}`,
+  };
+  const session: ResumeFileReadSession = {
+    roots: [{ rootId: "root-1", label: "managed-work" }],
+    execute: async () => ({
+      ok: true,
+      type: "read",
+      rootId: "root-1",
+      path: "resume-evidence.md",
+      citation: executedCitation,
+      text: "Built Flask-based web application with SQLite backend for run record management and VCF file validation.",
+    }),
+    validateCitation: (value) =>
+      JSON.stringify(value) === JSON.stringify(executedCitation),
+  };
+  const base = { ...requestBase, baseline, fileReadSession: session };
+  const value = {
+    ...base,
+    consentFingerprint: resumeCoachConsentFingerprint(base),
+  };
+  let calls = 0;
+  const result = await requestResumeCoach(value, async () => {
+    calls += 1;
+    if (calls === 1) {
+      return native({
+        kind: "tool",
+        action: {
+          action: "read",
+          rootId: "root-1",
+          path: "resume-evidence.md",
+        },
+      });
+    }
+    const modelOutput = JSON.stringify({
+      output: [
+        {
+          type: "message",
+          content: JSON.stringify({
+            kind: "final",
+            edits: [
+              {
+                slotId: "projects",
+                text: "Flask Pipeline | SQLite\n- Built Flask-based web application with SQLite backend for run record management and VCF file validation.",
+                claims: [
+                  {
+                    text: "Built Flask-based web application with SQLite backend for run record management and VCF file validation.",
+                    citations: [
+                      {
+                        citationId: "citation-3",
+                        path: "resume-evidence.md",
+                        startLine: 1,
+                        endLine: 361,
+                        contentDigest: "sha256:placeholder",
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+            unknowns: [],
+          }),
+        },
+      ],
+    });
+    return new Response(modelOutput, {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  });
+  assert.equal(calls, 2);
+  assert.match(
+    result.sections.find((section) => section.heading === "Projects")?.text ??
+      "",
+    /Built Flask-based web application/,
+  );
+  const projectClaim = result.claims.find((c) =>
+    c.text.includes("Built Flask-based web application"),
+  );
+  assert.equal(
+    projectClaim?.fileCitations?.[0]?.contentDigest,
+    `sha256:${"f".repeat(64)}`,
+  );
+});
+
+test("specialistFallback synthesizes skills and validates when baseline has empty technical skills", async () => {
+  const base = {
+    ...requestBase,
+    baseline: {
+      ...baseline,
+      sections: baseline.sections.map((section) =>
+        section.heading === "Technical Skills"
+          ? { ...section, existingDetail: "" }
+          : section,
+      ),
+    },
+    evidence: [
+      {
+        id: "00000000-0000-7000-8000-000000000001",
+        contentDigest: `sha256:${"b".repeat(64)}`,
+        factualText:
+          "Developed TypeScript and React components with SQLite database storage.",
+        sourceDocument:
+          "resume-evidence/projects/Personal-Workbench/resume-evidence.md",
+      },
+    ],
+  };
+  const value = {
+    ...base,
+    consentFingerprint: resumeCoachConsentFingerprint(base),
+  };
+  const fallback = await requestResumeCoach(
+    value,
+    async () =>
+      new Response(
+        JSON.stringify({ output: [{ type: "tool_call", content: "{}" }] }),
+        { status: 200 },
+      ),
+  );
+  const skills = fallback.sections.find(
+    (section) => section.heading === "Technical Skills",
+  );
+  assert.ok(skills?.text.includes("Languages: TypeScript"));
+  assert.ok(skills?.text.includes("Frameworks: React"));
+  assert.ok(skills?.text.includes("Data & APIs: SQLite"));
+});
+
+test("Resume Architect populates Education from profileSnapshot when baseline Education is empty", async () => {
+  const profile = {
+    firstName: "Adrian",
+    lastName: "Javier",
+    school: "University of the Philippines",
+    program: "BS Computer Science",
+    graduationYear: 2026,
+    latinHonors: "Magna Cum Laude",
+    gwa: "1.25",
+  };
+  const executedCitation: ResumeFileCitation = {
+    citationId: "citation-1",
+    path: "resume-evidence.md",
+    startLine: 1,
+    endLine: 289,
+    contentDigest: `sha256:${"a".repeat(64)}`,
+  };
+  const session: ResumeFileReadSession = {
+    roots: [{ rootId: "root-1", label: "managed-work" }],
+    execute: async () => ({
+      ok: true,
+      type: "read",
+      rootId: "root-1",
+      path: "resume-evidence.md",
+      citation: executedCitation,
+      text: "Built Flask-based web application with SQLite backend for run record management and VCF file validation.",
+    }),
+    validateCitation: (value) =>
+      JSON.stringify(value) === JSON.stringify(executedCitation),
+  };
+  const base = {
+    ...requestBase,
+    profileSnapshot: JSON.stringify(profile),
+    baseline: {
+      ...baseline,
+      sections: baseline.sections.map((section) =>
+        section.heading === "Education"
+          ? { ...section, existingDetail: "" }
+          : section,
+      ),
+    },
+    fileReadSession: session,
+  };
+  const value = {
+    ...base,
+    consentFingerprint: resumeCoachConsentFingerprint(base),
+  };
+  let calls = 0;
+  const result = await requestResumeCoach(value, async () => {
+    calls += 1;
+    if (calls === 1) {
+      return native({
+        kind: "tool",
+        action: {
+          action: "read",
+          rootId: "root-1",
+          path: "resume-evidence.md",
+        },
+      });
+    }
+    return new Response(
+      JSON.stringify({
+        output: [
+          {
+            type: "message",
+            content: JSON.stringify({
+              kind: "final",
+              edits: [
+                {
+                  slotId: "projects",
+                  text: "Flask Pipeline | SQLite\n- Built Flask-based web application with SQLite backend for run record management and VCF file validation.",
+                  claims: [
+                    {
+                      text: "Built Flask-based web application with SQLite backend for run record management and VCF file validation.",
+                      citations: [executedCitation],
+                    },
+                  ],
+                },
+              ],
+              unknowns: [],
+            }),
+          },
+        ],
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  });
+  const educationSection = result.sections.find(
+    (section) => section.heading === "Education",
+  );
+  assert.ok(educationSection?.text.includes("University of the Philippines"));
+  assert.ok(educationSection?.text.includes("BS Computer Science"));
+  assert.ok(educationSection?.text.includes("2026"));
+  assert.ok(educationSection?.text.includes("Magna Cum Laude"));
+  assert.ok(educationSection?.text.includes("GWA 1.25"));
+});
+
 test("Resume Architect filters out unrequested non-work sections like education and skills from file agent output", async () => {
   const citation: ResumeFileCitation = {
     citationId: "citation-1",
@@ -3220,3 +3449,85 @@ Let me know if you need further adjustments!`;
   assert.equal(result.selectionEcho, value.consentFingerprint);
   assert.equal(result.sections.length, 4);
 });
+
+test("Resume Coach recovers when model emits prefix labels and multiple tool JSON lines", async () => {
+  const citation = {
+    citationId: "citation-gemma-1",
+    path: "resume-evidence.md",
+    startLine: 1,
+    endLine: 2,
+    contentDigest: `sha256:${"e".repeat(64)}`,
+  };
+  const session: ResumeFileReadSession = {
+    roots: [
+      {
+        rootId: "root-1",
+        label: "managed-work",
+        name: "BioEvidence",
+        category: "project",
+      },
+    ],
+    execute: async () => ({
+      ok: true,
+      type: "read",
+      rootId: "root-1",
+      path: "resume-evidence.md",
+      citation,
+      text: "Built accessible TypeScript interfaces.",
+    }),
+    validateCitation: (value) =>
+      JSON.stringify(value) === JSON.stringify(citation),
+  };
+  const base = { ...requestBase, baseline, fileReadSession: session };
+  const value = {
+    ...base,
+    consentFingerprint: resumeCoachConsentFingerprint(base),
+  };
+  let calls = 0;
+  const result = await requestResumeCoach(value, async () => {
+    calls += 1;
+    if (calls === 1) {
+      // Model emits multi-line output with prefixed labels (e.g. gemma-4-e4b turn 1)
+      const multiLineGemmaOutput = `List directory: {"kind":"tool","action":{"action":"read","rootId":"root-1","path":"resume-evidence.md"}}
+List directory: {"kind":"tool","action":{"action":"read","rootId":"root-2","path":"resume-evidence.md"}}`;
+      return new Response(
+        JSON.stringify({
+          output: [{ type: "message", content: multiLineGemmaOutput }],
+        }),
+        { status: 200 },
+      );
+    }
+    return new Response(
+      JSON.stringify({
+        output: [
+          {
+            type: "message",
+            content: JSON.stringify({
+              kind: "final",
+              edits: [
+                {
+                  slotId: "projects",
+                  text: "BioEvidence | Validation app | TypeScript\n- Built accessible TypeScript interfaces.",
+                  claims: [
+                    {
+                      text: "Built accessible TypeScript interfaces.",
+                      citations: [citation],
+                    },
+                  ],
+                },
+              ],
+              unknowns: [],
+            }),
+          },
+        ],
+      }),
+      { status: 200 },
+    );
+  });
+  assert.equal(calls, 2);
+  assert.match(
+    result.sections.find((s) => s.heading === "Projects")?.text ?? "",
+    /Built accessible TypeScript interfaces/,
+  );
+});
+
