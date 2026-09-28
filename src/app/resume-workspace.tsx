@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { BaseResumeImporter } from "@/app/base-resume-importer";
-import { ResumeCoach } from "@/app/resume-coach";
+import { ResumeStudio } from "@/app/resume-studio";
 import { ResumeWorkspacePicker } from "@/app/resume-workspace-picker";
 import { ResumeOnboarding } from "@/app/resume-onboarding";
 import { bootstrapBundledBaseResume } from "@/domain/base-resume/import-base-resume";
@@ -173,7 +173,7 @@ export async function ResumeWorkspace() {
     );
   return (
     <div className="workspace-shell resume-workspace">
-      <header className="sr-only" aria-hidden="true">
+      <div className="sr-only" aria-hidden="true">
         <div className="resume-head-copy">
           <p className="eyebrow">Resume</p>
           <h1 aria-label="Shape your base resume">Shape your base resume</h1>
@@ -183,10 +183,10 @@ export async function ResumeWorkspace() {
             <Link href="/evidence">Experience &amp; Projects</Link>.
           </p>
         </div>
-      </header>
+      </div>
       {!baselineReady ? <BaseResumeImporter /> : null}
       <section id="resume-edit" aria-label="Resume Edit">
-        <ResumeCoach
+        <ResumeStudio
           workspacePicker={
             <ResumeWorkspacePicker
               workspaces={workspaceState.workspaces}

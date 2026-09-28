@@ -95,11 +95,6 @@ export function ResumeWorkspacePicker({
             {activeWorkspace?.name ??
               (hasWorkspaces ? "Select Resume" : "New Resume")}
           </span>
-          {activeWorkspace ? (
-            <span className="trigger-badge">
-              {journeyLabel(activeWorkspace)}
-            </span>
-          ) : null}
         </div>
         <span className="trigger-chevron" aria-hidden="true">
           {isOpen ? "▲" : "▼"}

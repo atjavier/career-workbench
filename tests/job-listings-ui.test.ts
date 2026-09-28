@@ -2,9 +2,20 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
+const readJobsUI = async () => {
+  const files = await Promise.all([
+    readFile(new URL("../src/app/job-listings.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/app/opportunity-card.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/app/opportunity-search.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/app/opportunity-subnav.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/app/opportunity-empty-state.tsx", import.meta.url), "utf8"),
+  ]);
+  return files.join("\n");
+};
+
 test("Jobs renders the captured Opportunity Library rather than legacy discovery listings", async () => {
   const [ui, page, settings] = await Promise.all([
-    readFile(new URL("../src/app/job-listings.tsx", import.meta.url), "utf8"),
+    readJobsUI(),
     readFile(new URL("../src/app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/app/[section]/page.tsx", import.meta.url), "utf8"),
   ]);
@@ -36,10 +47,7 @@ test("Jobs renders the captured Opportunity Library rather than legacy discovery
 });
 
 test("Captured opportunity cards preserve local attribution and an explicit outbound handoff", async () => {
-  const ui = await readFile(
-    new URL("../src/app/job-listings.tsx", import.meta.url),
-    "utf8",
-  );
+  const ui = await readJobsUI();
   for (const token of [
     "Open original page",
     'target="_blank"',
@@ -60,7 +68,7 @@ test("Captured opportunity cards preserve local attribution and an explicit outb
 
 test("Jobs keeps the capture dialog, local search, accessible states, and narrow reflow contracts", async () => {
   const [ui, styles] = await Promise.all([
-    readFile(new URL("../src/app/job-listings.tsx", import.meta.url), "utf8"),
+    readJobsUI(),
     readFile(new URL("../src/app/globals.css", import.meta.url), "utf8"),
   ]);
   for (const token of [
@@ -93,7 +101,7 @@ test("Jobs keeps the capture dialog, local search, accessible states, and narrow
 
 test("Fit explanation requires consent and preserves local-AI provenance and handoff safety", async () => {
   const [ui, assessment] = await Promise.all([
-    readFile(new URL("../src/app/job-listings.tsx", import.meta.url), "utf8"),
+    readJobsUI(),
     readFile(
       new URL("../src/app/opportunity-assessment.tsx", import.meta.url),
       "utf8",
@@ -121,7 +129,7 @@ test("Fit explanation requires consent and preserves local-AI provenance and han
 
 test("Stitch Job Board provides company logo badge, search clear ref, and safe outbound host parsing", async () => {
   const [ui, styles] = await Promise.all([
-    readFile(new URL("../src/app/job-listings.tsx", import.meta.url), "utf8"),
+    readJobsUI(),
     readFile(new URL("../src/app/globals.css", import.meta.url), "utf8"),
   ]);
   for (const token of [

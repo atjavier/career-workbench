@@ -70,6 +70,7 @@ test("polished presentation stays local, truthful, and accessible", async () => 
         "application-shell.tsx",
         "compact-navigation.tsx",
         "job-listings.tsx",
+        "opportunity-empty-state.tsx",
         "applications.tsx",
         "current-base-resume.tsx",
         "evidence-review.tsx",

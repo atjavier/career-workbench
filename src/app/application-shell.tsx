@@ -101,11 +101,6 @@ const destinations: readonly NavItem[] = [
         label: "Resume Preview",
         description: "Coach review & live PDF canvas",
       },
-      {
-        href: "/resume/coach",
-        label: "Career Coach",
-        description: "Interactive advisor & ATS audits (Pro)",
-      },
     ],
   },
   {
@@ -138,17 +133,15 @@ export async function ApplicationShell({
       ? "Experience & Projects"
       : active === "Coach Q&A"
         ? "Coach Q&A"
-        : active === "Career Coach"
-          ? "Career Coach"
-          : active === "Resume Preview"
+        : active === "Resume Preview"
+          ? "Resume Preview"
+          : active === "Resume Studio"
             ? "Resume Preview"
-            : active === "Resume Studio"
+            : active === "Resume"
               ? "Resume Preview"
-              : active === "Resume"
+              : active === "Base Resume"
                 ? "Resume Preview"
-                : active === "Base Resume"
-                  ? "Resume Preview"
-                  : active);
+                : active);
 
   const isResumeActive =
     active === "Resume" ||
@@ -157,13 +150,11 @@ export async function ApplicationShell({
     active === "Base Resume" ||
     active === "Experience & Projects" ||
     active === "Coach Q&A" ||
-    active === "Career Coach" ||
     effectiveSubActive === "Resume Preview" ||
     effectiveSubActive === "Resume Studio" ||
     effectiveSubActive === "Base Resume" ||
     effectiveSubActive === "Coach Q&A" ||
-    effectiveSubActive === "Experience & Projects" ||
-    effectiveSubActive === "Career Coach";
+    effectiveSubActive === "Experience & Projects";
 
   const resumeSubItems: NavSubItem[] = [
     {
@@ -171,7 +162,7 @@ export async function ApplicationShell({
       label: "Experience & Projects",
       description: "Documented collections & folders",
     },
-    ...(phase === "interview"
+    ...(phase === "interview" || active === "Coach Q&A"
       ? [
           {
             href: "/resume/interview",
@@ -184,11 +175,6 @@ export async function ApplicationShell({
       href: "/resume",
       label: "Resume Preview",
       description: "Coach review & live PDF canvas",
-    },
-    {
-      href: "/resume/coach",
-      label: "Career Coach",
-      description: "Interactive advisor & ATS audits (Pro)",
     },
   ];
 

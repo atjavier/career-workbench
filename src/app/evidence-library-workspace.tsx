@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { EvidenceLibrary } from "@/app/evidence-library";
+import { PageHeader } from "@/app/page-header";
 import { ResumeWorkspacePicker } from "@/app/resume-workspace-picker";
 import { listExperienceProjectCollection } from "@/domain/evidence/evidence-library";
 import { readResumeWorkspaceState } from "@/domain/resume-generation/resume-workspace-commands";
@@ -30,21 +31,19 @@ export async function EvidenceLibraryWorkspace() {
   ]);
   return (
     <div className="workspace-shell resume-workspace experience-projects-workspace">
-      <header className="resume-page-head">
-        <div className="resume-head-copy">
-          <h1>Experience &amp; Projects</h1>
-          <p>
-            Keep source folders separate from the reviewable evidence behind
-            your resume.
-          </p>
-        </div>
-        <div className="resume-view-tabs sr-only" aria-hidden="true" />
-        <ResumeWorkspacePicker
-          workspaces={workspaceState.workspaces}
-          activeWorkspaceId={workspaceState.activeWorkspace?.id}
-          revisionNumber={workspaceState.revisionNumber}
-        />
-      </header>
+      <PageHeader
+        className="resume-page-head"
+        title="Experience &amp; Projects"
+        subtitle="Keep source folders separate from the reviewable evidence behind your resume."
+        actions={
+          <ResumeWorkspacePicker
+            workspaces={workspaceState.workspaces}
+            activeWorkspaceId={workspaceState.activeWorkspace?.id}
+            revisionNumber={workspaceState.revisionNumber}
+          />
+        }
+      />
+      <div className="resume-view-tabs sr-only" aria-hidden="true" />
       <section id="experience-projects" aria-label="Experience and Projects">
         <EvidenceLibrary
           collection={collection.items}

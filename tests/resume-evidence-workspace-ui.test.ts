@@ -22,7 +22,7 @@ test("Resume presents Coach and preview panes while Experience & Projects makes 
       new URL("../src/app/resume-workspace.tsx", import.meta.url),
       "utf8",
     ),
-    readFile(new URL("../src/app/resume-coach.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/app/resume-studio.tsx", import.meta.url), "utf8"),
     readFile(
       new URL("../src/app/evidence-library-workspace.tsx", import.meta.url),
       "utf8",
@@ -78,7 +78,7 @@ test("the registered workflow separates folder documentation from base-resume ge
       new URL("../src/files/evidence-library.ts", import.meta.url),
       "utf8",
     ),
-    readFile(new URL("../src/app/resume-coach.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/app/resume-studio.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/app/actions.ts", import.meta.url), "utf8"),
     readFile(
       new URL(
@@ -141,7 +141,7 @@ test("existing generated resumes retain their Coach and preview workspace", asyn
       new URL("../src/app/resume-profile-form.tsx", import.meta.url),
       "utf8",
     ),
-    readFile(new URL("../src/app/resume-coach.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/app/resume-studio.tsx", import.meta.url), "utf8"),
     readFile(
       new URL("../src/app/current-base-resume.tsx", import.meta.url),
       "utf8",
@@ -188,7 +188,7 @@ test("existing generated resumes retain their Coach and preview workspace", asyn
 
 test("generated resumes offer an accessible evidence-based regeneration control without a revision request input", async () => {
   const [coach, actions] = await Promise.all([
-    readFile(new URL("../src/app/resume-coach.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/app/resume-studio.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/app/actions.ts", import.meta.url), "utf8"),
   ]);
 

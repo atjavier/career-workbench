@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { InterviewView } from "@/domain/resume-generation/resume-clarification-interview";
@@ -28,10 +28,11 @@ export function ResumeInterview({
   const [pendingCandidate, setPendingCandidate] = useState("");
   const [progress, setProgress] = useState("");
   const [goalsCollapsed, setGoalsCollapsed] = useState(false);
+  const [pastTaskIds, setPastTaskIds] = useState<Set<string>>(() => new Set());
+  const [sessionInitialized, setSessionInitialized] = useState(false);
   const lastAnnouncement = useRef(0);
   const openingTaskId = useRef<string | null>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
   const current = interview.current;
   const streaming = streamState.kind === "streaming";
 
@@ -44,6 +45,71 @@ export function ResumeInterview({
       // ignore localStorage
     }
   }, []);
+
+  useEffect(() => {
+    try {
+      const storageKey = `career_workbench_coach_session_${workspaceId}`;
+      const stored = sessionStorage.getItem(storageKey);
+      if (stored) {
+        const parsed = JSON.parse(stored) as { pastTaskIds?: string[]; completedQueue?: boolean } | string[];
+        if (Array.isArray(parsed)) {
+          setPastTaskIds(new Set(parsed));
+          setSessionInitialized(true);
+          return;
+        }
+        if (parsed && typeof parsed === "object" && Array.isArray(parsed.pastTaskIds)) {
+          if (!parsed.completedQueue || (!current && interview.remaining === 0)) {
+            setPastTaskIds(new Set(parsed.pastTaskIds));
+            setSessionInitialized(true);
+            return;
+          }
+        }
+      }
+      const initialPast = interview.completed.map((t) => t.id);
+      const isComplete = !current && interview.remaining === 0;
+      sessionStorage.setItem(
+        storageKey,
+        JSON.stringify({
+          pastTaskIds: initialPast,
+          completedQueue: isComplete,
+        }),
+      );
+      setPastTaskIds(new Set(initialPast));
+    } catch {
+      // ignore storage
+    }
+    setSessionInitialized(true);
+  }, [workspaceId, current, interview.remaining, interview.completed]);
+
+  useEffect(() => {
+    if (!sessionInitialized) return;
+    if (!current && interview.remaining === 0) {
+      try {
+        const storageKey = `career_workbench_coach_session_${workspaceId}`;
+        sessionStorage.setItem(
+          storageKey,
+          JSON.stringify({
+            pastTaskIds: Array.from(pastTaskIds),
+            completedQueue: true,
+          }),
+        );
+      } catch {
+        // ignore storage
+      }
+    }
+  }, [current, interview.remaining, pastTaskIds, sessionInitialized, workspaceId]);
+
+  const displayedTurns = useMemo(() => {
+    if (!sessionInitialized || pastTaskIds.size === 0) return interview.turns;
+    return interview.turns.filter((turn) => !pastTaskIds.has(turn.taskId));
+  }, [interview.turns, pastTaskIds, sessionInitialized]);
+
+  const displayedCompleted = useMemo(() => {
+    if (!sessionInitialized || pastTaskIds.size === 0) return interview.completed;
+    return interview.completed.filter((task) => !pastTaskIds.has(task.id));
+  }, [interview.completed, pastTaskIds, sessionInitialized]);
+
+  const displayedTotal = displayedCompleted.length + interview.remaining;
 
   const toggleGoals = useCallback((next: boolean) => {
     setGoalsCollapsed(next);
@@ -160,26 +226,32 @@ export function ResumeInterview({
     void sendStream("", true);
   }, [current, interview.turns, sendStream]);
 
-  const scrollToBottom = useCallback((smooth = true) => {
+  const scrollToBottom = useCallback((smooth = false) => {
     const messages = messagesRef.current;
-    if (messages) messages.scrollTop = messages.scrollHeight;
-    messagesEndRef.current?.scrollIntoView({
-      behavior: smooth ? "smooth" : "auto",
-      block: "end",
-    });
+    if (!messages) return;
+    if (smooth && typeof messages.scrollTo === "function") {
+      messages.scrollTo({
+        top: messages.scrollHeight,
+        behavior: "smooth",
+      });
+    } else {
+      messages.scrollTop = messages.scrollHeight;
+    }
   }, []);
 
   useEffect(() => {
-    const messages = messagesRef.current;
-    if (messages) messages.scrollTop = messages.scrollHeight;
-    messagesEndRef.current?.scrollIntoView({ block: "end" });
-    const frameId = requestAnimationFrame(() => {
-      const msgs = messagesRef.current;
-      if (msgs) msgs.scrollTop = msgs.scrollHeight;
-      messagesEndRef.current?.scrollIntoView({ block: "end" });
-    });
-    return () => cancelAnimationFrame(frameId);
-  }, [interview.turns, partial, pendingCandidate, streaming]);
+    const scrollDown = () => {
+      const messages = messagesRef.current;
+      if (messages) messages.scrollTop = messages.scrollHeight;
+    };
+    scrollDown();
+    const frameId = requestAnimationFrame(scrollDown);
+    const timer = setTimeout(scrollDown, 50);
+    return () => {
+      cancelAnimationFrame(frameId);
+      clearTimeout(timer);
+    };
+  }, [displayedTurns, partial, pendingCandidate, streaming]);
 
   return (
     <section
@@ -203,23 +275,15 @@ export function ResumeInterview({
           <div id="coach-chat-content" className="coach-chat-content">
             {current ? (
               <div className="coach-chat-context">
-                <div className="coach-context-header">
-                  <span className="coach-context-tag">Current goal</span>
-                  <span className="coach-context-item">
-                    {current.itemName} ({current.itemCategory})
-                  </span>
-                  {goalsCollapsed ? (
-                    <button
-                      type="button"
-                      className="coach-inline-expand-goals"
-                      onClick={() => toggleGoals(false)}
-                      title="Expand Goals & Progress"
-                    >
-                      Show Goals ({interview.completed.length}/{interview.total})
-                    </button>
-                  ) : null}
+                <div className="coach-context-inner">
+                  <div className="coach-context-header">
+                    <span className="coach-context-tag">Current goal</span>
+                    <span className="coach-context-item">
+                      {current.itemName} ({current.itemCategory})
+                    </span>
+                  </div>
+                  <p className="coach-context-question">{current.question}</p>
                 </div>
-                <p className="coach-context-question">{current.question}</p>
               </div>
             ) : null}
             <div className="coach-messages" ref={messagesRef}>
@@ -228,7 +292,7 @@ export function ResumeInterview({
                 className="coach-transcript"
                 aria-busy={streaming}
               >
-                {interview.turns.map((turn) => (
+                {displayedTurns.map((turn) => (
                   <li
                     key={turn.id}
                     className={
@@ -245,34 +309,9 @@ export function ResumeInterview({
                       }`}
                       aria-hidden="true"
                     >
-                      {turn.role === "coach" ? (
-                        <svg
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          width="12"
-                          height="12"
-                        >
-                          <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
-                        </svg>
-                      ) : (
-                        <svg
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          width="12"
-                          height="12"
-                        >
-                          <circle cx="12" cy="8" r="4" />
-                          <path d="M20 21a8 8 0 0 0-16 0" />
-                        </svg>
-                      )}
+                      <span className="avatar-monogram">
+                        {turn.role === "coach" ? "C" : "Y"}
+                      </span>
                     </div>
                     <div className="message-bubble-wrapper">
                       <div className="message-header-row">
@@ -290,19 +329,7 @@ export function ResumeInterview({
                       className="message-avatar candidate-avatar"
                       aria-hidden="true"
                     >
-                      <svg
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        width="12"
-                        height="12"
-                      >
-                        <circle cx="12" cy="8" r="4" />
-                        <path d="M20 21a8 8 0 0 0-16 0" />
-                      </svg>
+                      <span className="avatar-monogram">Y</span>
                     </div>
                     <div className="message-bubble-wrapper">
                       <div className="message-header-row">
@@ -321,18 +348,7 @@ export function ResumeInterview({
                       className="message-avatar coach-avatar"
                       aria-hidden="true"
                     >
-                      <svg
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        width="12"
-                        height="12"
-                      >
-                        <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
-                      </svg>
+                      <span className="avatar-monogram">C</span>
                     </div>
                     <div className="message-bubble-wrapper">
                       <div className="message-header-row">
@@ -353,12 +369,11 @@ export function ResumeInterview({
                 ) : null}
               </ol>
               <div
-                ref={messagesEndRef}
-                style={{ height: "1px", width: "100%", pointerEvents: "none" }}
+                style={{ height: "1.5rem", width: "100%", flexShrink: 0, pointerEvents: "none" }}
                 aria-hidden="true"
               />
             </div>
-            {interview.completed.some((task) => task.needsReview) ? (
+            {displayedCompleted.some((task) => task.needsReview) ? (
               <p className="coach-inline-status status status-error">
                 Review needed: this answer may conflict with documented
                 evidence.
@@ -408,34 +423,22 @@ export function ResumeInterview({
                     />
                     <button
                       type="submit"
-                      className="coach-send-button"
+                      className="coach-send-button affirmative-action"
                       aria-label="Send message"
                       disabled={streaming}
                     >
                       {streaming ? (
-                        <span className="send-spinner" aria-hidden="true" />
+                        <>
+                          <span className="send-spinner" aria-hidden="true" />
+                          <span>Responding…</span>
+                        </>
                       ) : (
-                        <svg
-                          width="16"
-                          height="16"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2.5"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        >
-                          <path d="m22 2-7 20-4-9-9-4Z" />
-                          <path d="M22 2 11 13" />
-                        </svg>
+                        <span>Send</span>
                       )}
-                      <span>Send</span>
                     </button>
                   </div>
                   <p className="coach-composer-note">
-                    Local Coach Resume only. It completes a goal when it has an
-                    adequate answer, an explicit unknown, or one needed detail
-                    to clarify.
+                    Local Coach Resume only. Press Enter to send • Shift+Enter for new line
                   </p>
                 </form>
                 {streamState.kind === "error" ? (
@@ -472,11 +475,14 @@ export function ResumeInterview({
                 </div>
                 <h3>All Evidence Clarified</h3>
                 <p>
-                  All current questions are complete. Your evidence is ready for
-                  the next resume step.
+                  All clarification questions have been answered. Your verified
+                  experience is ready to proceed to Base Resume generation.
                 </p>
-                <Link href="/resume" className="coach-complete-cta affirmative-action">
-                  Go to Base Resume →
+                <Link
+                  href="/resume"
+                  className="coach-complete-cta affirmative-action"
+                >
+                  Proceed to Resume Generation →
                 </Link>
               </div>
             )}
@@ -488,16 +494,16 @@ export function ResumeInterview({
           }`}
           aria-label="Clarification goals"
         >
-          {goalsCollapsed ? (
-            <div className="coach-rail-content">
-              <div className="coach-rail-header">
-                <button
-                  type="button"
-                  className="sidebar-collapse-button coach-sidebar-toggle-btn"
-                  onClick={() => toggleGoals(false)}
-                  title="Expand sidebar"
-                  aria-label="Expand sidebar"
-                >
+          <div className="coach-rail-content" aria-hidden={!goalsCollapsed}>
+            <div className="coach-rail-header">
+              <button
+                type="button"
+                className="coach-sidebar-toggle-btn"
+                onClick={() => toggleGoals(false)}
+                title="Expand sidebar"
+                aria-label="Expand sidebar"
+                tabIndex={goalsCollapsed ? 0 : -1}
+              >
                   <svg
                     width="18"
                     height="18"
@@ -515,13 +521,13 @@ export function ResumeInterview({
                 </button>
                 <span
                   className="insights-counter rail-counter"
-                  title={`${interview.completed.length} of ${interview.total} questions complete`}
+                  title={`${displayedCompleted.length} of ${displayedTotal} questions complete`}
                 >
-                  {interview.completed.length}/{interview.total}
+                  {displayedCompleted.length}/{displayedTotal}
                 </span>
               </div>
               <ol className="coach-goals-rail" aria-label="Clarification goals">
-                {interview.completed.map((task) => (
+                {displayedCompleted.map((task) => (
                   <li
                     key={task.id}
                     className="coach-goal-rail-item coach-goal-complete"
@@ -550,24 +556,25 @@ export function ResumeInterview({
                 ) : null}
               </ol>
             </div>
-          ) : (
-            <>
-              <div className="coach-insights-head">
-                <div>
-                  <p className="eyebrow">Goals &amp; Progress</p>
-                  <h3 className="coach-insights-title">Clarification Roadmap</h3>
-                </div>
-                <div className="coach-insights-head-actions">
-                  <span className="insights-counter">
-                    {interview.completed.length}/{interview.total}
-                  </span>
-                  <button
-                    type="button"
-                    className="sidebar-collapse-button coach-sidebar-toggle-btn"
-                    onClick={() => toggleGoals(true)}
-                    title="Collapse sidebar"
-                    aria-label="Collapse sidebar"
-                  >
+
+          <div className="coach-goals-expanded" aria-hidden={goalsCollapsed}>
+            <div className="coach-insights-head">
+              <div>
+                <p className="eyebrow">Goals &amp; Progress</p>
+                <h3 className="coach-insights-title">Clarification Roadmap</h3>
+              </div>
+              <div className="coach-insights-head-actions">
+                <span className="insights-counter">
+                  {displayedCompleted.length}/{displayedTotal}
+                </span>
+                <button
+                  type="button"
+                  className="coach-sidebar-toggle-btn"
+                  onClick={() => toggleGoals(true)}
+                  title="Collapse sidebar"
+                  aria-label="Collapse sidebar"
+                  tabIndex={goalsCollapsed ? -1 : 0}
+                >
                     <svg
                       width="18"
                       height="18"
@@ -590,9 +597,9 @@ export function ResumeInterview({
                   className="coach-progress-bar-fill"
                   style={{
                     width: `${
-                      interview.total > 0
+                      displayedTotal > 0
                         ? Math.round(
-                            (interview.completed.length / interview.total) * 100,
+                            (displayedCompleted.length / displayedTotal) * 100,
                           )
                         : 0
                     }%`,
@@ -600,14 +607,14 @@ export function ResumeInterview({
                 />
               </div>
               <p className="coach-insights-intro">
-                {interview.completed.length} of {interview.total} questions
+                {displayedCompleted.length} of {displayedTotal} questions
                 complete.{" "}
                 {interview.remaining === 0
                   ? "All goals complete! Your evidence is fully clarified."
                   : `${interview.remaining} goal${interview.remaining === 1 ? "" : "s"} remaining.`}
               </p>
               <ol className="coach-goals" aria-label="Clarification goals">
-                {interview.completed.map((task) => (
+                {displayedCompleted.map((task) => (
                   <li key={task.id} className="coach-goal coach-goal-complete">
                     <span className="goal-check-icon" aria-hidden="true">
                       <svg viewBox="0 0 16 16" fill="currentColor" width="10" height="10">
@@ -640,8 +647,7 @@ export function ResumeInterview({
                   </li>
                 ) : null}
               </ol>
-            </>
-          )}
+            </div>
         </aside>
         <p
           className="sr-only"

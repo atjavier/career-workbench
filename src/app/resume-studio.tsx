@@ -21,6 +21,7 @@ import {
 } from "@/app/actions";
 import type { MaterialDraftView } from "@/domain/resume-generation/material-draft-commands";
 import { ResumePdfPreview } from "@/app/resume-pdf-preview";
+import { PageHeader } from "@/app/page-header";
 
 const initialHandoff: MaterialDraftHandoffActionState = {
   status: "idle",
@@ -31,7 +32,7 @@ const initialGeneration: ResumeCoachActionState = {
   summary: "",
 };
 
-export function ResumeCoach({
+export function ResumeStudio({
   available,
   unavailableReason,
   showSetupLink = false,
@@ -136,6 +137,9 @@ export function ResumeCoach({
     (Boolean(generationMessage) &&
       !generationMessage?.startsWith("Your resume has not been generated"));
 
+  const MIN_SCALE = 0.5;
+  const MAX_SCALE = 2.5;
+
   const [scale, setScale] = useState(1.0);
   const [isAutoFit, setIsAutoFit] = useState(true);
   const studioRef = useRef<HTMLDivElement>(null);
@@ -201,20 +205,53 @@ export function ResumeCoach({
     };
   }, [isAutoFit, calculateHalfPageFit]);
 
-  const handleZoomIn = () => {
+  const handleZoomIn = useCallback(() => {
     setIsAutoFit(false);
-    setScale((prev) => Math.min(Number((prev + 0.1).toFixed(2)), 1.5));
-  };
+    setScale((prev) => Math.min(Number((prev + 0.1).toFixed(2)), MAX_SCALE));
+  }, []);
 
-  const handleZoomOut = () => {
+  const handleZoomOut = useCallback(() => {
     setIsAutoFit(false);
-    setScale((prev) => Math.max(Number((prev - 0.1).toFixed(2)), 0.5));
-  };
+    setScale((prev) => Math.max(Number((prev - 0.1).toFixed(2)), MIN_SCALE));
+  }, []);
 
-  const handleZoomReset = () => {
+  const handleZoomReset = useCallback(() => {
     setIsAutoFit(false);
     setScale(1.0);
-  };
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+
+      if ((e.metaKey || e.ctrlKey) && (e.key === "=" || e.key === "+")) {
+        e.preventDefault();
+        handleZoomIn();
+      } else if ((e.metaKey || e.ctrlKey) && (e.key === "-" || e.key === "_")) {
+        e.preventDefault();
+        handleZoomOut();
+      } else if ((e.metaKey || e.ctrlKey) && e.key === "0") {
+        e.preventDefault();
+        handleZoomReset();
+      } else if (!e.metaKey && !e.ctrlKey && !e.altKey) {
+        if (e.key === "f" || e.key === "F") {
+          e.preventDefault();
+          handleZoomFit();
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleZoomIn, handleZoomOut, handleZoomReset, handleZoomFit]);
 
   return (
     <div ref={studioRef} className="resume-coach-preview-layout resume-minimal-studio">
@@ -254,207 +291,36 @@ export function ResumeCoach({
           <h2 id="resume-generated-preview-heading">Resume</h2>
         </div>
 
-        {/* Modern Top Control Bar */}
-        <div className="resume-studio-toolbar" role="toolbar" aria-label="Resume Document Tools">
-          {/* Left: Workspace & Live Status */}
-          <div className="toolbar-section toolbar-section-left">
-            {workspacePicker ? (
-              <>
-                <div className="toolbar-workspace-picker-wrap">
-                  {workspacePicker}
-                </div>
-                <span className="toolbar-divider" aria-hidden="true" />
-              </>
-            ) : null}
-            {generationNeeded || revisionPending ? (
-              <>
-                <span
-                  className="preview-status-pill preview-status-stale"
-                  aria-label="Status: Updates available — Needs regeneration"
-                >
-                  <span className="status-dot amber-dot" aria-hidden="true" />
-                  Out of date — Changes detected
-                </span>
-                <form
-                  action={revisionAction}
-                  aria-busy={revisionPending}
-                  className="toolbar-action-form"
-                >
-                  <input
-                    type="hidden"
-                    name="generationCommand"
-                    value="revision"
-                  />
-                  <input
-                    type="hidden"
-                    name="workspaceId"
-                    value={workspaceId ?? ""}
-                  />
-                  <button
-                    type="submit"
-                    disabled={revisionPending}
-                    className="toolbar-btn toolbar-btn-highlight"
-                    title="Regenerate resume with local AI"
-                  >
-                    <svg
-                      width="14"
-                      height="14"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2.2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      aria-hidden="true"
-                      className={revisionPending ? "spin-icon" : ""}
-                    >
-                      <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
-                    </svg>
-                    <span>{revisionPending ? "Regenerating resume…" : "Regenerate resume"}</span>
-                  </button>
-                </form>
-              </>
+        <PageHeader
+          className="resume-page-head"
+          title="Preview"
+          titleAddon={
+            generationNeeded || revisionPending ? (
+              <span
+                className="preview-status-pill preview-status-stale"
+                aria-label="Status: Updates available — Needs regeneration"
+              >
+                <span className="status-dot amber-dot" aria-hidden="true" />
+                <span className="status-label-full">Out of date — Changes detected</span>
+                <span className="status-label-short" aria-hidden="true">Updates pending</span>
+              </span>
             ) : proposalVisible ? (
               <span
                 className="preview-status-pill preview-status-ready"
                 aria-label="Status: Document compiled"
               >
                 <span className="status-dot green-dot" aria-hidden="true" />
-                Up to date
+                <span className="status-label-full">Up to date</span>
+                <span className="status-label-short" aria-hidden="true">Current</span>
               </span>
-            ) : null}
-          </div>
+            ) : null
+          }
+          subtitle="Preview of the generated or compiled PDF."
+          actions={workspacePicker}
+        />
 
-          {/* Center: Zoom & View Controls */}
-          {proposalVisible ? (
-            <div className="toolbar-section toolbar-section-center">
-              <div
-                className="toolbar-zoom-group"
-                role="group"
-                aria-label="Zoom and resize controls"
-              >
-                <button
-                  type="button"
-                  className="toolbar-zoom-btn"
-                  onClick={handleZoomOut}
-                  disabled={scale <= 0.5}
-                  title="Zoom out (-10%)"
-                  aria-label="Zoom out"
-                >
-                  <svg
-                    width="12"
-                    height="12"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
-                  >
-                    <line x1="5" y1="12" x2="19" y2="12" />
-                  </svg>
-                </button>
-
-                <button
-                  type="button"
-                  className="toolbar-zoom-btn toolbar-zoom-value"
-                  onClick={handleZoomReset}
-                  title="Click to reset zoom to 100%"
-                  aria-label="Reset zoom to 100%"
-                >
-                  {Math.round(scale * 100)}%
-                </button>
-
-                <button
-                  type="button"
-                  className="toolbar-zoom-btn"
-                  onClick={handleZoomIn}
-                  disabled={scale >= 1.5}
-                  title="Zoom in (+10%)"
-                  aria-label="Zoom in"
-                >
-                  <svg
-                    width="12"
-                    height="12"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
-                  >
-                    <line x1="12" y1="5" x2="12" y2="19" />
-                    <line x1="5" y1="12" x2="19" y2="12" />
-                  </svg>
-                </button>
-
-                <span className="toolbar-zoom-sep" aria-hidden="true" />
-
-                <button
-                  type="button"
-                  className={`toolbar-zoom-btn toolbar-zoom-fit ${isAutoFit ? "is-active" : ""}`}
-                  onClick={handleZoomFit}
-                  title="Fit document to half-page width"
-                >
-                  <svg
-                    width="12"
-                    height="12"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
-                  >
-                    <polyline points="15 3 21 3 21 9" />
-                    <polyline points="9 21 3 21 3 15" />
-                    <line x1="21" y1="3" x2="14" y2="10" />
-                    <line x1="3" y1="21" x2="10" y2="14" />
-                  </svg>
-                  <span>Fit</span>
-                </button>
-              </div>
-            </div>
-          ) : null}
-
-          {/* Right: Actions & Exports */}
-          <div className="toolbar-section toolbar-section-right">
-            {activeDraftId ? (
-              <div className="toolbar-export-group" role="group" aria-label="Export options">
-                {/* Download PDF button */}
-                <a
-                  className="toolbar-btn toolbar-btn-subtle"
-                  href={`/api/resume-drafts/${encodeURIComponent(activeDraftId)}/pdf`}
-                  download="base-resume.pdf"
-                  title="Download PDF"
-                >
-                  <svg
-                    width="14"
-                    height="14"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
-                  >
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                    <polyline points="7 10 12 15 17 10" />
-                    <line x1="12" y1="15" x2="12" y2="3" />
-                  </svg>
-                  <span>PDF</span>
-                </a>
-              </div>
-            ) : null}
-          </div>
-        </div>
-
-        {/* Update alert notice when evidence changes */}
-        {generationNeeded ? (
+        {/* Update alert notice with contextual Regenerate action */}
+        {generationNeeded || revisionPending ? (
           <div
             className="resume-update-alert"
             role="status"
@@ -464,8 +330,7 @@ export function ResumeCoach({
               <div className="update-alert-copy">
                 <strong>Resume update available</strong>
                 <span>
-                  {" — "}Documented work has been updated. Click{" "}
-                  <em>Regenerate resume</em> to compile these changes.
+                  {" — "}Documented work has been updated.
                   {hasPendingInterview ? (
                     <>
                       {" "}
@@ -478,6 +343,44 @@ export function ResumeCoach({
                   ) : null}
                 </span>
               </div>
+              <form
+                action={revisionAction}
+                aria-busy={revisionPending}
+                className="toolbar-action-form update-alert-action"
+              >
+                <input
+                  type="hidden"
+                  name="generationCommand"
+                  value="revision"
+                />
+                <input
+                  type="hidden"
+                  name="workspaceId"
+                  value={workspaceId ?? ""}
+                />
+                <button
+                  type="submit"
+                  disabled={revisionPending}
+                  className="toolbar-btn toolbar-btn-highlight"
+                  title="Regenerate resume with local AI"
+                >
+                  <svg
+                    width="13"
+                    height="13"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                    className={revisionPending ? "spin-icon" : ""}
+                  >
+                    <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
+                  </svg>
+                  <span>{revisionPending ? "Regenerating resume…" : "Regenerate resume"}</span>
+                </button>
+              </form>
             </div>
           </div>
         ) : null}
@@ -629,18 +532,133 @@ export function ResumeCoach({
               </div>
             )}
           </div>
-        </div>
 
-        {/* Bottom Career Coach Bar */}
-        <div className="preview-distraction-free-footer resume-studio-bottom-bar">
-          <p>
-            Looking to identify skill gaps to upskill for target roles, or shape your career trajectory?{" "}
-            <Link href="/resume/coach" className="coach-link">
-              Consult Career Coach →
-            </Link>
-          </p>
+          {/* Floating Canvas Zoom HUD */}
+          {proposalVisible ? (
+            <div
+              className="canvas-floating-zoom-hud"
+              role="group"
+              aria-label="Document zoom controls"
+            >
+              <button
+                type="button"
+                className="toolbar-zoom-btn"
+                onClick={handleZoomOut}
+                disabled={scale <= MIN_SCALE}
+                title="Zoom out (-10%) [Cmd -]"
+                aria-label="Zoom out"
+              >
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+              </button>
+
+              <button
+                type="button"
+                className="toolbar-zoom-btn toolbar-zoom-value"
+                onClick={handleZoomReset}
+                title="Reset zoom to 100% [Cmd 0]"
+                aria-label="Reset zoom to 100%"
+              >
+                {Math.round(scale * 100)}%
+              </button>
+
+              <button
+                type="button"
+                className="toolbar-zoom-btn"
+                onClick={handleZoomIn}
+                disabled={scale >= MAX_SCALE}
+                title="Zoom in (+10%) [Cmd +]"
+                aria-label="Zoom in"
+              >
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <line x1="12" y1="5" x2="12" y2="19" />
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+              </button>
+
+              <span className="toolbar-zoom-sep" aria-hidden="true" />
+
+              <button
+                type="button"
+                className={`toolbar-zoom-btn toolbar-zoom-fit ${isAutoFit ? "is-active" : ""}`}
+                onClick={handleZoomFit}
+                title="Fit document to window [Press F]"
+              >
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <polyline points="15 3 21 3 21 9" />
+                  <polyline points="9 21 3 21 3 15" />
+                  <line x1="21" y1="3" x2="14" y2="10" />
+                  <line x1="3" y1="21" x2="10" y2="14" />
+                </svg>
+                <span>Fit</span>
+              </button>
+
+              {activeDraftId ? (
+                <>
+                  <span className="toolbar-zoom-sep" aria-hidden="true" />
+                  <a
+                    className="toolbar-zoom-btn toolbar-download-btn"
+                    href={`/api/resume-drafts/${encodeURIComponent(activeDraftId)}/pdf`}
+                    download="base-resume.pdf"
+                    title="Download compiled PDF"
+                    aria-label="Download compiled PDF"
+                  >
+                    <svg
+                      width="12"
+                      height="12"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                      <polyline points="7 10 12 15 17 10" />
+                      <line x1="12" y1="15" x2="12" y2="3" />
+                    </svg>
+                    <span>PDF</span>
+                  </a>
+                </>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </section>
     </div>
   );
 }
+
+export const ResumeCoach = ResumeStudio;

@@ -19,6 +19,7 @@ import {
   type WorkspaceActionState,
 } from "@/app/actions";
 import type { ExperienceProjectCollection } from "@/domain/evidence/evidence-library";
+import { SegmentedTabs } from "@/app/segmented-tabs";
 
 const initial: WorkspaceActionState = {
   status: "idle",
@@ -40,6 +41,8 @@ const categoryLabel = {
   project: "Project",
   experience: "Experience",
 } as const;
+
+type WorkCategory = "all" | "project" | "experience";
 
 const GENERATOR_FILE_ORDER: Record<string, number> = {
   "resume-bullet-candidates.md": 1,
@@ -474,87 +477,71 @@ export function EvidenceLibrary({
       className="experience-projects-collection"
       aria-labelledby="experience-projects-heading"
     >
-      <div
-        className="experience-project-tabs"
-        role="tablist"
-        aria-label="Work type"
-      >
-        <button
-          id="all-tab"
-          type="button"
-          role="tab"
-          className={`experience-type-tab ${category === "all" ? "is-selected" : ""}`}
-          aria-selected={category === "all"}
-          aria-controls="work-type-panel"
-          onClick={() => {
-            setCategory("all");
-            setOpen(false);
-          }}
-        >
-          <span>All</span>
-          <span className="tab-badge-count">{collection.length}</span>
-        </button>
-        <button
-          id="experiences-tab"
-          type="button"
-          role="tab"
-          className={`experience-type-tab ${category === "experience" ? "is-selected" : ""}`}
-          aria-selected={category === "experience"}
-          aria-controls="work-type-panel"
-          onClick={() => {
-            setCategory("experience");
-            setOpen(false);
-          }}
-        >
-          <svg
-            className="tab-icon"
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            <rect x="2" y="7" width="20" height="14" rx="2" ry="2" />
-            <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" />
-          </svg>
-          <span>Experiences</span>
-          <span className="tab-badge-count">{experiencesCount}</span>
-        </button>
-        <button
-          id="projects-tab"
-          type="button"
-          role="tab"
-          className={`experience-type-tab ${category === "project" ? "is-selected" : ""}`}
-          aria-selected={category === "project"}
-          aria-controls="work-type-panel"
-          onClick={() => {
-            setCategory("project");
-            setOpen(false);
-          }}
-        >
-          <svg
-            className="tab-icon"
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            <polyline points="16 18 22 12 16 6" />
-            <polyline points="8 6 2 12 8 18" />
-          </svg>
-          <span>Projects</span>
-          <span className="tab-badge-count">{projectsCount}</span>
-        </button>
-      </div>
+      <SegmentedTabs<WorkCategory>
+        tabs={[
+          {
+            id: "all",
+            label: "All",
+            count: collection.length,
+            tabId: "all-tab",
+            ariaControls: "work-type-panel",
+          },
+          {
+            id: "experience",
+            label: "Experiences",
+            count: experiencesCount,
+            tabId: "experiences-tab",
+            ariaControls: "work-type-panel",
+            icon: (
+              <svg
+                className="tab-icon"
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <rect x="2" y="7" width="20" height="14" rx="2" ry="2" />
+                <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" />
+              </svg>
+            ),
+          },
+          {
+            id: "project",
+            label: "Projects",
+            count: projectsCount,
+            tabId: "projects-tab",
+            ariaControls: "work-type-panel",
+            icon: (
+              <svg
+                className="tab-icon"
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <polyline points="16 18 22 12 16 6" />
+                <polyline points="8 6 2 12 8 18" />
+              </svg>
+            ),
+          },
+        ]}
+        activeTab={category}
+        onChange={(val) => {
+          setCategory(val);
+          setOpen(false);
+        }}
+        ariaLabel="Work type"
+      />
 
       <section
         id="work-type-panel"
@@ -689,11 +676,6 @@ export function EvidenceLibrary({
                 <p className="new-doc-card-subtitle">
                   Inspect a local {category === "all" ? "codebase or work" : label.toLowerCase()} folder to extract verified resume evidence.
                 </p>
-              </div>
-              <div className="new-doc-card-cta">
-                <span className="new-doc-cta-btn">
-                  + Choose folder
-                </span>
               </div>
             </div>
           </li>

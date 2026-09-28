@@ -1,5 +1,6 @@
 import { ApplicationShell } from "@/app/application-shell";
 import { redirect } from "next/navigation";
+import { PageHeader } from "@/app/page-header";
 import { ResumeWorkspacePicker } from "@/app/resume-workspace-picker";
 import { readResumeWorkspaceState } from "@/domain/resume-generation/resume-workspace-commands";
 import { readLatestResumeEvidenceIntake } from "@/domain/resume-generation/resume-evidence-intake";
@@ -31,11 +32,13 @@ export default async function ResumeInterviewPage() {
   const shouldShowInterview = Boolean(
     state.activeWorkspace &&
     interview &&
-    (state.activeWorkspace.journey?.phase === "interview" || hasReviewConflict),
+    (state.activeWorkspace.journey?.phase === "interview" ||
+      state.activeWorkspace.journey?.phase === "ready_to_generate" ||
+      hasReviewConflict),
   );
   if (
     state.activeWorkspace?.journey &&
-    !["documenting", "interview", "recovery"].includes(
+    !["documenting", "interview", "ready_to_generate", "recovery"].includes(
       state.activeWorkspace.journey.phase,
     ) &&
     !hasReviewConflict
@@ -47,24 +50,19 @@ export default async function ResumeInterviewPage() {
     "Reading your selected local folders and documenting resume evidence.";
   return (
     <ApplicationShell active="Coach Q&A">
-      <div className="workspace-shell resume-workspace">
-        <header className="resume-page-head">
-          <div className="resume-head-copy">
-            <p className="eyebrow">Resume Coach</p>
-            <h1>Prepare your resume evidence</h1>
-            <p>
-              Your local AI coach analyzes your documented work and identifies a
-              few targeted clarification questions. Answer the questions below
-              to establish your verified achievements and metrics before
-              generating your base resume.
-            </p>
-          </div>
-          <ResumeWorkspacePicker
-            workspaces={state.workspaces}
-            activeWorkspaceId={state.activeWorkspace?.id}
-            revisionNumber={state.revisionNumber}
-          />
-        </header>
+      <div className="workspace-shell resume-workspace resume-interview-workspace">
+        <PageHeader
+          className="resume-page-head"
+          title="Prepare your resume evidence"
+          subtitle="Your local AI coach analyzes your documented work and identifies a few targeted clarification questions. Answer the questions below to establish your verified achievements and metrics before generating your base resume."
+          actions={
+            <ResumeWorkspacePicker
+              workspaces={state.workspaces}
+              activeWorkspaceId={state.activeWorkspace?.id}
+              revisionNumber={state.revisionNumber}
+            />
+          }
+        />
         {shouldShowInterview && state.activeWorkspace && interview ? (
           <ResumeInterview
             workspaceId={state.activeWorkspace.id}

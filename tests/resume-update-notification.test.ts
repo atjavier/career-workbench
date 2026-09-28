@@ -6,7 +6,7 @@ test("evidence intake provides actionable next-step routing and Base Resume warn
   const [actions, library, coach, styles] = await Promise.all([
     readFile(new URL("../src/app/actions.ts", import.meta.url), "utf8"),
     readFile(new URL("../src/app/evidence-library.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../src/app/resume-coach.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/app/resume-studio.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/app/globals.css", import.meta.url), "utf8"),
   ]);
 
@@ -56,7 +56,7 @@ test("Base Resume remains accessible across journey phases and documentation dis
   const [shell, workspace, coach, library, styles] = await Promise.all([
     readFile(new URL("../src/app/application-shell.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/app/resume-workspace.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../src/app/resume-coach.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/app/resume-studio.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/app/evidence-library.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/app/globals.css", import.meta.url), "utf8"),
   ]);

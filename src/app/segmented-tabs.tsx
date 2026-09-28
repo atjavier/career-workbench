@@ -8,6 +8,7 @@ export type TabItem<T extends string = string> = {
   count?: number;
   icon?: ReactNode;
   ariaControls?: string;
+  tabId?: string;
 };
 
 export type SegmentedTabsProps<T extends string = string> = {
@@ -35,10 +36,11 @@ export function SegmentedTabs<T extends string = string>({
     >
       {tabs.map((tab) => {
         const isSelected = activeTab === tab.id;
+        const elementId = tab.tabId ?? `${idPrefix}-${tab.id}`;
         return (
           <button
             key={tab.id}
-            id={`${idPrefix}-${tab.id}`}
+            id={elementId}
             type="button"
             role="tab"
             className={`experience-type-tab ${isSelected ? "is-selected" : ""}`}

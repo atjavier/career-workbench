@@ -9,7 +9,7 @@ test("Resume onboarding prepares evidence before the Coach interview", async () 
   const [workspace, form, coach, styles] = await Promise.all([
     read("src/app/resume-workspace.tsx"),
     read("src/app/resume-onboarding.tsx"),
-    read("src/app/resume-coach.tsx"),
+    read("src/app/resume-studio.tsx"),
     read("src/app/globals.css"),
   ]);
 

@@ -3,14 +3,16 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 test("Experience & Projects exposes category-specific source-folder handoff and safe generated-document import", async () => {
-  const [ui, workspace, actions, page] = await Promise.all(
+  const [evidenceUi, tabsUi, workspace, actions, page] = await Promise.all(
     [
       "../src/app/evidence-library.tsx",
+      "../src/app/segmented-tabs.tsx",
       "../src/app/evidence-library-workspace.tsx",
       "../src/app/actions.ts",
       "../src/app/evidence/page.tsx",
     ].map((file) => readFile(new URL(file, import.meta.url), "utf8")),
   );
+  const ui = evidenceUi + "\n" + tabsUi;
   for (const text of [
     "Projects",
     "Experiences",

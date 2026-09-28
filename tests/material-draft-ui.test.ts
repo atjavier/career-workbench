@@ -4,7 +4,7 @@ import test from "node:test";
 
 test("Resume Coach presents the generated PDF and does not regenerate on page visits", async () => {
   const [coach, actions] = await Promise.all([
-    readFile(new URL("../src/app/resume-coach.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/app/resume-studio.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/app/actions.ts", import.meta.url), "utf8"),
   ]);
   for (const token of [
