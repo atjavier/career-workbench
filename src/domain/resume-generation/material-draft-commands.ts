@@ -15,6 +15,7 @@ import {
   workspaceOwnsDraft,
 } from "@/persistence/resume-workspace-repository";
 import { appendAuditEvent } from "@/persistence/workspace-repository";
+import { listClarifiedEvidenceInDatabase } from "@/domain/resume-generation/resume-clarified-evidence";
 
 type Options = { appDataRoot?: string };
 export type MaterialDraftCandidateClarification = {
@@ -389,6 +390,51 @@ function load(
   return { stored, view: parseStoredDraft(stored) };
 }
 
+function attachWorkspaceClarifications(
+  db: ReturnType<typeof openDatabase>,
+  view: MaterialDraftView,
+  workspaceId?: string,
+): MaterialDraftView {
+  const targetWorkspaceId =
+    workspaceId ??
+    (
+      db
+        .prepare(
+          "SELECT workspace_id AS workspaceId FROM resume_workspace_drafts WHERE draft_id = ?",
+        )
+        .get(view.id) as { workspaceId: string } | undefined
+    )?.workspaceId;
+  if (!targetWorkspaceId) return view;
+  const workspaceClarifications = listClarifiedEvidenceInDatabase(
+    db,
+    targetWorkspaceId,
+  )
+    .filter((item) => !item.needsReview)
+    .map((item) => ({
+      itemName: item.itemName,
+      itemCategory: item.itemCategory,
+      category: item.category,
+      text: item.candidateText.trim(),
+      provenance: item.provenance,
+    }));
+  const baseClarifications = view.candidateClarifications ?? [];
+  const existingKeys = new Set(
+    baseClarifications.map(
+      (c) => `${c.itemCategory}:${c.itemName.toLowerCase()}:${c.category}`,
+    ),
+  );
+  const mergedClarifications = [
+    ...baseClarifications,
+    ...workspaceClarifications.filter(
+      (c) =>
+        !existingKeys.has(
+          `${c.itemCategory}:${c.itemName.toLowerCase()}:${c.category}`,
+        ),
+    ),
+  ];
+  return { ...view, candidateClarifications: mergedClarifications };
+}
+
 export async function readMaterialDraft(
   input: Options & { draftId: string; requireHandoff?: boolean },
 ): Promise<MaterialDraftView> {
@@ -401,7 +447,7 @@ export async function readMaterialDraft(
   try {
     const view = load(db, input.draftId).view;
     if (input.requireHandoff && !view.handedOff) invalid();
-    return view;
+    return attachWorkspaceClarifications(db, view);
   } catch (error) {
     if (error instanceof WorkspaceError) throw error;
     return invalid();
@@ -421,11 +467,11 @@ export async function readActiveWorkspaceMaterialDraft(
   const db = openDatabase(paths.databasePath);
   try {
     const workspace = readActiveResumeWorkspace(db).workspace;
-    if (!workspace || !workspaceOwnsDraft(db, workspace.id, input.draftId))
-      invalid();
+    if (!workspace) return invalid();
+    if (!workspaceOwnsDraft(db, workspace.id, input.draftId)) return invalid();
     const view = load(db, input.draftId).view;
-    if (input.requireHandoff && !view.handedOff) invalid();
-    return view;
+    if (input.requireHandoff && !view.handedOff) return invalid();
+    return attachWorkspaceClarifications(db, view, workspace.id);
   } catch (error) {
     if (error instanceof WorkspaceError) throw error;
     return invalid();

@@ -51,9 +51,15 @@ function printable(value: string): string {
     .replace(/[\u2018\u2019]/g, "'")
     .replace(/[\u201c\u201d]/g, '"')
     .replace(/[\u2013\u2014]/g, "-")
-    .replace(/[\u2022\u00b7]/g, "-")
+    .replace(/[\u2192\u2794\u2799\u279c\u27a1]/g, "->")
+    .replace(/[\u2190\u2b05]/g, "<-")
+    .replace(/[\u2194\u2b0c]/g, "<->")
+    .replace(/[\u21d2]/g, "=>")
+    .replace(/[\u2022\u00b7\u2219]/g, "-")
+    .replace(/[\u2212]/g, "-")
+    .replace(/[\u00a0\u2000-\u200b\u202f\u205f\u3000]/g, " ")
     .replace(/\u2026/g, "...")
-    .replace(/[^\x20-\x7e]/g, "?")
+    .replace(/[^\x20-\x7e]/g, "")
     .replace(/\\/g, "\\\\")
     .replace(/\(/g, "\\(")
     .replace(/\)/g, "\\)");
@@ -256,10 +262,104 @@ function contactAndName(draft: MaterialDraftView): {
   };
 }
 
+const months =
+  "(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)";
+const seasons = "(?:Spring|Summer|Fall|Autumn|Winter)";
+const year = "(?:19|20)\\d{2}";
+const present = "(?:Present|Current|Now|Ongoing)";
+const isoYearMonth = "(?:(?:19|20)\\d{2}[-/]\\d{1,2})";
+const slashMonthYear = "(?:\\b\\d{1,2}[-/](?:19|20)\\d{2}\\b)";
+const dayNum = "\\d{1,2}(?:st|nd|rd|th)?";
+const monthDayYear = `(?:${months}\\s+${dayNum},?\\s+${year})`;
+const dayMonthYear = `(?:${dayNum}\\s+${months},?\\s+${year})`;
+const singleDateToken = `(?:${monthDayYear}|${dayMonthYear}|${months}\\s+${year}|${seasons}\\s+${year}|${isoYearMonth}|${slashMonthYear}|${year})`;
+const dateRangeRegex = new RegExp(
+  `(${singleDateToken})\\s*(?:–|-|—|to|until|through|and)\\s*(${singleDateToken}|${present})`,
+  "i",
+);
+const singleDateRegex = new RegExp(`\\b(${singleDateToken})\\b`, "i");
+
+const monthAbbrs = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+function formatDateToken(token: string): string {
+  const trimmed = token.trim();
+  if (/^present$/i.test(trimmed)) return "Present";
+  const ymMatch = trimmed.match(/^((?:19|20)\d{2})[-/](\d{1,2})$/);
+  if (ymMatch) {
+    const y = ymMatch[1]!;
+    const m = parseInt(ymMatch[2]!, 10);
+    if (m >= 1 && m <= 12) {
+      return `${monthAbbrs[m - 1]} ${y}`;
+    }
+  }
+  const myMatch = trimmed.match(/^(\d{1,2})[-/]((?:19|20)\d{2})$/);
+  if (myMatch) {
+    const m = parseInt(myMatch[1]!, 10);
+    const y = myMatch[2]!;
+    if (m >= 1 && m <= 12) {
+      return `${monthAbbrs[m - 1]} ${y}`;
+    }
+  }
+  const monthDayMatch = trimmed.match(
+    new RegExp(`^(${months})\\s+${dayNum},?\\s+((?:19|20)\\d{2})$`, "i"),
+  );
+  if (monthDayMatch) {
+    return `${monthDayMatch[1]} ${monthDayMatch[2]}`;
+  }
+  const dayMonthMatch = trimmed.match(
+    new RegExp(`^${dayNum}\\s+(${months}),?\\s+((?:19|20)\\d{2})$`, "i"),
+  );
+  if (dayMonthMatch) {
+    return `${dayMonthMatch[1]} ${dayMonthMatch[2]}`;
+  }
+  return trimmed;
+}
+
+export function cleanDateString(raw: string): string {
+  if (!raw) return "";
+  const trimmed = raw.trim();
+  const rangeMatch = trimmed.match(dateRangeRegex);
+  if (rangeMatch) {
+    return `${formatDateToken(rangeMatch[1]!)} – ${formatDateToken(rangeMatch[2]!)}`;
+  }
+  const singleMatch = trimmed.match(singleDateRegex);
+  if (singleMatch) {
+    return formatDateToken(singleMatch[1]!);
+  }
+  return trimmed
+    .replace(
+      /^(?:i\s+(?:worked|developed|built|contributed|did|created|started|joined)(?:\s+on\s+it)?(?:\s+from|\s+between|\s+in|\s+during)?|from|between|during|in)\s+/i,
+      "",
+    )
+    .replace(/[.]+$/, "")
+    .trim();
+}
+
+function isProjectDatePart(s: string): boolean {
+  const trimmed = s.trim();
+  return (
+    dateRangeRegex.test(trimmed) ||
+    singleDateRegex.test(trimmed) ||
+    /\b(?:19|20)\d{2}\b/.test(trimmed) ||
+    /\b(?:present|current|now|ongoing)\b/i.test(trimmed)
+  );
+}
+
+export function isPlaceholderTechStack(value: string | undefined): boolean {
+  if (!value) return true;
+  return /^(?:\[?\s*(?:unknown|not\s+(?:provided|specified|available)|unspecified|n\/?a|none)\s*\]?)$/i.test(
+    value.trim(),
+  );
+}
+
 export function parseProjectHeader(line: string): {
   title: string;
   tech?: string;
   description?: string;
+  date?: string;
 } {
   const bullet = /^(?:[-*•])\s+/.test(line);
   if (bullet) return { title: line };
@@ -268,29 +368,58 @@ export function parseProjectHeader(line: string): {
     .map((p) => p.trim())
     .filter(Boolean);
   if (parts.length <= 1) return { title: line };
-  if (parts.length === 2) {
-    return { title: parts[0]!, tech: parts[1] };
-  }
 
   const title = parts[0]!;
-  const descriptors = parts.slice(1);
+  let date: string | undefined;
+  const descriptors: string[] = [];
+  for (const part of parts.slice(1)) {
+    if (!date && isProjectDatePart(part)) {
+      date = cleanDateString(part);
+    } else {
+      descriptors.push(part);
+    }
+  }
+
+  if (descriptors.length === 0) {
+    return { title, date };
+  }
+  if (descriptors.length === 1) {
+    const candidate = descriptors[0]!;
+    if (isPlaceholderTechStack(candidate)) {
+      return { title, date };
+    }
+    return { title, tech: candidate, date };
+  }
+
   const isTech = (s: string) =>
-    s.includes(",") ||
-    /\b(?:react|next\.?js|typescript|javascript|python|go|golang|sqlite|vue|node|node\.?js|fastapi|flask|django|docker|aws|tailwind|postgres|postgresql|sql|graphql|rest|restful|html|css|c\+\+|c\#|java|rust|git)\b/i.test(
-      s,
-    );
+    !isPlaceholderTechStack(s) &&
+    (s.includes(",") ||
+      /\b(?:react|next\.?js|typescript|javascript|python|go|golang|sqlite|vue|node|node\.?js|fastapi|flask|django|docker|aws|tailwind|postgres|postgresql|sql|graphql|rest|restful|html|css|c\+\+|c\#|java|rust|git)\b/i.test(
+        s,
+      ));
 
   const techIndex = descriptors.findIndex(isTech);
   if (techIndex >= 0) {
     const tech = descriptors[techIndex]!;
-    const remaining = descriptors.filter((_, idx) => idx !== techIndex);
-    return { title, tech, description: remaining.join(" | ") };
+    const remaining = descriptors.filter(
+      (_, idx) => idx !== techIndex && !isPlaceholderTechStack(descriptors[idx]),
+    );
+    return { title, tech, description: remaining.join(" | ") || undefined, date };
+  }
+
+  const validDescriptors = descriptors.filter((d) => !isPlaceholderTechStack(d));
+  if (validDescriptors.length === 0) {
+    return { title, date };
+  }
+  if (validDescriptors.length === 1) {
+    return { title, description: validDescriptors[0], date };
   }
 
   return {
     title,
-    tech: descriptors.at(-1)!,
-    description: descriptors.slice(0, -1).join(" | "),
+    tech: validDescriptors.at(-1)!,
+    description: validDescriptors.slice(0, -1).join(" | "),
+    date,
   };
 }
 
@@ -301,38 +430,6 @@ export function cleanOrganization(org: string): string {
       /\s*[\(\[]\s*(?:company(?:\s*\/?\s*org(?:anization)?)?|org(?:anization)?|employer)\s*[\)\]]/gi,
       "",
     )
-    .trim();
-}
-
-const months =
-  "(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)";
-const seasons = "(?:Spring|Summer|Fall|Autumn|Winter)";
-const year = "(?:19|20)\\d{2}";
-const present = "(?:Present|Current|Now|Ongoing)";
-const singleDateToken = `(?:${months}\\s+${year}|${seasons}\\s+${year}|\\b\\d{1,2}\\/\\d{2,4}\\b|${year})`;
-const dateRangeRegex = new RegExp(
-  `(${singleDateToken})\\s*(?:–|-|—|to|until|through|and)\\s*(${singleDateToken}|${present})`,
-  "i",
-);
-const singleDateRegex = new RegExp(`\\b(${singleDateToken})\\b`, "i");
-
-export function cleanDateString(raw: string): string {
-  if (!raw) return "";
-  const trimmed = raw.trim();
-  const rangeMatch = trimmed.match(dateRangeRegex);
-  if (rangeMatch) {
-    return `${rangeMatch[1]!.trim()} – ${rangeMatch[2]!.trim()}`;
-  }
-  const singleMatch = trimmed.match(singleDateRegex);
-  if (singleMatch) {
-    return singleMatch[1]!.trim();
-  }
-  return trimmed
-    .replace(
-      /^(?:i\s+(?:worked|developed|built|contributed|did|created|started|joined)(?:\s+on\s+it)?(?:\s+from|\s+between|\s+in|\s+during)?|from|between|during|in)\s+/i,
-      "",
-    )
-    .replace(/[.]+$/, "")
     .trim();
 }
 
@@ -390,6 +487,9 @@ function entriesFromSection(
         title = parsed.title;
         detail = parsed.tech;
         meta = parsed.description;
+        if (parsed.date) {
+          date = parsed.date;
+        }
       } else {
         const parts = rawTitleSource
           .split("|")
@@ -445,17 +545,26 @@ function entriesFromSection(
         meta = meta ? `${meta} | ${cleanedMeta}` : cleanedMeta;
       }
 
-      if (!date && allClarifications.length && title) {
-        const normalizedTitle = title.toLowerCase().replace(/[^a-z0-9]/g, "");
+      if (!date && allClarifications.length && (title || detail)) {
+        const matchTarget = [title, detail, meta].filter(Boolean).join(" ");
+        const normalizedTarget = matchTarget.toLowerCase().replace(/[^a-z0-9]/g, "");
+        const targetTokens = new Set(
+          matchTarget.toLowerCase().match(/[a-z0-9]{3,}/g) ?? [],
+        );
         const dateClarification = allClarifications.find((c) => {
           if (c.category !== "dates" || !c.text?.trim()) return false;
           const normalizedItem = c.itemName
             .toLowerCase()
             .replace(/[^a-z0-9]/g, "");
-          return (
-            normalizedTitle.includes(normalizedItem) ||
-            normalizedItem.includes(normalizedTitle)
-          );
+          if (
+            normalizedTarget.includes(normalizedItem) ||
+            normalizedItem.includes(normalizedTarget)
+          ) {
+            return true;
+          }
+          const itemTokens =
+            c.itemName.toLowerCase().match(/[a-z0-9]{3,}/g) ?? [];
+          return itemTokens.some((token) => targetTokens.has(token));
         });
         if (dateClarification) {
           date = cleanDateString(dateClarification.text.trim());

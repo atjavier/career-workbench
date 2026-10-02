@@ -93,12 +93,22 @@ export function isLatestWorkspaceMaterialDraftCurrent(
 ): boolean {
   const draft = db
     .prepare(
-      "SELECT d.id, d.profile_revision_id AS profileRevisionId, d.content_json AS contentJson FROM material_drafts d JOIN resume_workspace_drafts w ON w.draft_id = d.id WHERE w.workspace_id = ? ORDER BY d.created_at DESC, d.id DESC LIMIT 1",
+      "SELECT d.id, d.created_at AS createdAt, d.profile_revision_id AS profileRevisionId, d.content_json AS contentJson FROM material_drafts d JOIN resume_workspace_drafts w ON w.draft_id = d.id WHERE w.workspace_id = ? ORDER BY d.created_at DESC, d.id DESC LIMIT 1",
     )
     .get(input.workspaceId) as
-    { id: string; profileRevisionId: string; contentJson: string } | undefined;
+    { id: string; createdAt: string; profileRevisionId: string; contentJson: string } | undefined;
   if (!draft || draft.profileRevisionId !== input.profileRevisionId)
     return false;
+  try {
+    const newerClarification = db
+      .prepare(
+        "SELECT 1 FROM resume_clarified_evidence WHERE workspace_id = ? AND created_at > ? LIMIT 1",
+      )
+      .get(input.workspaceId, draft.createdAt);
+    if (newerClarification) return false;
+  } catch {
+    // If table does not exist or column error, proceed
+  }
   // Older drafts used one combined “Selected Experience & Projects” section
   // and were rendered as low-level source snippets. Treat them as stale so the
   // current Coach automatically regenerates the separated, template-ready
@@ -130,7 +140,8 @@ export function isLatestWorkspaceMaterialDraftCurrent(
     const serialized = JSON.stringify(parsed);
     if (
       /`|https?:\/\/|(?:^|[\s\"'])\/(?:api|src)\//i.test(serialized) ||
-      /(?:^|[\n\"'])[-*]\s+docs\//i.test(serialized)
+      /(?:^|[\n\"'])[-*]\s+docs\//i.test(serialized) ||
+      /\|\s*(?:Not Specified|Unknown|N\/?A)\s*(?:\||\r?\n)/i.test(serialized)
     )
       return false;
   } catch {

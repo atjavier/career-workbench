@@ -95,6 +95,89 @@ export function parseCuratedFacts(
   });
 }
 
+function isUnhelpfulContext(text: string): boolean {
+  const trimmed = text.trim();
+  if (/^\*\*[^*]+\*\*:?$/.test(trimmed)) return true;
+  return /^(?:not directly evidenced|unknown|none|n\/a)[.]?$/i.test(trimmed);
+}
+
+export function extractDocumentedContext(
+  documents: Array<{ path: string; text: string }>,
+): Array<{ text: string; sourcePath: string }> {
+  const results: Array<{ text: string; sourcePath: string }> = [];
+
+  for (const doc of documents) {
+    const filename = doc.path.split("/").pop() ?? "";
+
+    // 1. Extract from resume-summary.md
+    if (filename === "resume-summary.md") {
+      const lines = doc.text.split(/\r?\n/).map((l) => l.trim());
+      for (const line of lines) {
+        if (
+          !line ||
+          line.startsWith("#") ||
+          line.startsWith("<!--") ||
+          /^[-*+]\s+/.test(line)
+        )
+          continue;
+        if (
+          /^(?:Material Capabilities|Implementation Scope|Attribution|Explicit Unknowns|Evidence Gaps)/i.test(
+            line,
+          )
+        )
+          break;
+        const cleaned = line
+          .replace(
+            /^(?:Project Identity|Problem\/Purpose|Intended User\/Workflow|Design Rationale)\s*:\s*/i,
+            "",
+          )
+          .trim();
+        if (cleaned.length >= 20 && !isUnhelpfulContext(cleaned)) {
+          results.push({ text: cleaned, sourcePath: doc.path });
+        }
+      }
+    }
+
+    // 2. Extract from project-overview.md or experience-overview.md
+    if (
+      filename === "project-overview.md" ||
+      filename === "experience-overview.md"
+    ) {
+      const lines = doc.text.split(/\r?\n/).map((l) => l.trim());
+      for (const line of lines) {
+        if (!line || line.startsWith("#") || line.startsWith("<!--")) continue;
+        const clean = line.replace(/^[-*+]\s+/, "").trim();
+        if (/^evidence is (?:absent|missing)|no direct evidence/i.test(clean))
+          continue;
+        if (clean.length >= 20 && !isUnhelpfulContext(clean)) {
+          results.push({ text: clean, sourcePath: doc.path });
+        }
+      }
+    }
+
+    // 3. Extract from resume-bullet-candidates.md (Resume Context section)
+    if (filename === "resume-bullet-candidates.md") {
+      const lines = doc.text.split(/\r?\n/).map((l) => l.trim());
+      for (const line of lines) {
+        const match = line.match(
+          /^(?:Purpose|User or workflow|Design rationale|Directly stated outcome):\s*(.+)$/i,
+        );
+        if (match && match[1]?.trim()) {
+          const val = match[1].trim();
+          if (
+            !/^(?:not directly evidenced|unknown|none|n\/a)[.]?$/i.test(val) &&
+            val.length >= 15
+          ) {
+            results.push({ text: val, sourcePath: doc.path });
+          }
+        }
+      }
+    }
+  }
+
+  return results;
+}
+
 const has = (facts: string, pattern: RegExp) => pattern.test(facts);
 
 /** Facts are the only input. Unknown statements and E/B identifiers are not evidence. */
@@ -190,7 +273,7 @@ async function loadItems(
     applyMigrations(db);
     const rows = db
       .prepare(
-        "SELECT d.library_path, d.category FROM evidence_library_documents d JOIN evidence_library_imports i ON i.id = d.import_id JOIN resume_workspace_imports w ON w.import_id = i.id WHERE w.workspace_id = ? AND d.library_path LIKE '%/resume-evidence.md' ORDER BY d.library_path",
+        "SELECT d.library_path, d.category FROM evidence_library_documents d JOIN evidence_library_imports i ON i.id = d.import_id JOIN resume_workspace_imports w ON w.import_id = i.id WHERE w.workspace_id = ? AND d.library_path LIKE '%.md' ORDER BY d.library_path",
       )
       .all(workspaceId) as Array<{ library_path: string; category: Category }>;
     const groups = new Map<string, Item>();
@@ -316,7 +399,9 @@ export async function interpretWorkspaceEvidence(
         const facts = item.documents.flatMap((document) =>
           parseCuratedFacts(document.text, document.path),
         );
-        const source = item.documents[0]!.path;
+        const source =
+          item.documents.find((d) => d.path.endsWith("/resume-evidence.md"))
+            ?.path ?? item.documents[0]!.path;
         for (const fact of facts) {
           insertInterpretation(
             db,
@@ -367,6 +452,18 @@ export async function interpretWorkspaceEvidence(
             source,
             now,
           );
+        const documentedContext = extractDocumentedContext(item.documents);
+        for (const ctx of documentedContext) {
+          insertInterpretation(
+            db,
+            expectedWorkspaceId,
+            item,
+            "context",
+            ctx.text,
+            ctx.sourcePath,
+            now,
+          );
+        }
         for (const conflict of contradictions(facts))
           insertInterpretation(
             db,
@@ -377,13 +474,17 @@ export async function interpretWorkspaceEvidence(
             source,
             now,
           );
+        const allContextText = [
+          ...facts.map(({ fact }) => fact),
+          ...documentedContext.map(({ text }) => text),
+        ].join("\n");
         reconcilePendingTasks(
           db,
           expectedWorkspaceId,
           item,
           planClarifications(
             item.name,
-            facts.map(({ fact }) => fact).join("\n"),
+            allContextText,
             item.category,
           ),
           now,

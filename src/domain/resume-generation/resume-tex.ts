@@ -32,9 +32,9 @@ function fallbackTemplate(): string {
 \titleformat{\section}{\normalfont\fontsize{12}{14}\selectfont\uppercase}{ }{0pt}{}[\vspace{-4pt}\titlerule]
 \titlespacing*{\section}{0pt}{10pt}{9pt}
 \newenvironment{tightitemize}{\begin{list}{\textbullet}{\setlength{\leftmargin}{28pt}\setlength{\labelsep}{5pt}\setlength{\labelwidth}{7pt}\setlength{\itemsep}{0pt}\setlength{\topsep}{0pt}\setlength{\partopsep}{0pt}\setlength{\parsep}{0pt}\setlength{\parskip}{0pt}}}{\end{list}}
-\newcommand{\resumeexperience}[3]{\noindent\hspace*{16pt}\textbf{#1}\hfill\textit{#2}\\[-1pt]\hspace*{16pt}\textit{#3}\par\vspace{2pt}}
-\newcommand{\resumeproject}[3]{\noindent\hspace*{16pt}\textbf{#1}\if\relax\detokenize{#2}\relax\else\ \textit{| #2}\fi\hfill\textit{#3}\par\vspace{2pt}}
-\newcommand{\resumeeducation}[3]{\noindent\hspace*{16pt}\textbf{#1}\\[-1pt]\hspace*{16pt}\textit{#2}\hfill\textit{#3}\par\vspace{2pt}}
+\newcommand{\resumeexperience}[3]{\noindent\hspace*{16pt}{\fontsize{10.25}{12.2}\selectfont\textbf{#1}}\hfill{\fontsize{9}{11.2}\selectfont\textit{#2}}\\[-0.5pt]\hspace*{16pt}{\fontsize{9}{11.2}\selectfont\textit{#3}}\par\vspace{2pt}}
+\newcommand{\resumeproject}[3]{\noindent\hspace*{16pt}{\fontsize{10.25}{12.2}\selectfont\textbf{#1}}\if\relax\detokenize{#2}\relax\else{\fontsize{9}{11.2}\selectfont\ \textit{| #2}}\fi\hfill{\fontsize{9}{11.2}\selectfont\textit{#3}}\par\vspace{2pt}}
+\newcommand{\resumeeducation}[3]{\noindent\hspace*{16pt}{\fontsize{10.25}{12.2}\selectfont\textbf{#1}}\\[-0.5pt]\hspace*{16pt}{\fontsize{9}{11.2}\selectfont\textit{#2}}\hfill{\fontsize{9}{11.2}\selectfont\textit{#3}}\par\vspace{2pt}}
 \newcommand{\resumeskill}[2]{\noindent\hspace*{16pt}\textbf{#1:}\ #2\par}
 \begin{document}
 \fontsize{9.25}{11.6}\selectfont
@@ -68,8 +68,15 @@ function latex(value: string): string {
       .replace(/[\u2018\u2019]/g, "'")
       .replace(/[\u201c\u201d]/g, '"')
       .replace(/[\u2013\u2014]/g, "-")
+      .replace(/[\u2192\u2794\u2799\u279c\u27a1]/g, "->")
+      .replace(/[\u2190\u2b05]/g, "<-")
+      .replace(/[\u2194\u2b0c]/g, "<->")
+      .replace(/[\u21d2]/g, "=>")
+      .replace(/[\u2022\u00b7\u2219]/g, "-")
+      .replace(/[\u2212]/g, "-")
+      .replace(/[\u00a0\u2000-\u200b\u202f\u205f\u3000]/g, " ")
       .replace(/\u2026/g, "...")
-      .replace(/[^\x20-\x7e]/g, "?")
+      .replace(/[^\x20-\x7e]/g, "")
       // Protect literal backslashes with a sentinel before escaping TeX
       // punctuation; otherwise the braces in \textbackslash{} would be
       // escaped a second time.

@@ -12,6 +12,9 @@ import {
   resumeCoachConsentFingerprint,
   resumeCoachSystemInstruction,
   resumeInterviewCoachConsentFingerprint,
+  enrichAndCompleteBullets,
+  sanitizeBulletText,
+  convertFlatEntriesToEdits,
 } from "../src/adapters/local-model/local-model-gateway";
 import type { ResumeFileReadSession } from "../src/files/evidence-library";
 import {
@@ -953,6 +956,142 @@ test("Resume Architect accepts file agent final response with heading and traili
     "Ownership of project components",
     "Specific metrics",
   ]);
+});
+
+test("Resume Architect repairs Gemma 4 duplicate claims key and omitted edit closure before unknowns", async () => {
+  const citation: ResumeFileCitation = {
+    citationId: "citation-1",
+    path: "resume-evidence.md",
+    startLine: 1,
+    endLine: 100,
+    contentDigest: `sha256:${"a".repeat(64)}`,
+  };
+  const session: ResumeFileReadSession = {
+    roots: [{ rootId: "root-1", label: "managed-work" }],
+    execute: async () => ({
+      ok: true,
+      type: "read",
+      rootId: "root-1",
+      path: "resume-evidence.md",
+      citation,
+      text: "Built bioinformatics pipeline.\nBuilt workbench platform.",
+    }),
+    validateCitation: (value) =>
+      JSON.stringify(value) === JSON.stringify(citation),
+  };
+  const base = { ...requestBase, baseline, fileReadSession: session };
+  const value = {
+    ...base,
+    consentFingerprint: resumeCoachConsentFingerprint(base),
+  };
+  let calls = 0;
+  const result = await requestResumeCoach(value, async () => {
+    calls += 1;
+    if (calls === 1) {
+      return native({
+        kind: "tool",
+        action: {
+          action: "read",
+          rootId: "root-1",
+          path: "resume-evidence.md",
+        },
+      });
+    }
+    // Emulates Gemma 4: repeating "claims": [ in the middle of claims, and
+    // omitting `}]` before `"unknowns": []}` at the end.
+    const rawMalformation = JSON.stringify({
+      output: [
+        {
+          type: "message",
+          content: `{"kind":"final","edits":[{"slotId":"projects","text":"BioEvidence | Workflow | Python\\n- Built bioinformatics pipeline.\\n\\nPersonal-Workbench | Platform | Next.js\\n- Built workbench platform.","claims":[{"text":"Built bioinformatics pipeline.","citations":[${JSON.stringify(citation)}]},"claims":[{"text":"Built workbench platform.","citations":[${JSON.stringify(citation)}]}]}],\"unknowns\":[\"Pending metric validation\"]}`,
+        },
+      ],
+    });
+    return new Response(rawMalformation, {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  });
+  assert.equal(calls, 2);
+  assert.match(
+    result.sections.find((section) => section.heading === "Projects")?.text ??
+      "",
+    /Built bioinformatics pipeline/,
+  );
+  assert.match(
+    result.sections.find((section) => section.heading === "Projects")?.text ??
+      "",
+    /Built workbench platform/,
+  );
+  assert.equal(result.claims.length, 2);
+  assert.deepEqual(result.unknowns, ["Pending metric validation"]);
+});
+
+test("Resume Architect repairs Gemma 4 claims array closed with brace before next edit", async () => {
+  const citation: ResumeFileCitation = {
+    citationId: "citation-1",
+    path: "resume-evidence.md",
+    startLine: 1,
+    endLine: 100,
+    contentDigest: `sha256:${"a".repeat(64)}`,
+  };
+  const session: ResumeFileReadSession = {
+    roots: [{ rootId: "root-1", label: "managed-work" }],
+    execute: async () => ({
+      ok: true,
+      type: "read",
+      rootId: "root-1",
+      path: "resume-evidence.md",
+      citation,
+      text: "Built bioinformatics pipeline.\nBuilt workbench platform.",
+    }),
+    validateCitation: (value) =>
+      JSON.stringify(value) === JSON.stringify(citation),
+  };
+  const base = { ...requestBase, baseline, fileReadSession: session };
+  const value = {
+    ...base,
+    consentFingerprint: resumeCoachConsentFingerprint(base),
+  };
+  let calls = 0;
+  const result = await requestResumeCoach(value, async () => {
+    calls += 1;
+    if (calls === 1) {
+      return native({
+        kind: "tool",
+        action: {
+          action: "read",
+          rootId: "root-1",
+          path: "resume-evidence.md",
+        },
+      });
+    }
+    // Emulates Gemma 4: closing claims array with a `}` instead of `]` before `}, { "slotId": ... }`.
+    const rawMalformation = JSON.stringify({
+      output: [
+        {
+          type: "message",
+          content: `{"kind":"final","edits":[{"slotId":"projects","text":"BioEvidence | Workflow | Python\\n- Built bioinformatics pipeline.","claims":[{"text":"Built bioinformatics pipeline.","citations":[${JSON.stringify(citation)}]}}},{"slotId":"projects","text":"Personal-Workbench | Platform | Next.js\\n- Built workbench platform.","claims":[{"text":"Built workbench platform.","citations":[${JSON.stringify(citation)}]}]}],"unknowns":[]}`,
+        },
+      ],
+    });
+    return new Response(rawMalformation, {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  });
+  assert.equal(calls, 2);
+  assert.match(
+    result.sections.find((section) => section.heading === "Projects")?.text ??
+      "",
+    /Built bioinformatics pipeline/,
+  );
+  assert.match(
+    result.sections.find((section) => section.heading === "Projects")?.text ??
+      "",
+    /Built workbench platform/,
+  );
+  assert.equal(result.claims.length, 2);
 });
 
 test("Resume Architect repairs premature root close before unknowns and resolves selected-projects slot alias", async () => {
@@ -2678,6 +2817,121 @@ test("Resume Architect rejects visible work bullets without matching evidence-li
       "",
     /Built accessible TypeScript interfaces/,
   );
+});
+
+test("Resume Coach accepts valid action-led bullets with natural engineering verbs beyond a static allowlist (e.g. Finalized, Formulated)", async () => {
+  const base = {
+    ...requestBase,
+    baseline,
+    evidence: [
+      {
+        ...requestBase.evidence[0],
+        factualText:
+          "Finalized the profile component and developed availability dashboards.",
+        sourceDocument:
+          "resume-evidence/projects/BioEvidence/resume-evidence.md",
+      },
+    ],
+  };
+  const value = {
+    ...base,
+    consentFingerprint: resumeCoachConsentFingerprint(base),
+  };
+  const result = await requestResumeCoach(value, async () =>
+    native({
+      schemaVersion: 1,
+      selectionEcho: value.consentFingerprint,
+      sections: [
+        baseline.sections[0]!,
+        baseline.sections[1]!,
+        {
+          heading: "Projects",
+          text: "BioEvidence | Profile component dashboard\n- Finalized the profile component and developed availability dashboards.",
+        },
+        baseline.sections[3]!,
+      ],
+      claims: [
+        {
+          text: "Finalized the profile component and developed availability dashboards.",
+          evidenceIndexes: [0],
+        },
+      ],
+      unknowns: [],
+    }),
+  );
+  assert.match(
+    result.claims[0]?.text ?? "",
+    /Finalized the profile component and developed availability dashboards/,
+  );
+  assert.match(
+    result.sections.find((s) => s.heading === "Projects")?.text ?? "",
+    /Finalized the profile component/,
+  );
+});
+
+test("enrichAndCompleteBullets faithfully preserves model-generated bullets without keyword overrides", () => {
+  const modelBullets = [
+    "As project manager, scaffolded the backend and guided an 8-member group to build a platform connecting students and tutors, eliminating reliance on external social media for contact.",
+    "Engineered a centralized system to manage peer tutoring and group sessions, implementing role-based access control for Tutee, Tutor, and Admin staff functionalities.",
+    "Built data models for core entities including Sessions and Feedback to support the booking of one-on-one and group tutoring sessions, improving academic resource accessibility.",
+  ];
+  const candidateBullets = [
+    "Engineered a centralized, peer-to-peer tutoring platform connecting students, tutors, and administrative staff for academic support.",
+    "Implemented data persistence for user records using Mongoose models, including logic to retrieve and manage active users.",
+    "Established API endpoints for managing tutors and subjects, routing requests through the Express framework.",
+  ];
+
+  const result = enrichAndCompleteBullets(modelBullets, candidateBullets, 3);
+  assert.equal(result.length, 3);
+  assert.equal(result[0], modelBullets[0]);
+  assert.equal(result[1], modelBullets[1]);
+  assert.equal(result[2], modelBullets[2]);
+});
+
+test("enrichAndCompleteBullets tops up from candidate bullets only when model returns fewer bullets", () => {
+  const modelBullets = [
+    "Engineered a centralized system to manage peer tutoring and group sessions.",
+  ];
+  const candidateBullets = [
+    "Implemented data persistence for user records using Mongoose models.",
+    "Established API endpoints for managing tutors and subjects.",
+  ];
+
+  const result = enrichAndCompleteBullets(modelBullets, candidateBullets, 3);
+  assert.equal(result.length, 3);
+  assert.equal(result[0], "Engineered a centralized system to manage peer tutoring and group sessions.");
+  assert.equal(result[1], "Implemented data persistence for user records using Mongoose models.");
+  assert.equal(result[2], "Established API endpoints for managing tutors and subjects.");
+});
+
+test("sanitizeBulletText removes markers and normalizes whitespace without canned substitutions", () => {
+  const raw = "• Built a cache-control: private endpoint at 127.0.0.1 for local PDF previews -> with fast reload.";
+  const cleaned = sanitizeBulletText(raw);
+  assert.equal(cleaned, "Built a cache-control: private endpoint at 127.0.0.1 for local PDF previews -> with fast reload.");
+});
+
+test("convertFlatEntriesToEdits preserves model project bullets and formats header with core technologies", () => {
+  const entries = [
+    {
+      section: "projects",
+      name: "ElbiTutors",
+      descriptor: "Peer-to-Peer Tutoring Platform",
+      techStack: "Express, React, JavaScript, Mongoose",
+      dates: "Oct 2025 – Jan 2026",
+      bullets: [
+        "As project manager, scaffolded the backend and guided an 8-member group to build a platform connecting students and tutors, eliminating reliance on external social media for contact.",
+        "Engineered a centralized system to manage peer tutoring and group sessions, implementing role-based access control for Tutee, Tutor, and Admin staff functionalities.",
+        "Built data models for core entities including Sessions and Feedback to support the booking of one-on-one and group tutoring sessions, improving academic resource accessibility.",
+      ],
+    },
+  ];
+
+  const edits = convertFlatEntriesToEdits(entries);
+  assert.equal(edits.length, 1);
+  const edit = edits[0] as Record<string, unknown>;
+  assert.equal(edit.slotId, "projects");
+  assert.match(String(edit.text), /^ElbiTutors \| Peer-to-Peer Tutoring Platform \| Express, React, JavaScript, Mongoose \| Oct 2025 – Jan 2026/);
+  assert.match(String(edit.text), /As project manager, scaffolded the backend and guided an 8-member group/);
 });
 
 test("Resume Architect accepts eligible direct-less clarification support, excludes needs-review answers, and rejects out-of-contract responses", async () => {

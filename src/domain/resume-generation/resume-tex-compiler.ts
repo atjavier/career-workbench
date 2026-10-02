@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { lstat, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
+import { inflateSync } from "node:zlib";
 
 import type { MaterialDraftView } from "@/domain/resume-generation/material-draft-commands";
 import { renderResumeDraftTex } from "@/domain/resume-generation/resume-tex";
@@ -17,13 +18,15 @@ const bundleUrl = "https://data1b.fullyjustified.net/tlextras-2022.0r0.tar";
 
 export class ResumeTexCompilationError extends Error {
   cleanupPath?: string;
+  readonly cleanupSafe: boolean;
 
   constructor(
     message: string,
-    readonly cleanupSafe = true,
+    cleanupSafe = true,
   ) {
     super(message);
     this.name = "ResumeTexCompilationError";
+    this.cleanupSafe = cleanupSafe;
   }
 }
 
@@ -519,4 +522,28 @@ export async function compileRawTexDraftPdf(input: {
     paths.root,
     true,
   );
+}
+
+/** Count pages in a compiled PDF buffer to verify 1-page presentation compliance. */
+export function countPdfPages(pdfBuffer: Uint8Array | Buffer): number {
+  const buf = Buffer.isBuffer(pdfBuffer) ? pdfBuffer : Buffer.from(pdfBuffer);
+  const str = buf.toString("binary");
+  const countMatch = /\/Type\s*\/Pages[\s\S]*?\/Count\s+(\d+)/.exec(str);
+  if (countMatch) return parseInt(countMatch[1]!, 10);
+
+  let pages = 0;
+  const streamRegex = /stream[\r\n]+([\s\S]*?)[\r\n]+endstream/g;
+  let match: RegExpExecArray | null;
+  while ((match = streamRegex.exec(str)) !== null) {
+    try {
+      const decompressed = inflateSync(Buffer.from(match[1]!, "binary"));
+      if (
+        decompressed.includes("/Type /Page") ||
+        decompressed.includes("/Type/Page")
+      ) {
+        pages++;
+      }
+    } catch {}
+  }
+  return pages > 0 ? pages : 1;
 }

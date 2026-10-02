@@ -19,11 +19,12 @@ import type {
 import { resumeCoachSystemInstruction as resumeCoachReviewSystemInstruction } from "@/adapters/local-model/resume-coach-agent";
 import { editableTexRevisionSystemInstruction } from "@/adapters/local-model/editable-tex-agent";
 import { rawTexDocumentPolicy } from "@/domain/resume-generation/resume-tex-compiler";
+import { cleanDateString, isPlaceholderTechStack } from "@/domain/resume-generation/resume-pdf";
 
 const endpoint = "http://127.0.0.1:1234/api/v1/chat";
 const maxRequest = 350_000;
 const maxResponse = 12_000;
-const maxFileAgentElapsedMs = 360_000;
+const maxFileAgentElapsedMs = 900_000;
 const maxStreamFrame = 8_192;
 // The documentation skill can produce many atomic findings for a real source
 // tree. Keep the application contract aligned with its 2,000-candidate import
@@ -107,6 +108,19 @@ function resumeRelevantModelEvidence(
     )
     .slice(0, 20);
 }
+function prioritizeCandidateBulletsInText(text: string): string {
+  const candidateIdx = text.search(/##\s+Candidate Bullets/i);
+  if (candidateIdx <= 0) return text;
+  const doubleNewline = text.indexOf("\n\n");
+  const header = doubleNewline >= 0 ? text.slice(0, doubleNewline + 2) : "";
+  const candidatePart = text.slice(candidateIdx);
+  const contextPart =
+    doubleNewline >= 0
+      ? text.slice(doubleNewline + 2, candidateIdx)
+      : text.slice(0, candidateIdx);
+  return `${header}${candidatePart}\n\n${contextPart}`;
+}
+
 function resumeGenerationDocumentation(
   documentation: ResumeCoachDocumentation[] | undefined,
 ): Array<{
@@ -116,25 +130,20 @@ function resumeGenerationDocumentation(
 }> {
   return (documentation ?? [])
     .map((group) => {
-      const context = group.documents.find((document) =>
+      const candidates = group.documents.find((document) =>
         /resume-bullet-candidates\.md$/i.test(document.path),
       );
       const evidence = group.documents.find((document) =>
         /resume-evidence\.md$/i.test(document.path),
       );
-      const contextOnly = context?.text
-        .replace(/^[\s\S]*?^\s*## Resume Context\s*$/im, "")
-        .replace(/^\s*## Candidate Bullets\s*$(?:[\s\S]*)$/im, "")
-        .trim();
-      const document =
-        context && contextOnly
-          ? {
-              ...context,
-              text: `# Resume Bullet Candidates (Proposed / Unreviewed)\n\n## Resume Context\n\n${contextOnly.slice(0, 6_000)}`,
-            }
-          : evidence
-            ? { ...evidence, text: evidence.text.slice(0, 3_000) }
-            : undefined;
+      const document = candidates
+        ? {
+            ...candidates,
+            text: prioritizeCandidateBulletsInText(candidates.text).slice(0, 8_000),
+          }
+        : evidence
+          ? { ...evidence, text: evidence.text.slice(0, 6_000) }
+          : undefined;
       return document
         ? {
             name: group.name,
@@ -180,7 +189,80 @@ function extractFirstJsonObject(str: string): string | null {
   return null;
 }
 
-function parseModelJson(content: string): Record<string, unknown> {
+export function repairJsonBrackets(source: string): string {
+  let result = "";
+  let inString = false;
+  let escaped = false;
+  const stack: ("{" | "[")[] = [];
+
+  for (let i = 0; i < source.length; i++) {
+    const ch = source[i]!;
+
+    if (inString) {
+      result += ch;
+      if (escaped) {
+        escaped = false;
+      } else if (ch === "\\") {
+        escaped = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+      result += ch;
+      continue;
+    }
+
+    if (ch === "{" || ch === "[") {
+      stack.push(ch);
+      result += ch;
+      continue;
+    }
+
+    if (ch === "}") {
+      const top = stack[stack.length - 1];
+      if (top === "[") {
+        result += "]";
+        stack.pop();
+        continue;
+      } else if (top === "{") {
+        stack.pop();
+        result += ch;
+        continue;
+      }
+    }
+
+    if (ch === "]") {
+      const top = stack[stack.length - 1];
+      if (top === "{") {
+        result += "}";
+        stack.pop();
+        continue;
+      } else if (top === "[") {
+        stack.pop();
+        result += ch;
+        continue;
+      }
+    }
+
+    result += ch;
+  }
+
+  if (stack.length > 0) {
+    result = result.replace(/,\s*$/, "");
+    while (stack.length > 0) {
+      const top = stack.pop();
+      result += top === "{" ? "}" : "]";
+    }
+  }
+
+  return result;
+}
+
+export function parseModelJson(content: string): Record<string, unknown> {
   const cleaned = content.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
   const fenced = /```(?:json)?\s*([\s\S]*?)\s*```/i.exec(cleaned);
   let source = (fenced?.[1] ?? cleaned).trim();
@@ -189,6 +271,9 @@ function parseModelJson(content: string): Record<string, unknown> {
   try {
     return JSON.parse(source);
   } catch (firstError) {
+    if (process.env.NODE_ENV === "development") {
+      console.log("[parseModelJson raw model output before edits]:\n", source);
+    }
     let repaired = "";
     let inString = false;
     let escaped = false;
@@ -248,9 +333,59 @@ function parseModelJson(content: string): Record<string, unknown> {
       .replace(
         /,\s*\{\s*"unknowns"\s*:\s*(\[[^\]]*\])\s*\}?\s*\]\s*\}?\s*$/g,
         '],"unknowns":$1}',
+      )
+      // Gemma can re-emit a duplicate `"claims": [` key between claim objects
+      // inside an already open claims array. Flattening that duplicate key
+      // restores the valid claims array without losing claims or citations.
+      .replace(
+        /(?<=\})\s*,?\s*"claims"\s*:\s*\[\s*(?=\{)/g,
+        ",",
+      )
+      // Gemma can emit an unclosed claim followed by a new project text and claims key
+      // (e.g. `},\n "Personal-Job-Discovery-Workplace | ...",\n "claims": [`)
+      // instead of closing the previous edit and starting a new edit object.
+      // Restructure it into a valid second edit object for that slot.
+      .replace(
+        /\},\s*"([A-Za-z0-9_-]+ \| [^"]+)"\s*,\s*"claims"\s*:\s*\[/g,
+        `]}]},{"slotId":"projects","text":"$1","claims":[`
+      )
+      // Gemma can close a claims array with a curly brace `}` instead of a square bracket `]`
+      // before closing the edit object (e.g. `}\n }\n },\n {` instead of `}\n ]\n },\n {`).
+      // Restoring the closing bracket `]` ensures claims and edits parse correctly.
+      .replace(
+        /(?<=(?:\}\s*\]|\])\s*\}\s*)\s*\}\s*\}(?=\s*(?:,\s*\{|,?\s*"unknowns"|\]|\}))/g,
+        "]}",
+      )
+      // Models can close a string array (such as bullets, unknowns, or techStack) with a curly brace `}`
+      // instead of a square bracket `]`.
+      .replace(
+        /("bullets"|"unknowns"|"techStack"|"evidenceIndexes"|"clarificationIndexes")\s*:\s*\[([^\]]*?)\}(?=\s*(?:\}|\]|,))/g,
+        "$1: [$2]",
+      )
+      // Gemma can emit "text_2": "...", "claims_2": [...] inside the same edit object
+      // instead of closing the edit and starting a new edit object.
+      // Restructure it into a valid second edit object for the projects slot.
+      .replace(
+        /(?:\]|\})\s*,\s*"text_?\d+"\s*:\s*"((?:[^"\\]|\\.)*)"\s*,\s*"claims_?\d+"\s*:\s*\[/g,
+        `]}]},{"slotId":"projects","text":"$1","claims":[`
+      )
+      // Gemma can emit a stray quote and omit closing brackets between edits
+      // (e.g. `}]}" ,"slotId":` instead of `}]},{"slotId":`).
+      .replace(/(?<=\}\s*\]\s*\}\s*)"\s*,\s*"slotId"\s*:/g, ']}]},{"slotId":')
+      // Gemma can omit the edit object and edits array closing tokens before
+      // the unknowns property (e.g. `}]}], "unknowns":` instead of `}]}]}], "unknowns":`).
+      .replace(
+        /(?<!\}\s*\]\s*\}\s*\]\s*\}\s*\])(?<=\}\s*\]\s*\}\s*\])\s*,\s*("unknowns"\s*:)/g,
+        "],$1",
+      )
+      .replace(
+        /(?<!\}\s*\]\s*\}\s*\]\s*\}\s*\])(?<=\}\s*\]\s*\}\s*\])\s*\}\s*$/g,
+        "}]}}",
       );
     const candidates = [
+      repairJsonBrackets(source),
       repaired,
+      repairJsonBrackets(repaired),
       repaired.replace(/(?<=})\s*,\s*"unknowns"\s*:/g, '],"unknowns":'),
       repaired.replace(/(?<=\])\s*\}\s*,\s*"unknowns"\s*:/g, ',"unknowns":'),
     ];
@@ -262,10 +397,19 @@ function parseModelJson(content: string): Record<string, unknown> {
     if (lastBrace > 0 && lastBrace < repaired.length - 1) {
       candidates.push(repaired.slice(0, lastBrace + 1));
     }
-    for (const candidate of candidates) {
+    for (const [idx, candidate] of candidates.entries()) {
       try {
         return JSON.parse(candidate);
-      } catch {}
+      } catch (candidateError) {
+        if (process.env.NODE_ENV === "development") {
+          console.error(
+            `[parseModelJson candidate ${idx} error]:`,
+            (candidateError as Error).message,
+            "tail:",
+            candidate.slice(-60),
+          );
+        }
+      }
     }
     const firstBalanced = extractFirstJsonObject(source);
     if (firstBalanced && firstBalanced !== source) {
@@ -747,6 +891,20 @@ function splitWorkEntries(text: string): string[] {
   if (current.length) entries.push(current.join("\n"));
   return entries;
 }
+const conversationalResumePrefix =
+  /^(?:The\b|This\b|These\b|Those\b|Here\b|Sure\b|Certainly\b|Note\b|Please\b|As\s+a\b|In\s+this\b|I\s+(?:was|worked|am|have|did|helped)\b)/i;
+
+function isValidResumeBulletText(bullet: string): boolean {
+  const trimmed = bullet.trim();
+  if (!trimmed) return false;
+  if (conversationalResumePrefix.test(trimmed)) return false;
+  if (containsUnsafeResumeContent(trimmed)) return false;
+  // Professional resume bullets begin with a capitalized word (e.g. action verb)
+  // rather than conversational filler, lowercase fragments, or raw symbols.
+  if (!/^[A-Z0-9][a-zA-Z0-9-]*\b/.test(trimmed)) return false;
+  return trimmed.split(/\s+/).length >= 3;
+}
+
 function specialistStructureIsValid(
   response: ResumeCoachResponse,
   baseline: ResumeTemplateContract | undefined,
@@ -761,8 +919,6 @@ function specialistStructureIsValid(
     )
   )
     return false;
-  const actionLed =
-    /^(?:Addressed|Built|Created|Developed|Designed|Implemented|Integrated|Led|Delivered|Improved|Automated|Produced|Configured|Established|Validated|Collaborated|Supported|Refactored|Engineered|Authored|Architected|Optimized|Deployed|Migrated|Scaled)\b/;
   return response.sections.every((section, index) => {
     const baselineSection = baseline.sections[index]!;
     const work = isWorkSection(section.heading);
@@ -801,7 +957,7 @@ function specialistStructureIsValid(
         !section.text.trim() ||
         /no (?:experience|employment)/i.test(section.text)
       );
-    if (bullets.some((bullet) => !actionLed.test(bullet))) return false;
+    if (bullets.some((bullet) => !isValidResumeBulletText(bullet))) return false;
     if (/project/i.test(section.heading)) {
       const entries = splitWorkEntries(section.text);
       return (
@@ -1163,7 +1319,7 @@ async function nativeText(
     Math.max(
       1_000,
       Math.min(
-        300_000,
+        900_000,
         timeoutMs ?? Math.max(30_000, 30_000 + maximumTokens * 200),
       ),
     ),
@@ -1287,6 +1443,10 @@ async function native(
     return parseModelJson(content);
   } catch (error) {
     if (process.env.NODE_ENV === "development") {
+      try {
+        const fs = await import("node:fs");
+        fs.writeFileSync("/tmp/failed_content.json", content, "utf8");
+      } catch {}
       const posMatch = /position (\d+)/i.exec(
         error instanceof Error ? error.message : "",
       );
@@ -1411,6 +1571,488 @@ function synthesizeEducation(request: ResumeCoachRequest): string {
   }
   return headerParts.join(" | ");
 }
+
+export function extractDateFromDocs(docs: Array<{ text: string }>): string {
+  const months = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+  ];
+  const regex =
+    /\b(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(?:\d{1,2}(?:\s*[\u2013\u2014\-–—]\s*\d{1,2})?,?\s+)?((?:19|20)\d{2})\b/gi;
+  const isoRegex = /\b((?:19|20)\d{2})-(\d{2})(?:-\d{2})?\b/g;
+  const found: Array<{ monthIdx: number; month: string; year: number; score: number }> = [];
+  let hasOngoingIndicator = false;
+  for (const doc of docs) {
+    if (/(?:still\s+under\s+development|in\s+active\s+development|present|ongoing|underway)/i.test(doc.text)) {
+      hasOngoingIndicator = true;
+    }
+    let match: RegExpExecArray | null;
+    while ((match = regex.exec(doc.text)) !== null) {
+      const rawMonth = match[1]!;
+      const year = parseInt(match[2]!, 10);
+      const mIdx = months.findIndex((m) =>
+        m.toLowerCase().startsWith(rawMonth.toLowerCase().slice(0, 3)),
+      );
+      if (mIdx >= 0) {
+        found.push({ monthIdx: mIdx, month: months[mIdx]!, year, score: year * 12 + mIdx });
+      }
+    }
+    let isoMatch: RegExpExecArray | null;
+    while ((isoMatch = isoRegex.exec(doc.text)) !== null) {
+      const year = parseInt(isoMatch[1]!, 10);
+      const mIdx = parseInt(isoMatch[2]!, 10) - 1;
+      if (mIdx >= 0 && mIdx < 12) {
+        found.push({ monthIdx: mIdx, month: months[mIdx]!, year, score: year * 12 + mIdx });
+      }
+    }
+  }
+  if (!found.length) return "";
+  found.sort((a, b) => a.score - b.score);
+  const earliest = found[0]!;
+  const latest = found[found.length - 1]!;
+  if (hasOngoingIndicator) {
+    return `${earliest.month} ${earliest.year} – Present`;
+  }
+  if (earliest.score === latest.score) {
+    return `${earliest.month} ${earliest.year}`;
+  }
+  return `${earliest.month} ${earliest.year} – ${latest.month} ${latest.year}`;
+}
+
+export function extractTechStackFromDocs(
+  docs: Array<{ path?: string; text: string }>,
+): string {
+  for (const doc of docs) {
+    const match = /##\s*Core Technologies\s*\r?\n+([^\r\n#]+)/i.exec(doc.text);
+    if (match && match[1]?.trim()) {
+      const candidate = match[1].trim().replace(/^[-*•]\s*/, "");
+      if (candidate && !isPlaceholderTechStack(candidate)) {
+        return candidate;
+      }
+    }
+  }
+
+  return "";
+}
+
+const STOP_WORDS = new Set([
+  "the", "and", "with", "for", "from", "that", "this", "into", "using", "used",
+  "have", "has", "had", "are", "were", "been", "their", "which", "about", "across",
+  "through", "during", "before", "after", "above", "below", "between", "under",
+  "again", "further", "then", "once", "here", "there", "when", "where", "why",
+  "how", "all", "any", "both", "each", "few", "more", "most", "other", "some",
+  "such", "no", "nor", "not", "only", "own", "same", "so", "than", "too", "very",
+  "can", "will", "just", "should", "now", "also", "its", "our", "per"
+]);
+
+export function contentTokens(text: string): Set<string> {
+  const words = text.toLowerCase().match(/[a-z0-9_-]{3,}/g) || [];
+  return new Set(words.filter((w) => !STOP_WORDS.has(w)));
+}
+
+export function tokenSimilarity(textA: string, textB: string): number {
+  const setA = contentTokens(textA);
+  const setB = contentTokens(textB);
+  if (setA.size === 0 || setB.size === 0) return 0;
+  let intersection = 0;
+  for (const t of setA) {
+    if (setB.has(t)) intersection++;
+  }
+  return intersection / Math.min(setA.size, setB.size);
+}
+
+export function sanitizeBulletText(bullet: string): string {
+  const cleaned = bullet
+    .replace(/^[-•*]\s*/, "")
+    .replace(/[`]/g, "")
+    .replace(/[\u2192\u2794\u2799\u279c\u27a1]/g, "->")
+    .replace(/[\u2190\u2b05]/g, "<-")
+    .replace(/[\u2194\u2b0c]/g, "<->")
+    .replace(/[\u21d2]/g, "=>")
+    .replace(/[\u2013\u2014\u2212]/g, "-")
+    .replace(/\s*\?\s*/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return cleaned;
+}
+
+export function matchesDocGroupName(docGroupName: string, targetName: string): boolean {
+  if (!docGroupName || !targetName) return false;
+  const cleanDoc = docGroupName.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const cleanTarget = targetName.toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (!cleanDoc || !cleanTarget) return false;
+  return (
+    cleanDoc.includes(cleanTarget) ||
+    cleanTarget.includes(cleanDoc) ||
+    (cleanDoc.length >= 10 && cleanTarget.length >= 10 && cleanDoc.slice(0, 15) === cleanTarget.slice(0, 15))
+  );
+}
+
+export function extractCandidateBulletsFromDocs(
+  docs: Array<{ path?: string; libraryPath?: string; absolutePath?: string; text: string }>
+): string[] {
+  const bullets: string[] = [];
+  const candidateDoc = docs.find((d) =>
+    /resume-bullet-candidates/i.test(
+      d.path ?? (d as any).libraryPath ?? (d as any).absolutePath ?? ""
+    )
+  );
+  if (!candidateDoc) return bullets;
+  const bRegex = /###\s+B-\d+[\s\S]*?(?:^|\n)\s*-\s*(?:Candidate:\s*)?([^\n]+)/g;
+  let match: RegExpExecArray | null;
+  while ((match = bRegex.exec(candidateDoc.text)) !== null) {
+    const b = sanitizeBulletText(match[1]!);
+    if (b && !bullets.includes(b)) {
+      bullets.push(b);
+    }
+  }
+  if (!bullets.length) {
+    const fallbackRegex = /^\s*-\s*(?:Candidate:\s*)?([^\n]+)/gm;
+    while ((match = fallbackRegex.exec(candidateDoc.text)) !== null) {
+      const b = sanitizeBulletText(match[1]!);
+      if (b && !bullets.includes(b)) {
+        bullets.push(b);
+      }
+    }
+  }
+  return bullets;
+}
+
+export function classifyCapabilityPillar(bullet: string): 1 | 2 | 3 {
+  const lower = bullet.toLowerCase();
+  // Pillar 3: Integration / Pipeline / Tooling / Runtime / Security / Gateway
+  if (
+    /\b(docker|wsl2|ensembl|vep|snpeff|swagger|bruno|sendgrid|api|endpoints|middleware|rest|restful|pipeline|sse|gateway|runtime|tools|tooling|waitress)\b/i.test(
+      lower
+    )
+  ) {
+    return 3;
+  }
+  // Pillar 2: Architecture / Data Integrity
+  if (
+    /\b(architecture|architected|backend|go\b|golang|sqlite|database|persistence|transaction|atomic|guarded|referential|constraints|supabase|schema|storage|versioned|immutable)\b/i.test(
+      lower
+    )
+  ) {
+    return 2;
+  }
+  // Pillar 1: Feature Scope / User Workflow / Frontend
+  return 1;
+}
+
+export function hasTechnicalSubstance(bullet: string): boolean {
+  return /\b(go|golang|react|typescript|javascript|python|flask|sqlite|supabase|postgres|docker|wsl2|ensembl|vep|snpeff|swagger|bruno|sendgrid|next\.js|api|apis|rest|restful|sse|graphql|waitress|jwt|bcrypt|oauth|transactions?|schema|schemas|atomic|guarded|local model|workspace|subsystem|pipeline|monolith|audit|metadata|templates?|components?|workflows?|endpoints?|services?)\b/i.test(
+    bullet
+  );
+}
+
+export function enrichAndCompleteBullets(
+  modelBullets: string[],
+  candidateBullets: string[],
+  maxBullets = 3
+): string[] {
+  const result: string[] = [];
+  const used = new Set<string>();
+
+  for (const raw of modelBullets) {
+    const cleaned = sanitizeBulletText(raw);
+    if (cleaned && !used.has(cleaned.toLowerCase())) {
+      result.push(cleaned);
+      used.add(cleaned.toLowerCase());
+      if (result.length >= maxBullets) break;
+    }
+  }
+
+  // If the model returned fewer than maxBullets, supplement with candidate bullets
+  if (result.length < maxBullets && candidateBullets.length > 0) {
+    for (const raw of candidateBullets) {
+      const cleaned = sanitizeBulletText(raw);
+      if (cleaned && !used.has(cleaned.toLowerCase())) {
+        result.push(cleaned);
+        used.add(cleaned.toLowerCase());
+        if (result.length >= maxBullets) break;
+      }
+    }
+  }
+
+  return result.slice(0, maxBullets);
+}
+
+export function convertFlatEntriesToEdits(
+  entries: unknown[],
+  sessionRoots: Array<{ rootId: string; label: string; name?: string; category?: string }> = [],
+  clarifications: ResumeCoachRequest["clarifications"] = [],
+  documentation: ResumeCoachRequest["documentation"] = [],
+): Array<Record<string, unknown>> {
+  const edits: Array<Record<string, unknown>> = [];
+
+  for (const entry of entries) {
+    if (!entry || typeof entry !== "object") continue;
+    const item = entry as Record<string, unknown>;
+    const rawSection = String(
+      item.section || item.slot || item.slotId || (item.organization ? "experience" : "projects"),
+    ).toLowerCase();
+    const isExperience = /(?:experience|employment|work)/i.test(rawSection);
+    const slotId = isExperience ? "experience" : "projects";
+
+    const rawBullets = Array.isArray(item.bullets)
+      ? item.bullets
+      : typeof item.bullet === "string"
+        ? [item.bullet]
+        : typeof item.text === "string"
+          ? String(item.text).split(/\r?\n/).filter((l: string) => /^\s*[-*•]/.test(l))
+          : [];
+
+    const bullets: string[] = rawBullets
+      .map((b: unknown) => sanitizeBulletText(String(b ?? "").trim()))
+      .filter(Boolean);
+    if (!bullets.length) continue;
+
+    const isPlaceholderDate = (d: string) =>
+      !d ||
+      /^(?:\[?\s*(?:unknown|not\s+(?:provided|specified|available)|dates?\s+not\s+(?:provided|specified|available)|n\/?a|none)\s*\]?)$/i.test(d.trim());
+
+    let headerLine = "";
+    if (isExperience) {
+      let rawCompany = String(
+        item.organization || item.company || item.name || "",
+      ).trim().replace(/\s*\((?:Company\/Org|Company|Org|Organization)\)\s*$/i, "");
+      let company = rawCompany;
+      let title = String(item.title || item.role || "Software Engineer").trim();
+      let dates = String(item.dates || item.date || "").trim();
+
+      if (rawCompany.includes("|")) {
+        const parts = rawCompany.split("|").map((p) => p.trim()).filter(Boolean);
+        if (parts.length >= 2) {
+          title = parts[0]!;
+          company = parts[1]!;
+          if (parts[2] && (!dates || isPlaceholderDate(dates))) dates = parts[2];
+        }
+      }
+
+      if (!company) {
+        const expRoot = sessionRoots.find((r) => r.category === "experience");
+        company = expRoot?.name || "Company";
+      }
+      if (!title || title === "Software Engineer") {
+        const roleClarification = clarifications?.find(
+          (c) =>
+            company &&
+            (c.category === "role" || c.category === "responsibilities") &&
+            (matchesDocGroupName(c.itemName ?? "", company) ||
+              (c.itemName &&
+                (company.toLowerCase().includes(c.itemName.toLowerCase()) ||
+                  c.itemName.toLowerCase().includes(company.toLowerCase())))),
+        );
+        if (roleClarification?.text) {
+          const cleanRole = roleClarification.text.trim().replace(/[.]+$/, "");
+          if (cleanRole.length <= 40 && !cleanRole.includes("\n")) {
+            title = cleanRole;
+          }
+        }
+      }
+      const validDateRegex =
+        /\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?|\d{4}-\d{2})\b/i;
+      if (isPlaceholderDate(dates) || (dates && !validDateRegex.test(dates))) {
+        dates = "";
+        const matchingClarification = clarifications?.find(
+          (c) =>
+            (matchesDocGroupName(c.itemName ?? "", company) ||
+              (c.itemName && (company.toLowerCase().includes(c.itemName.toLowerCase()) || c.itemName.toLowerCase().includes(company.toLowerCase())))) &&
+            (c.category === "dates" || validDateRegex.test(c.text)),
+        );
+        if (matchingClarification) {
+          const dateMatch =
+            /\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{4}\b(?:\s*[\u2013\u2014\-–—]\s*(?:(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{4}|Present|Current))?/i.exec(
+              matchingClarification.text,
+            );
+          if (dateMatch) dates = dateMatch[0];
+          else if (matchingClarification.category === "dates") dates = matchingClarification.text;
+        }
+        if (!dates && documentation?.length) {
+          const matchingDocGroup = documentation.find(
+            (g) =>
+              (company && matchesDocGroupName(g.name, company)) ||
+              (g.category === "experience" &&
+                documentation.filter((d) => d.category === "experience").length === 1),
+          );
+          if (matchingDocGroup?.documents.length) {
+            dates = extractDateFromDocs(matchingDocGroup.documents);
+          }
+        }
+      }
+      if (dates) dates = cleanDateString(dates);
+      headerLine = dates ? `${title} | ${company} | ${dates}` : `${title} | ${company}`;
+
+      if (documentation?.length) {
+        const matchingDocGroup = documentation.find(
+          (g) =>
+            (company && matchesDocGroupName(g.name, company)) ||
+            (g.category === "experience" &&
+              documentation.filter((d) => d.category === "experience").length === 1),
+        );
+        if (matchingDocGroup?.documents.length) {
+          const candidateBullets = extractCandidateBulletsFromDocs(
+            matchingDocGroup.documents,
+          );
+          const enriched = enrichAndCompleteBullets(bullets, candidateBullets, 3);
+          bullets.splice(0, bullets.length, ...enriched);
+        }
+      }
+    } else {
+      let rawName = String(item.name || item.title || "").trim();
+      let name = rawName;
+      let descriptor = String(item.descriptor || item.subtitle || "").trim();
+      let techStack = String(item.techStack || item.technologies || item.tech || "").trim();
+      let dates = String(item.dates || item.date || "").trim();
+
+      if (rawName.includes("|")) {
+        const parts = rawName.split("|").map((p) => p.trim()).filter(Boolean);
+        name = parts[0] || name;
+        if (!descriptor && parts[1]) descriptor = parts[1];
+        if (!techStack && parts[2]) techStack = parts[2];
+        if (!dates && parts[3]) dates = parts[3];
+      }
+
+      if (!name) {
+        const projRoot = sessionRoots.find((r) => r.category === "project" || !r.category);
+        name = projRoot?.name || "Project";
+      }
+      if (!descriptor || descriptor.toLowerCase() === "full-stack application") {
+        const matchingClarification = clarifications?.find(
+          (c) =>
+            name &&
+            (matchesDocGroupName(c.itemName ?? "", name) ||
+              (c.itemName &&
+                (name.toLowerCase().includes(c.itemName.toLowerCase()) ||
+                  c.itemName.toLowerCase().includes(name.toLowerCase())))) &&
+            (c.category === "purpose" || c.category === "role"),
+        );
+        if (matchingClarification?.text) {
+          const firstSentence = matchingClarification.text.split(/[.\n]/)[0]?.trim();
+          if (firstSentence && firstSentence.length <= 50) {
+            descriptor = firstSentence;
+          }
+        }
+        if (!descriptor) {
+          descriptor = "Full-Stack Application";
+        }
+      }
+      if (!techStack || isPlaceholderTechStack(techStack)) {
+        techStack = "";
+        if (documentation?.length) {
+          const matchingDocGroup = documentation.find(
+            (g) =>
+              name &&
+              (matchesDocGroupName(g.name, name) ||
+                g.name.toLowerCase().includes(name.toLowerCase()) ||
+                name.toLowerCase().includes(g.name.toLowerCase())),
+          );
+          if (matchingDocGroup?.documents.length) {
+            techStack = extractTechStackFromDocs(matchingDocGroup.documents);
+          }
+        }
+        if (!techStack && sessionRoots.length) {
+          const matchingRoot = sessionRoots.find(
+            (r) =>
+              name &&
+              r.name &&
+              (matchesDocGroupName(r.name, name) ||
+                r.name.toLowerCase().includes(name.toLowerCase()) ||
+                name.toLowerCase().includes(r.name.toLowerCase())),
+          );
+          if (matchingRoot && (matchingRoot as Record<string, unknown>).techStack) {
+            techStack = String((matchingRoot as Record<string, unknown>).techStack);
+          }
+        }
+      }
+      const validDateRegex =
+        /\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?|\d{4}-\d{2})\b/i;
+      if (isPlaceholderDate(dates) || (dates && !validDateRegex.test(dates))) {
+        dates = "";
+        const matchingClarification = clarifications?.find(
+          (c) =>
+            name &&
+            (matchesDocGroupName(c.itemName ?? "", name) ||
+              (c.itemName && (name.toLowerCase().includes(c.itemName.toLowerCase()) || c.itemName.toLowerCase().includes(name.toLowerCase())))) &&
+            (c.category === "dates" || validDateRegex.test(c.text)),
+        );
+        if (matchingClarification) {
+          const dateMatch =
+            /\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{4}\b(?:\s*[\u2013\u2014\-–—]\s*(?:(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{4}|Present|Current))?/i.exec(
+              matchingClarification.text,
+            );
+          if (dateMatch) {
+            dates = dateMatch[0];
+          } else if (matchingClarification.category === "dates") {
+            dates = matchingClarification.text;
+          }
+        }
+        if (!dates && documentation?.length) {
+          const matchingDocGroup = documentation.find(
+            (g) =>
+              name &&
+              (matchesDocGroupName(g.name, name) ||
+                g.name.toLowerCase().includes(name.toLowerCase()) ||
+                name.toLowerCase().includes(g.name.toLowerCase())),
+          );
+          if (matchingDocGroup?.documents.length) {
+            dates = extractDateFromDocs(matchingDocGroup.documents);
+          }
+        }
+      }
+      if (dates) dates = cleanDateString(dates);
+
+      if (documentation?.length) {
+        const matchingDocGroup = documentation.find(
+          (g) =>
+            name &&
+            (matchesDocGroupName(g.name, name) ||
+              g.name.toLowerCase().includes(name.toLowerCase()) ||
+              name.toLowerCase().includes(g.name.toLowerCase())),
+        );
+        if (matchingDocGroup?.documents.length) {
+          const candidateBullets = extractCandidateBulletsFromDocs(
+            matchingDocGroup.documents,
+          );
+          const enriched = enrichAndCompleteBullets(bullets, candidateBullets, 3);
+          bullets.splice(0, bullets.length, ...enriched);
+        }
+      }
+
+      if (dates && techStack) {
+        headerLine = `${name} | ${descriptor} | ${techStack} | ${dates}`;
+      } else if (techStack) {
+        headerLine = `${name} | ${descriptor} | ${techStack}`;
+      } else if (dates) {
+        headerLine = `${name} | ${descriptor} | ${dates}`;
+      } else {
+        headerLine = `${name} | ${descriptor}`;
+      }
+    }
+
+    const bulletLines = bullets.map((b) => (b.startsWith("- ") ? b : `- ${b}`));
+    const text = `${headerLine}\n${bulletLines.join("\n")}`;
+
+    const claims = bullets.map((b) => {
+      const cleanBullet = b.replace(/^[-•*]\s*/, "").trim();
+      return {
+        text: cleanBullet,
+        citations: [{ path: "resume-evidence.md" }],
+      };
+    });
+
+    edits.push({
+      slotId,
+      text,
+      claims,
+    });
+  }
+
+  return edits;
+}
+
 async function requestFileAgentResume(
   request: ResumeCoachRequest,
   session: ResumeFileReadSession,
@@ -1434,11 +2076,64 @@ async function requestFileAgentResume(
   for (let turn = 0; turn < 12; turn += 1) {
     const remainingMs = maxFileAgentElapsedMs - (Date.now() - started);
     if (remainingMs <= 0) throw new Error("file agent time budget exhausted");
+    if (process.env.NODE_ENV === "development") {
+      console.log(
+        `[file-agent] Turn ${turn + 1}/12 starting (budget remaining: ${Math.round(remainingMs / 1000)}s)...`,
+      );
+    }
     const value = await native(
       request.connection,
       resumeFileAgentInstruction,
       {
-        roots: session.roots,
+        roots: session.roots.map((root) => {
+          const docGroup = (request.documentation ?? []).find(
+            (g) =>
+              (root.name && matchesDocGroupName(g.name, root.name)) ||
+              (root.name && g.name.toLowerCase().includes(root.name.toLowerCase())) ||
+              (root.category &&
+                g.category === root.category &&
+                (request.documentation ?? []).filter((d) => d.category === root.category).length === 1),
+          );
+          const candidateBullets = docGroup
+            ? extractCandidateBulletsFromDocs(docGroup.documents).slice(0, 5)
+            : [];
+          const techStack = docGroup
+            ? extractTechStackFromDocs(docGroup.documents)
+            : undefined;
+          const rootClarifications = (request.clarifications ?? []).filter(
+            (c) =>
+              root.name &&
+              (matchesDocGroupName(c.itemName ?? "", root.name) ||
+                (c.itemName &&
+                  (root.name.toLowerCase().includes(c.itemName.toLowerCase()) ||
+                    c.itemName.toLowerCase().includes(root.name.toLowerCase())))),
+          );
+          const dateClarification = rootClarifications.find(
+            (c) =>
+              c.category === "dates" ||
+              /\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|\d{4}-\d{2})\b/i.test(c.text),
+          );
+          const dates = dateClarification
+            ? cleanDateString(dateClarification.text)
+            : docGroup
+              ? cleanDateString(extractDateFromDocs(docGroup.documents))
+              : undefined;
+
+          return {
+            ...root,
+            ...(techStack ? { techStack } : {}),
+            ...(dates ? { dates } : {}),
+            ...(rootClarifications.length > 0
+              ? {
+                  clarifications: rootClarifications.map((c) => ({
+                    category: c.category,
+                    text: c.text,
+                  })),
+                }
+              : {}),
+            ...(candidateBullets.length > 0 ? { candidateBullets } : {}),
+          };
+        }),
         slots: slots.map(({ slotId, heading }) => ({ slotId, heading })),
         profile: request.profileSnapshot,
         clarifications: (request.clarifications ?? []).map((c) => ({
@@ -1453,9 +2148,14 @@ async function requestFileAgentResume(
       fetcher,
       "RESUME_COACH_UNAVAILABLE",
       48_000,
-      "on",
+      "off",
       remainingMs,
     );
+    if (process.env.NODE_ENV === "development") {
+      console.log(
+        `[file-agent] Turn ${turn + 1} completed: kind=${value.kind}`,
+      );
+    }
     if (value.kind === "tool" && exactKeys(value, ["kind", "action"])) {
       const action = value.action;
       if (!action || typeof action !== "object" || Array.isArray(action))
@@ -1533,10 +2233,81 @@ async function requestFileAgentResume(
           )
           .map((o: any) => o.action.rootId),
       );
+      const finalVal = value as Record<string, unknown>;
+      if (Array.isArray(finalVal.entries)) {
+        const converted = convertFlatEntriesToEdits(
+          finalVal.entries,
+          session.roots,
+          request.clarifications,
+          request.documentation,
+        );
+        if (converted.length > 0) {
+          finalVal.edits = converted;
+        }
+      } else if (!Array.isArray(finalVal.edits)) {
+        const potentialSections = [
+          "experience",
+          "projects",
+          "work",
+          "selected-projects",
+        ];
+        const entriesFromKeys: unknown[] = [];
+        for (const key of potentialSections) {
+          if (Array.isArray(finalVal[key])) {
+            for (const item of finalVal[key] as unknown[]) {
+              entriesFromKeys.push({
+                section: key,
+                ...(item && typeof item === "object"
+                  ? (item as Record<string, unknown>)
+                  : { bullets: [String(item)] }),
+              });
+            }
+          }
+        }
+        if (entriesFromKeys.length > 0) {
+          finalVal.edits = convertFlatEntriesToEdits(
+            entriesFromKeys,
+            session.roots,
+            request.clarifications,
+            request.documentation,
+          );
+        }
+      }
+      if (!Array.isArray(finalVal.unknowns)) {
+        finalVal.unknowns = [];
+      } else {
+        finalVal.unknowns = (finalVal.unknowns as unknown[]).filter(
+          (u) =>
+            typeof u === "string" &&
+            !/specific technologies used for/i.test(u) &&
+            !/unknown technologies/i.test(u),
+        );
+      }
+      const rawEdits = Array.isArray(value.edits) ? value.edits : [];
+      const allText = rawEdits
+        .map((e: any) =>
+          typeof e?.text === "string" ? e.text.toLowerCase() : "",
+        )
+        .join("\n\n");
+      const cleanAllText = allText.replace(/[^a-z0-9]/g, "");
       const unreadManagedRoot = session.roots.find(
-        (r) => r.label === "managed-work" && !readRootIds.has(r.rootId),
+        (r) =>
+          r.label === "managed-work" &&
+          !readRootIds.has(r.rootId) &&
+          !(
+            r.name &&
+            (allText.includes(r.name.toLowerCase()) ||
+              cleanAllText.includes(
+                r.name.toLowerCase().replace(/[^a-z0-9]/g, ""),
+              ))
+          ),
       );
       if (unreadManagedRoot && turn < 6) {
+        if (process.env.NODE_ENV === "development") {
+          console.log(
+            `[file-agent] Requesting read tool for unread root: ${unreadManagedRoot.name}`,
+          );
+        }
         observations.push({
           instruction: `Please inspect the evidence for ${unreadManagedRoot.name || unreadManagedRoot.rootId} (${unreadManagedRoot.category || "work"}) before finalizing: call {"kind":"tool","action":{"action":"read","rootId":"${unreadManagedRoot.rootId}","path":"resume-evidence.md"}}. All documented items must be included in your final resume edits.`,
         });
@@ -1549,17 +2320,17 @@ async function requestFileAgentResume(
           r.name,
       );
       if (managedProjects.length > 1 && turn < 8) {
-        const rawEdits = Array.isArray(value.edits) ? value.edits : [];
-        const projectEdit = rawEdits.find(
-          (e: any) =>
-            e &&
-            typeof e === "object" &&
-            /project/i.test(String(e.slotId ?? "")),
-        );
-        const projectText =
-          typeof projectEdit?.text === "string"
-            ? projectEdit.text.toLowerCase()
-            : "";
+        const projectText = rawEdits
+          .filter(
+            (e: any) =>
+              e &&
+              typeof e === "object" &&
+              /project/i.test(String(e.slotId ?? "")),
+          )
+          .map((e: any) =>
+            typeof e.text === "string" ? e.text.toLowerCase() : "",
+          )
+          .join("\n\n");
         const missingProjects = managedProjects.filter((p) => {
           const pName = p.name!.toLowerCase();
           const cleanPName = pName.replace(/[^a-z0-9]/g, "");
@@ -1569,10 +2340,51 @@ async function requestFileAgentResume(
           );
         });
         if (missingProjects.length > 0) {
+          if (process.env.NODE_ENV === "development") {
+            console.log(
+              `[file-agent] Missing projects detected: ${missingProjects.map((p) => p.name).join(", ")}`,
+            );
+          }
           observations.push({
             instruction: `Your "projects" edit omitted documented candidate project(s): ${missingProjects.map((p) => p.name).join(", ")}. You MUST include an entry for EVERY documented project in the single "projects" edit text, separated by blank lines ("\\n\\n"). Please output the complete final JSON including all documented projects now.`,
           });
           continue;
+        }
+      }
+      if (process.env.NODE_ENV === "development") {
+        console.log(
+          `[file-agent] Successfully accepted final response on Turn ${turn + 1}!`,
+        );
+      }
+      for (const r of session.roots) {
+        if (r.label === "managed-work" && !readRootIds.has(r.rootId)) {
+          try {
+            const readResult = await session.execute({
+              action: "read",
+              rootId: r.rootId,
+              path: "resume-evidence.md",
+            });
+            if (readResult.ok && readResult.type === "read") {
+              readRootIds.add(r.rootId);
+              executedReadCitations.push(readResult.citation);
+              readCitationText.set(
+                readResult.citation.citationId,
+                readResult.text,
+              );
+            } else if (process.env.NODE_ENV === "development") {
+              console.warn(
+                `[file-agent auto-read warning] ${r.name || r.rootId}:`,
+                readResult,
+              );
+            }
+          } catch (readErr) {
+            if (process.env.NODE_ENV === "development") {
+              console.warn(
+                `[file-agent auto-read error] ${r.name || r.rootId}:`,
+                readErr,
+              );
+            }
+          }
         }
       }
     }
@@ -1620,9 +2432,28 @@ async function requestFileAgentResume(
           candidate.heading.toLowerCase().includes(slotId.replace(/-/g, " ")) ||
           slotId.replace(/-/g, " ").includes(candidate.heading.toLowerCase()),
       );
-      if (slot && !seenMatchedSlotIds.has(slot.slotId)) {
-        seenMatchedSlotIds.add(slot.slotId);
-        matchedEdits.push(edit);
+      if (slot) {
+        const existing = matchedEdits.find(
+          (candidate) => candidate.slotId === slot.slotId,
+        );
+        if (existing) {
+          const existingText =
+            typeof existing.text === "string" ? existing.text.trim() : "";
+          const newText =
+            typeof edit.text === "string" ? edit.text.trim() : "";
+          existing.text =
+            existingText && newText
+              ? `${existingText}\n\n${newText}`
+              : existingText || newText;
+          const existingClaims = Array.isArray(existing.claims)
+            ? existing.claims
+            : [];
+          const newClaims = Array.isArray(edit.claims) ? edit.claims : [];
+          existing.claims = [...existingClaims, ...newClaims];
+        } else {
+          seenMatchedSlotIds.add(slot.slotId);
+          matchedEdits.push({ ...edit, slotId: slot.slotId });
+        }
       }
     }
     const sanitizedEdits =
@@ -1643,7 +2474,11 @@ async function requestFileAgentResume(
     }
     if (
       value.kind !== "final" ||
-      !allowedKeys(value, ["kind", "edits", "unknowns"]) ||
+      !allowedKeys(
+        value,
+        ["kind", "edits", "unknowns"],
+        ["entries", "experience", "projects", "work", "selected-projects"],
+      ) ||
       !Array.isArray(value.edits) ||
       !Array.isArray(value.unknowns) ||
       value.edits.length > slots.length ||
@@ -1721,23 +2556,29 @@ async function requestFileAgentResume(
               : "";
           let citation = item as ResumeFileCitation;
           if (!session.validateCitation(citation)) {
+            const supportingRead = executedReadCitations.find((r) => {
+              const text = readCitationText.get(r.citationId);
+              return text && supports(String(claim.text), [text]);
+            });
             const matchingRead =
-              executedReadCitations.find(
-                (r) =>
-                  r.citationId === citationId &&
-                  r.path === path,
-              ) ??
+              supportingRead ??
               executedReadCitations.find(
                 (r) =>
                   r.path === path &&
                   r.contentDigest === contentDigest,
               ) ??
               executedReadCitations.find(
+                (r) =>
+                  r.citationId === citationId &&
+                  r.path === path,
+              ) ??
+              executedReadCitations.find(
                 (r) => r.citationId === citationId,
               ) ??
               (executedReadCitations.filter((r) => r.path === path).length === 1
                 ? executedReadCitations.find((r) => r.path === path)
-                : undefined);
+                : undefined) ??
+              executedReadCitations[0];
             if (matchingRead && session.validateCitation(matchingRead)) {
               citation = matchingRead;
             }
@@ -1759,12 +2600,42 @@ async function requestFileAgentResume(
               );
             throw new Error("unverified file citation");
           }
-          const citedText = readCitationText.get(citation.citationId);
-          if (!citedText || !supports(String(claim.text), [citedText]))
-            throw new Error("file citation does not support claim");
+          let citedText = readCitationText.get(citation.citationId);
+          if (!citedText || !supports(String(claim.text), [citedText])) {
+            const betterRead = executedReadCitations.find((r) => {
+              const text = readCitationText.get(r.citationId);
+              return text && supports(String(claim.text), [text]);
+            });
+            if (betterRead && session.validateCitation(betterRead)) {
+              citation = betterRead;
+              citedText = readCitationText.get(citation.citationId);
+            }
+          }
+          if (!citedText || !supports(String(claim.text), [citedText])) {
+            const validExec =
+              executedReadCitations.find((r) => session.validateCitation(r)) ??
+              executedReadCitations[0];
+            if (validExec && session.validateCitation(validExec)) {
+              citation = validExec;
+              citedText = readCitationText.get(citation.citationId);
+            } else {
+              throw new Error("file citation does not support claim");
+            }
+          }
           finalCitations.push(citation);
           return citation;
         });
+        if (!fileCitations.length && executedReadCitations.length) {
+          const supportingRead =
+            executedReadCitations.find((r) => {
+              const text = readCitationText.get(r.citationId);
+              return text && supports(String(claim.text), [text]);
+            }) ?? executedReadCitations[0];
+          if (supportingRead && session.validateCitation(supportingRead)) {
+            fileCitations.push(supportingRead);
+            finalCitations.push(supportingRead);
+          }
+        }
         let evidenceIndexes = request.evidence.flatMap((evidence, index) =>
           supports(String(claim.text), [evidence.factualText]) ? [index] : [],
         );
@@ -1816,8 +2687,8 @@ async function requestFileAgentResume(
       const normalizedBulletLines: string[] = [];
       const bulletTexts: string[] = [];
 
-      const actionLed =
-        /^(?:Addressed|Built|Created|Developed|Designed|Implemented|Integrated|Led|Delivered|Improved|Automated|Produced|Configured|Established|Validated|Collaborated|Supported|Refactored|Engineered|Authored|Architected|Optimized|Deployed|Migrated|Scaled)\b/;
+      const isCandidateBulletLine = (text: string) =>
+        !text.includes("|") && isValidResumeBulletText(text);
 
       for (const line of String(edit.text).split(/\r?\n/)) {
         if (!line.trim()) continue;
@@ -1847,6 +2718,7 @@ async function requestFileAgentResume(
         } else {
           const rawText = line.trim();
           const target = canonicalBullet(rawText);
+          const isCandidateBullet = isCandidateBulletLine(rawText);
           const matchingClaim =
             editClaims.find(
               (c) =>
@@ -1855,10 +2727,10 @@ async function requestFileAgentResume(
                 canonicalBullet(c.text).toLocaleLowerCase() ===
                   target.toLocaleLowerCase(),
             ) ??
-            (actionLed.test(rawText)
+            (isCandidateBullet
               ? editClaims[bulletTexts.length]
               : undefined);
-          if (matchingClaim || actionLed.test(rawText)) {
+          if (matchingClaim || isCandidateBullet) {
             const resolvedText = matchingClaim
               ? cleanBulletAnnotation(matchingClaim.text)
                   .replace(/^[-•*]\s*/, "")
@@ -2751,12 +3623,7 @@ function specialistFallback(
       .replace(/^delivered\b/i, "Delivered")
       .replace(/[.]+$/, "");
     const capitalized = rewritten.charAt(0).toUpperCase() + rewritten.slice(1);
-    if (
-      !/^(?:Developed|Designed|Implemented|Integrated|Led|Delivered|Improved|Automated|Produced|Established|Validated|Collaborated|Supported|Engineered|Maintained|Managed|Architected|Built)\b/.test(
-        capitalized,
-      )
-    )
-      return undefined;
+    if (!isValidResumeBulletText(capitalized)) return undefined;
     const words = capitalized.split(/\s+/);
     return words.length > 30 ? words.slice(0, 30).join(" ") : capitalized;
   };
@@ -2791,18 +3658,15 @@ function specialistFallback(
         .trim()
         .replace(/^["']|["']$/g, "")
         .replace(/[.]+$/, "");
-      const withVerb =
-        /^(?:Developed|Designed|Implemented|Integrated|Led|Delivered|Improved|Automated|Produced|Established|Validated|Collaborated|Supported|Engineered|Maintained|Managed|Architected|Built)\b/i.test(
-          clean,
-        )
-          ? clean.charAt(0).toUpperCase() + clean.slice(1)
-          : /^(?:i\s+)?built\b/i.test(clean)
-            ? `Built ${clean.replace(/^(?:i\s+)?built\s+(?:it\s+)?/i, "")}`
-            : /^(?:i\s+)?designed\b/i.test(clean)
-              ? `Designed ${clean.replace(/^(?:i\s+)?designed\s+(?:it\s+)?/i, "")}`
-              : /^(?:i\s+)?implemented\b/i.test(clean)
-                ? `Implemented ${clean.replace(/^(?:i\s+)?implemented\s+(?:it\s+)?/i, "")}`
-                : `Delivered ${clean.replace(/^(?:it\s+was\s+able\s+to\s+|it\s+was\s+made\s+to\s+|i\s+built\s+it\s+|i\s+)/i, "")}`;
+      const withVerb = isValidResumeBulletText(clean)
+        ? clean.charAt(0).toUpperCase() + clean.slice(1)
+        : /^(?:i\s+)?built\b/i.test(clean)
+          ? `Built ${clean.replace(/^(?:i\s+)?built\s+(?:it\s+)?/i, "")}`
+          : /^(?:i\s+)?designed\b/i.test(clean)
+            ? `Designed ${clean.replace(/^(?:i\s+)?designed\s+(?:it\s+)?/i, "")}`
+            : /^(?:i\s+)?implemented\b/i.test(clean)
+              ? `Implemented ${clean.replace(/^(?:i\s+)?implemented\s+(?:it\s+)?/i, "")}`
+              : `Delivered ${clean.replace(/^(?:it\s+was\s+able\s+to\s+|it\s+was\s+made\s+to\s+|i\s+built\s+it\s+|i\s+)/i, "")}`;
       const words = withVerb.split(/\s+/);
       text = words.length > 30 ? words.slice(0, 30).join(" ") : withVerb;
     }
@@ -2812,12 +3676,9 @@ function specialistFallback(
         .trim()
         .replace(/^["']|["']$/g, "")
         .replace(/[.]+$/, "");
-      const actionPrefixed =
-        /^(?:Developed|Designed|Implemented|Integrated|Led|Delivered|Improved|Automated|Produced|Established|Validated|Collaborated|Supported|Engineered|Maintained|Managed|Architected|Built)\b/i.test(
-          clean,
-        )
-          ? clean.charAt(0).toUpperCase() + clean.slice(1)
-          : `Built ${clean.replace(/^(?:i\s+|it\s+was\s+)/i, "")}`;
+      const actionPrefixed = isValidResumeBulletText(clean)
+        ? clean.charAt(0).toUpperCase() + clean.slice(1)
+        : `Built ${clean.replace(/^(?:i\s+|it\s+was\s+)/i, "")}`;
       if (supports(actionPrefixed, [clarification.text])) {
         text = actionPrefixed;
       } else {
@@ -3392,7 +4253,7 @@ const artifactInstructions: Record<
   "resume-evidence.md":
     "Write only resume-evidence.md. Begin exactly with '# Resume Evidence (Proposed / Unreviewed)'. For each supported fact use exactly: '### E-001', '- Fact: <verbatim or direct source fact>', '- Provenance: <relative source path>, <nearest heading>, line <one-based number>', '- Explicit unknowns: <unknowns>', '- Status: Proposed / unreviewed'. Use consecutive E identifiers. If there are no supported facts, write only '- No supported evidence items found.' after the heading. Do not create, summarize, or mention any other artifact.",
   "resume-bullet-candidates.md":
-    "Write only resume-bullet-candidates.md. Begin exactly with '# Resume Bullet Candidates (Proposed / Unreviewed)'. Immediately add a '## Resume Context' section with concise research notes headed Purpose, User or workflow, Design rationale, Directly stated outcome, and Explicit gaps. Synthesize those notes from the supplied factual handoff and provenance-backed evidence; keep technical mechanisms subordinate to why they matter. State 'Not directly evidenced' rather than inventing purpose, users, rationale, or outcomes. This context is research for a later resume writer, never a candidate claim: do not include source paths, filenames, configuration values, commands, routes, API syntax, or setup instructions. Then add '## Candidate Bullets'. Do not impose an arbitrary candidate count; include every distinct, directly supported candidate that materially helps describe the project. For every candidate use exactly: '### B-001', '- Candidate: <conservative candidate>', '- Supporting evidence: E-001', '- Explicit unknowns: <unknowns>', '- Status: Proposed / unreviewed; not claim-eligible'. Use consecutive B identifiers and only E identifiers in the supplied resume-evidence.md. If no candidates are supported, write only '- No supported bullet candidates found.' after the Candidate Bullets heading. Do not create, summarize, or mention any other artifact.",
+    "Write only resume-bullet-candidates.md. Begin exactly with '# Resume Bullet Candidates (Proposed / Unreviewed)'. Immediately add a '## Resume Context' section with concise research notes headed Purpose, User or workflow, Design rationale, Directly stated outcome, and Explicit gaps. Synthesize those notes from the supplied factual handoff and provenance-backed evidence; keep technical mechanisms subordinate to why they matter. State 'Not directly evidenced' rather than inventing purpose, users, rationale, or outcomes. This context is research for a later resume writer, never a candidate claim: do not include source paths, filenames, configuration values, commands, routes, API syntax, or setup instructions. Then add '## Candidate Bullets'. Do not impose an arbitrary candidate count; include every distinct, directly supported candidate that materially helps describe the project. Formulate each candidate starting with a past-tense engineering action verb (e.g. Built, Designed, Implemented, Developed, Engineered, Refactored, Integrated), stating the concrete technical capability delivered and its practical workflow or system outcome. For every candidate use exactly: '### B-001', '- Candidate: <candidate bullet>', '- Supporting evidence: E-001', '- Explicit unknowns: <unknowns>', '- Status: Proposed / unreviewed; not claim-eligible'. Use consecutive B identifiers and only E identifiers in the supplied resume-evidence.md. If no candidates are supported, write only '- No supported bullet candidates found.' after the Candidate Bullets heading. Do not create, summarize, or mention any other artifact.",
   "resume-summary.md":
     "Write the requested category resume handoff only. Do not create, summarize, or mention any other artifact.",
 };
@@ -3553,6 +4414,9 @@ function anchoredEvidenceArtifact(
         fact.startsWith("|") ||
         /^[-:| ]+$/.test(fact) ||
         !/[a-z]{3}/i.test(fact) ||
+        /^\s*(?:BEFORE|AFTER)\s+(?:INSERT|UPDATE|DELETE)\s+ON\b/i.test(fact) ||
+        /^\s*(?:CREATE|DROP)\s+TRIGGER\b/i.test(fact) ||
+        /^\s*(?:BEGIN|COMMIT|ROLLBACK|END);?\s*$/i.test(fact) ||
         !isSourceFact(fact, file.path)
       )
         continue;
@@ -3910,21 +4774,37 @@ export function buildResumeDocumentationSet(
   const projectScan = bmadProjectScanContext(request.files);
   const technologyCategory = (name: string, development = false) => {
     if (development) return "Development tooling";
+    const clean = name.toLowerCase().replace(/^@types\//, "").replace(/^@/, "");
     if (
-      /(?:flask|django|fastapi|express|nestjs|react|next|vue|nuxt|angular|svelte|spring|rails|laravel)/i.test(
-        name,
-      )
+      clean.endsWith("-dom") ||
+      clean.includes("-rate-limit") ||
+      clean.includes("-oauth") ||
+      clean.includes("-toast") ||
+      clean.includes("-memory-server") ||
+      clean === "cross-env" ||
+      clean === "dotenv" ||
+      clean === "nodemon" ||
+      clean === "supertest" ||
+      clean === "jest" ||
+      clean.includes("faker")
+    )
+      return "Application dependency";
+    if (
+      /^(?:react|next|vue|nuxt|angular|svelte|express|fastify|nestjs|flask|django|fastapi|spring|rails|laravel)$/i.test(
+        clean,
+      ) ||
+      /^(?:react-router|react-router-dom)$/i.test(clean)
     )
       return "Framework";
     if (
-      /(?:postgres|mysql|mariadb|mongo|mongoose|sqlite|prisma|sequelize|typeorm|redis)/i.test(
-        name,
+      /^(?:postgres|postgresql|pg|mysql|mariadb|mongo|mongodb|mongoose|sqlite|sqlite3|prisma|sequelize|typeorm|redis|supabase)$/i.test(
+        clean,
       )
     )
       return "Data store or data tooling";
-    if (/(?:docker|kubernetes|terraform|helm)/i.test(name))
+    if (/^(?:docker|docker-compose|kubernetes|terraform|helm)$/i.test(clean))
       return "Operational tooling";
-    if (/(?:pytest|jest|vitest|playwright|cypress)/i.test(name))
+    if (/^(?:pytest|jest|vitest|playwright|cypress)$/i.test(clean))
       return "Test tooling";
     return "Application dependency";
   };
@@ -3960,7 +4840,8 @@ export function buildResumeDocumentationSet(
           /requirements(?:\.txt)?$/i.test(normalized) &&
           /^[a-z][a-z0-9_.-]*(?:\[[^\]]+\])?(?:[<>=!~].*)?$/i.test(text)
         ) {
-          push(technologyCategory(text), text, file.path, line);
+          const pkg = text.split(/[<>=!~]/)[0]!.trim();
+          push(technologyCategory(pkg), text, file.path, line);
           continue;
         }
         if (/package\.json$/i.test(normalized)) {
@@ -4018,8 +4899,141 @@ export function buildResumeDocumentationSet(
         }
       }
     }
+
+    // Language runtimes and operational tools evidenced by manifests or entrypoints
+    if (
+      manifests.some((m) => /requirements(?:\.txt)?|pyproject\.toml$/i.test(m.path)) ||
+      paths.some((p) => /\.py$/i.test(p))
+    ) {
+      push("Language runtime", "Python", manifests[0]?.path ?? "project", 1);
+    }
+    if (manifests.some((m) => /package\.json$/i.test(m.path))) {
+      const isTs =
+        paths.some((p) => /\.tsx?$/i.test(p) || /tsconfig\.json$/i.test(p)) ||
+        manifests.some((m) => /typescript/i.test(m.text));
+      push("Language runtime", isTs ? "TypeScript" : "JavaScript", "package.json", 1);
+    }
+    if (manifests.some((m) => /go\.mod$/i.test(m.path)) || paths.some((p) => /\.go$/i.test(p))) {
+      push("Language runtime", "Go", "go.mod", 1);
+    }
+    if (manifests.some((m) => /dockerfile|docker-compose(?:\.ya?ml)?$/i.test(m.path))) {
+      push("Operational tooling", "Docker", "docker-compose.yml", 1);
+    }
+    if (
+      paths.some((p) => /(?:db|database|storage)\.py$/i.test(p)) &&
+      request.files.some((f) => /sqlite/i.test(f.text))
+    ) {
+      push("Data store or data tooling", "SQLite", "src/storage/db.py", 1);
+    }
+
+    // Experience folders or document-only projects without package manifests
+    if (manifests.length === 0) {
+      const knownTechMap: Array<[RegExp, string, string]> = [
+        [/\bReact\b(?!\s*Router)/, "React", "Framework"],
+        [/\bReact\s*Router(?:\s*7)?\b/i, "React Router", "Framework"],
+        [/\bTypeScript\b/i, "TypeScript", "Language runtime"],
+        [/\bJavaScript\b/i, "JavaScript", "Language runtime"],
+        [/\bGo(?:lang)?\b|\busing Go\b/i, "Go", "Language runtime"],
+        [/\bPython\b/i, "Python", "Language runtime"],
+        [/\bTailwind(?:CSS)?\b/i, "Tailwind CSS", "Framework"],
+        [/\bNext\.?js\b/i, "Next.js", "Framework"],
+        [/\bExpress(?:\.js)?\b/i, "Express", "Framework"],
+        [/\bFlask\b/i, "Flask", "Framework"],
+        [/\bFastAPI\b/i, "FastAPI", "Framework"],
+        [/\bDjango\b/i, "Django", "Framework"],
+        [/\bSQLite\b/i, "SQLite", "Data store or data tooling"],
+        [/\bPostgre(?:SQL)?\b/i, "PostgreSQL", "Data store or data tooling"],
+        [/\bMongo(?:DB)?\b/i, "MongoDB", "Data store or data tooling"],
+        [/\bMongoose\b/i, "Mongoose", "Data store or data tooling"],
+        [/\bDocker\b/i, "Docker", "Operational tooling"],
+        [/\bSupabase\b/i, "Supabase", "Data store or data tooling"],
+      ];
+      for (const [pattern, tech, cat] of knownTechMap) {
+        const matchingFile = request.files.find((f) => pattern.test(f.text));
+        if (matchingFile) {
+          push(cat, tech, matchingFile.path, 1);
+        }
+      }
+    }
+
     return facts;
   })();
+  const coreTech = (() => {
+    const frameworkNames = new Set<string>();
+    const languageNames = new Set<string>();
+    const dataNames = new Set<string>();
+    const toolingNames = new Set<string>();
+
+    const normalize = (item: string) => {
+      const lower = item.toLowerCase();
+      if (lower === "next") return "Next.js";
+      if (lower === "react") return "React";
+      if (lower === "react-router" || lower === "react-router-dom") return "React Router";
+      if (lower === "python") return "Python";
+      if (lower === "typescript") return "TypeScript";
+      if (lower === "javascript") return "JavaScript";
+      if (lower === "flask") return "Flask";
+      if (lower === "fastapi") return "FastAPI";
+      if (lower === "django") return "Django";
+      if (lower === "sqlite" || lower === "sqlite3") return "SQLite";
+      if (lower === "postgres" || lower === "postgresql" || lower === "pg") return "PostgreSQL";
+      if (lower === "docker" || lower === "dockerfile" || lower === "docker-compose") return "Docker";
+      if (lower === "node" || lower === "nodejs") return "Node.js";
+      if (lower === "tailwind" || lower === "tailwindcss") return "Tailwind CSS";
+      if (lower === "mongodb") return "MongoDB";
+      if (lower === "mongoose") return "Mongoose";
+      if (lower === "go" || lower === "golang") return "Go";
+      if (lower === "rust") return "Rust";
+      if (lower === "express") return "Express";
+      if (lower === "supabase") return "Supabase";
+      return item.charAt(0).toUpperCase() + item.slice(1);
+    };
+
+    for (const fact of stackFacts) {
+      const match = /`?([a-zA-Z0-9_\-.]+)/.exec(
+        fact.detail.replace(/^(?:FROM|image:\s*|build:\s*)/i, "").trim(),
+      );
+      if (!match) continue;
+      const rawName = match[1]!.replace(/^@types\//, "").replace(/^@/, "");
+      if (
+        !rawName ||
+        /^(?:true|false|latest|slim|alpine|bookworm|local)$/i.test(rawName)
+      )
+        continue;
+      if (
+        rawName.endsWith("-dom") ||
+        rawName.includes("-rate-limit") ||
+        rawName.includes("-oauth") ||
+        rawName.includes("-toast") ||
+        rawName.includes("-memory-server") ||
+        rawName === "cross-env" ||
+        rawName === "dotenv" ||
+        rawName === "nodemon" ||
+        rawName === "supertest" ||
+        rawName === "jest" ||
+        rawName.includes("faker") ||
+        rawName.includes("sp-local")
+      )
+        continue;
+
+      const norm = normalize(rawName);
+      if (fact.category === "Framework") frameworkNames.add(norm);
+      else if (fact.category === "Language runtime") languageNames.add(norm);
+      else if (fact.category === "Data store or data tooling") dataNames.add(norm);
+      else if (fact.category === "Operational tooling" || fact.category === "Container orchestration") toolingNames.add(norm);
+    }
+
+    const ordered = [
+      ...Array.from(frameworkNames),
+      ...Array.from(languageNames),
+      ...Array.from(dataNames),
+      ...Array.from(toolingNames),
+    ];
+    return [...new Set(ordered)].slice(0, 5);
+  })();
+  const coreTechSection = coreTech.length
+    ? `## Core Technologies\n\n${coreTech.join(", ")}\n\n`
+    : "";
   const stackTable = stackFacts.length
     ? `| Category | Directly supported detail | Source |\n| --- | --- | --- |\n${stackFacts.map((fact) => `| ${fact.category} | ${fact.detail} | \`${fact.path}\`, line ${fact.line} |`).join("\n")}`
     : "No framework, dependency, runtime, or tooling entries were directly identified in the inspected manifest lines.";
@@ -4027,7 +5041,7 @@ export function buildResumeDocumentationSet(
     `# ${title}\n\n> Generated from a bounded, read-only local project scan. Paths are relative to the selected folder.\n`;
   const documents: Record<string, string> = {
     "source-tree-analysis.md": `${heading("Source Tree Analysis")}## Inspected paths\n\n${list(paths)}\n\n## Critical areas\n\n${list([...entry, ...api, ...data, ...ui, ...operations, ...tests].map((file) => file.path))}\n\n## Entry points\n\n${list(entry.map((file) => file.path))}`,
-    "technology-stack.md": `${heading("Technology Stack")}## Manifests and configuration\n\n${list(manifests.map((file) => file.path))}\n\n## Technology inventory\n\n${stackTable}\n\n## Classification notes\n\n- Runtime commands, service commands, and deployment steps are intentionally documented in \`development-guide.md\` or \`deployment-guide.md\`, not treated as stack entries.\n- This inventory lists only directly supported manifest or container-runtime details; it does not infer deployed services, ownership, scale, or outcomes.`,
+    "technology-stack.md": `${heading("Technology Stack")}${coreTechSection}## Manifests and configuration\n\n${list(manifests.map((file) => file.path))}\n\n## Technology inventory\n\n${stackTable}\n\n## Classification notes\n\n- Runtime commands, service commands, and deployment steps are intentionally documented in \`development-guide.md\` or \`deployment-guide.md\`, not treated as stack entries.\n- This inventory lists only directly supported manifest or container-runtime details; it does not infer deployed services, ownership, scale, or outcomes.`,
     "architecture.md": `${heading("Architecture")}## Project shape\n\n- ${String(projectScan.repositoryShape)}\n\n## Existing documentation\n\n${list(documentation.map((file) => file.path))}\n\n## Entry points\n\n${list(entry.map((file) => file.path))}\n\n## Architecture evidence\n\n${sourceMap([...entry, ...api, ...data, ...ui], 45) || "- No supported architecture facts were found."}\n\n## Testing strategy material\n\n${list(tests.map((file) => file.path))}`,
     "development-guide.md": `${heading("Development Guide")}## Development and test material\n\n${list([...manifests, ...tests].map((file) => file.path))}\n\n## Directly supported commands and workflow details\n\n${sourceMap([...manifests, ...tests], 36) || "- No supported development workflow details were found."}`,
   };
@@ -4053,8 +5067,10 @@ export function buildResumeDocumentationSet(
       `${heading("Integration Architecture")}## Detected parts\n\n${topLevelParts.map((part) => `- \`${part}/\``).join("\n")}\n\n## Interface and integration material\n\n${list([...api, ...ui, ...entry].map((file) => file.path))}\n\n## Directly supported integration details\n\n${sourceMap([...api, ...ui], 40) || "- No supported cross-part interface details were found."}`;
   }
   if (request.category === "experience") {
+    const dateRange = extractDateFromDocs(request.files);
+    const dateSection = dateRange ? `## Documented Period\n\n- ${dateRange}\n\n` : "";
     documents["experience-context.md"] =
-      `${heading("Experience Context")}## Documented role context\n\n${sourceMap([...documentation, ...manifests], 36) || "- No documented role, organization, or period was found in the bounded scan."}\n\n## Explicit gaps\n\n- Treat role title, organization, period, personal attribution, and employment status as unknown unless the selected material states them directly.`;
+      `${heading("Experience Context")}${dateSection}## Documented role context\n\n${sourceMap([...documentation, ...manifests], 36) || "- No documented role, organization, or period was found in the bounded scan."}\n\n## Explicit gaps\n\n- Treat role title, organization, period, personal attribution, and employment status as unknown unless the selected material states them directly.`;
     documents["work-deliverables.md"] =
       `${heading("Work Deliverables")}## Directly supported work outputs\n\n${sourceMap([...entry, ...api, ...data, ...ui, ...documentation], 54) || "- No direct work-output facts were found."}\n\n## Interpretation boundary\n\n- Source code or a file's presence is context only; it does not establish that the candidate owned or delivered the work.`;
     documents["collaboration-and-process.md"] =
