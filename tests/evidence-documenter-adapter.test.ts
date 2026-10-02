@@ -113,7 +113,7 @@ test("LM Studio adapter is loopback-only, bounded, validates model JSON, and nev
 
 test("Experience & Projects keeps the legacy model documenter outside the active collection and avoids private display data", async () => {
   const ui = await readFile(
-    new URL("../src/app/evidence-library.tsx", import.meta.url),
+    new URL("../src/components/evidence/experience-projects.tsx", import.meta.url),
     "utf8",
   );
   assert.match(ui, /local AI/);

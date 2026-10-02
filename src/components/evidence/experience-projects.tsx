@@ -19,7 +19,7 @@ import {
   type WorkspaceActionState,
 } from "@/app/actions";
 import type { ExperienceProjectCollection } from "@/domain/evidence/evidence-library";
-import { SegmentedTabs } from "@/app/segmented-tabs";
+import { SegmentedTabs } from "@/components/common/segmented-tabs";
 
 const initial: WorkspaceActionState = {
   status: "idle",
@@ -71,11 +71,16 @@ function formatInlineText(text: string): ReactNode {
     if (chunk.startsWith("**") && chunk.endsWith("**")) {
       parts.push(<strong key={match.index}>{chunk.slice(2, -2)}</strong>);
     } else if (chunk.startsWith("`") && chunk.endsWith("`")) {
-      parts.push(
-        <code key={match.index} className="inline-code">
-          {chunk.slice(1, -1)}
-        </code>,
-      );
+      const codeContent = chunk.slice(1, -1);
+      if (codeContent.length <= 60 && !codeContent.includes("\n")) {
+        parts.push(
+          <code key={match.index} className="inline-code">
+            {codeContent}
+          </code>,
+        );
+      } else {
+        parts.push(codeContent);
+      }
     }
     lastIndex = regex.lastIndex;
   }
@@ -173,8 +178,8 @@ function sanitizeFilePathsAndCode(text: string): string {
     .replace(/\s*\(`?[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_./-]+`?\)/gi, "")
     .replace(/`[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_./-]+`/g, "")
     .replace(/\b(?:src|app|api|components|instance|tests?|lib|utils|pages)\/[a-zA-Z0-9_./-]+\b/gi, "")
-    .replace(/\b[a-zA-Z0-9_-]+\.(?:db|sqlite|md|tex|json|ts|tsx|js|mjs|py|go|html|css)\b/gi, "")
     .replace(/`([^`]+)`/g, "$1")
+    .replace(/`+/g, "")
     .replace(/\s{2,}/g, " ")
     .replace(/\s+([,.;:])/g, "$1")
     .replace(/;\s*;/g, ";")
@@ -186,35 +191,128 @@ function cleanCardDescription(text: string): string {
   let cleaned = text.trim();
   cleaned = cleaned.replace(/^[-*+]\s+/, "");
   cleaned = cleaned.replace(
-    /^\*\*(?:Project Purpose|Purpose|Role Transition & Scope|Overview|Description|Role & Scope|About the Project|About the Role|Summary)(?::\*\*|\*\*:\s*|\*\*)\s*/i,
+    /^\*\*(?:Project Identity|Project Purpose|Purpose|Problem\/Purpose|Role Transition & Scope|Overview|Description|Role & Scope|About the Project|About the Role|Summary)(?::\*\*|\*\*:\s*|\*\*)\s*/i,
     "",
   );
   cleaned = cleaned.replace(
-    /^(?:Project Purpose|Purpose|Role Transition & Scope|Overview|Description|Role & Scope|About the Project|About the Role|Summary)\s*:\s*/i,
+    /^(?:Project Identity|Project Purpose|Purpose|Problem\/Purpose|Role Transition & Scope|Overview|Description|Role & Scope|About the Project|About the Role|Summary)\s*:\s*/i,
     "",
   );
   cleaned = cleaned.replace(/^[:\s-]+/, "");
   return sanitizeFilePathsAndCode(cleaned.trim());
 }
 
+function isPersonName(text: string): boolean {
+  const words = text.trim().split(/\s+/);
+  if (words.length < 2 || words.length > 5) return false;
+  const allCapitalized = words.every((w) => /^[A-Z][a-zA-Z.'-]*$/.test(w));
+  if (!allCapitalized) return false;
+  const nonNameWords = new Set([
+    "The",
+    "A",
+    "An",
+    "This",
+    "Project",
+    "Weekly",
+    "Reflection",
+    "Overview",
+    "Experience",
+    "Summary",
+  ]);
+  return !words.some((w) => nonNameWords.has(w));
+}
+
+function isUnhelpfulSummaryLine(line: string): boolean {
+  const clean = line.replace(/^[-*+]\s+/, "").trim();
+  if (!clean) return true;
+  if (/^#+\s+/i.test(line)) return true;
+  if (/^<!--[\s\S]*?-->$/i.test(line)) return true;
+  if (/^---/.test(line)) return true;
+  if (
+    /^(?:directly supported|supported implementation|explicit unknowns?|direct evidence gaps|weekly reflection|personal thoughts?|internship report|daily log|reflection log|status report|meeting notes?)\b/i.test(
+      clean,
+    )
+  ) {
+    return true;
+  }
+  if (
+    /^(?:ownership,\s*metrics|outcomes,\s*and\s*skills|no\s+(?:supported\s+)?evidence|not\s+directly\s+evidenced|not\s+specified|none\s+found|unknown:)/i.test(
+      clean,
+    )
+  ) {
+    return true;
+  }
+  if (isPersonName(clean)) {
+    return true;
+  }
+  return false;
+}
+
+function extractConciseSummary(text: string, maxChars = 230): string {
+  const cleaned = cleanCardDescription(text);
+  if (!cleaned) return "";
+
+  // Split into sentences using punctuation boundaries
+  const sentenceRegex = /([A-Z0-9][^.!?]*[.!?])(?:\s+|$)/g;
+  const sentences: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = sentenceRegex.exec(cleaned)) !== null) {
+    const s = m[1].trim();
+    if (s) sentences.push(s);
+  }
+
+  if (sentences.length === 0) {
+    return cleaned.length <= maxChars
+      ? cleaned
+      : `${cleaned.slice(0, maxChars).replace(/\s+\S*$/, "").trimEnd()}…`;
+  }
+
+  let result = sentences[0];
+  // If first sentence is brief (< 100 chars), append second sentence if total fits in maxChars
+  if (sentences.length > 1 && result.length < 100) {
+    const candidate = `${result} ${sentences[1]}`;
+    if (candidate.length <= maxChars) {
+      result = candidate;
+    }
+  }
+
+  return result;
+}
+
 function getCardDescription(item: ExperienceProjectCollection): string {
+  const docs = item.documents ?? [];
+
+  // Priority 1: resume-summary.md provides the highest-quality holistic narrative
+  const summaryDoc = docs.find((d) => d.name === "resume-summary.md");
+  if (summaryDoc) {
+    const lines = summaryDoc.text
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter((l) => !isUnhelpfulSummaryLine(l));
+    if (lines.length) {
+      const summary = extractConciseSummary(lines[0], 230);
+      if (summary) return summary;
+    }
+  }
+
+  // Priority 2: overview document (project-overview.md or experience-overview.md)
   const overviewFile =
     item.category === "project"
       ? "project-overview.md"
       : "experience-overview.md";
-  const doc = (item.documents ?? []).find((d) => d.name === overviewFile);
+  const doc = docs.find((d) => d.name === overviewFile);
   if (doc) {
     const lines = doc.text
       .split(/\r?\n/)
       .map((line) => line.trim())
-      .filter((line) => line && !line.startsWith("#") && !line.startsWith("<!--"));
+      .filter((line) => !isUnhelpfulSummaryLine(line));
     if (lines.length) {
-      const firstLine = lines[0];
-      const cleaned = cleanCardDescription(firstLine);
-      if (cleaned) return cleaned;
+      const summary = extractConciseSummary(lines[0], 230);
+      if (summary) return summary;
     }
   }
-  return cleanCardDescription(item.summary ?? "");
+
+  return extractConciseSummary(item.summary ?? "", 230);
 }
 
 function getExperienceRole(item: ExperienceProjectCollection): string | null {
@@ -1424,3 +1522,5 @@ export function EvidenceLibrary({
     </section>
   );
 }
+
+export { EvidenceLibrary as ExperienceProjects };

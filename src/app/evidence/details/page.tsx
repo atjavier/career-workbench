@@ -1,6 +1,11 @@
-import { ApplicationShell } from "@/app/application-shell";
-import { EvidenceDetailsWorkspace } from "@/app/evidence-details-workspace";
+import { ApplicationShell } from "@/components/common/application-shell";
+import {
+  ExperienceProjectsDetailsWorkspace,
+  EvidenceDetailsWorkspace,
+} from "@/components/evidence/experience-projects-details-workspace";
 import { listExperienceProjectCollection } from "@/domain/evidence/evidence-library";
+import { readResumeWorkspaceState } from "@/domain/resume-generation/resume-workspace-commands";
+import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
@@ -9,6 +14,21 @@ export default async function EvidenceDetailsPage({
 }: {
   searchParams: Promise<{ category?: string; name?: string }>;
 }) {
+  const workspaceState = await readResumeWorkspaceState().catch(() => ({
+    workspaces: [],
+    activeWorkspace: undefined,
+    revisionNumber: 0,
+  }));
+  if (!workspaceState.activeWorkspace) {
+    redirect("/resume");
+  }
+  if (workspaceState.activeWorkspace.journey?.phase === "onboarding") {
+    redirect("/resume");
+  }
+  if (workspaceState.activeWorkspace.journey?.phase === "documenting") {
+    redirect("/resume/interview");
+  }
+
   const { category, name } = await searchParams;
   const decodedName = name ? decodeURIComponent(name) : "";
   const collection = await listExperienceProjectCollection().catch(() => []);
@@ -23,7 +43,7 @@ export default async function EvidenceDetailsPage({
 
   return (
     <ApplicationShell active="Resume" activeSubItem="Experience & Projects">
-      <EvidenceDetailsWorkspace item={item} requestedName={decodedName} />
+      <ExperienceProjectsDetailsWorkspace item={item} requestedName={decodedName} />
     </ApplicationShell>
   );
 }

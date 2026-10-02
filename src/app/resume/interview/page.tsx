@@ -1,12 +1,11 @@
-import { ApplicationShell } from "@/app/application-shell";
+import { ApplicationShell } from "@/components/common/application-shell";
 import { redirect } from "next/navigation";
-import { PageHeader } from "@/app/page-header";
-import { ResumeWorkspacePicker } from "@/app/resume-workspace-picker";
+import { PageHeader } from "@/components/common/page-header";
 import { readResumeWorkspaceState } from "@/domain/resume-generation/resume-workspace-commands";
 import { readLatestResumeEvidenceIntake } from "@/domain/resume-generation/resume-evidence-intake";
 import { readResumeClarificationInterview } from "@/domain/resume-generation/resume-clarification-interview";
-import { ResumeInterview } from "@/app/resume-interview";
-import { ResumeIntakeStatus } from "@/app/resume-intake-status";
+import { CoachQA, ResumeInterview } from "@/components/coach/coach-qa";
+import { ResumeIntakeStatus } from "@/components/coach/resume-intake-status";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +15,12 @@ export default async function ResumeInterviewPage() {
     activeWorkspace: undefined,
     revisionNumber: 0,
   }));
+  if (!state.activeWorkspace) {
+    redirect("/resume");
+  }
+  if (state.activeWorkspace.journey?.phase === "onboarding") {
+    redirect("/resume");
+  }
   const intake = state.activeWorkspace
     ? await readLatestResumeEvidenceIntake(state.activeWorkspace.id).catch(
         () => undefined,
@@ -49,22 +54,23 @@ export default async function ResumeInterviewPage() {
     intake?.message ??
     "Reading your selected local folders and documenting resume evidence.";
   return (
-    <ApplicationShell active="Coach Q&A">
+    <ApplicationShell active={shouldShowInterview ? "Coach Q&A" : "Resume"}>
       <div className="workspace-shell resume-workspace resume-interview-workspace">
         <PageHeader
           className="resume-page-head"
-          title="Prepare your resume evidence"
-          subtitle="Your local AI coach analyzes your documented work and identifies a few targeted clarification questions. Answer the questions below to establish your verified achievements and metrics before generating your base resume."
-          actions={
-            <ResumeWorkspacePicker
-              workspaces={state.workspaces}
-              activeWorkspaceId={state.activeWorkspace?.id}
-              revisionNumber={state.revisionNumber}
-            />
+          title={
+            shouldShowInterview
+              ? "Prepare your resume evidence"
+              : "Processing your work"
+          }
+          subtitle={
+            shouldShowInterview
+              ? "Your local AI coach analyzes your documented work and identifies a few targeted clarification questions. Answer the questions below to establish your verified achievements and metrics before generating your base resume."
+              : "Analyzing your selected project and experience folders with bounded local inspection to extract source-backed technical facts."
           }
         />
         {shouldShowInterview && state.activeWorkspace && interview ? (
-          <ResumeInterview
+          <CoachQA
             workspaceId={state.activeWorkspace.id}
             interview={interview}
           />

@@ -5,8 +5,8 @@ import test from "node:test";
 test("evidence intake provides actionable next-step routing and Base Resume warns when stale", async () => {
   const [actions, library, coach, styles] = await Promise.all([
     readFile(new URL("../src/app/actions.ts", import.meta.url), "utf8"),
-    readFile(new URL("../src/app/evidence-library.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../src/app/resume-studio.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/components/evidence/experience-projects.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/components/resume/resume-preview.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/app/globals.css", import.meta.url), "utf8"),
   ]);
 
@@ -54,10 +54,10 @@ test("removing a documented project prompts regeneration and detects changes", a
 
 test("Base Resume remains accessible across journey phases and documentation displays clear loading feedback", async () => {
   const [shell, workspace, coach, library, styles] = await Promise.all([
-    readFile(new URL("../src/app/application-shell.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../src/app/resume-workspace.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../src/app/resume-studio.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../src/app/evidence-library.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/components/common/application-shell.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/components/resume/resume-workspace.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/components/resume/resume-preview.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/components/evidence/experience-projects.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/app/globals.css", import.meta.url), "utf8"),
   ]);
 

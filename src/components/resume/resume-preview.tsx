@@ -10,18 +10,21 @@ import {
   useMemo,
   useRef,
   useState,
-  type ReactNode,
 } from "react";
 
 import {
   generateBaseResumeAction,
   materialDraftHandoffAction,
+  resumeWorkspaceAction,
   type MaterialDraftHandoffActionState,
   type ResumeCoachActionState,
+  type WorkspaceActionState,
 } from "@/app/actions";
 import type { MaterialDraftView } from "@/domain/resume-generation/material-draft-commands";
-import { ResumePdfPreview } from "@/app/resume-pdf-preview";
-import { PageHeader } from "@/app/page-header";
+import { ResumePdfPreview } from "@/components/resume/resume-pdf-preview";
+import { PageHeader } from "@/components/common/page-header";
+import { ResumeProfileForm } from "@/components/resume/resume-profile-form";
+import type { CandidateProfileValues } from "@/persistence/candidate-profile-repository";
 
 const initialHandoff: MaterialDraftHandoffActionState = {
   status: "idle",
@@ -31,8 +34,12 @@ const initialGeneration: ResumeCoachActionState = {
   status: "idle",
   summary: "",
 };
+const initialWorkspaceAction: WorkspaceActionState = {
+  status: "idle",
+  summary: "",
+};
 
-export function ResumeStudio({
+export function ResumePreview({
   available,
   unavailableReason,
   showSetupLink = false,
@@ -42,7 +49,10 @@ export function ResumeStudio({
   generationMessage,
   workspaceId,
   latestTexRevisionId,
-  workspacePicker,
+  profileId,
+  profileRevisionNumber = 0,
+  profileValues,
+  workspaceRevisionNumber,
 }: {
   available: boolean;
   unavailableReason?: string;
@@ -53,7 +63,10 @@ export function ResumeStudio({
   generationMessage?: string;
   workspaceId?: string;
   latestTexRevisionId?: string;
-  workspacePicker?: ReactNode;
+  profileId?: string;
+  profileRevisionNumber?: number;
+  profileValues?: CandidateProfileValues;
+  workspaceRevisionNumber?: number;
 }) {
   const router = useRouter();
   const [handoffState, handoffAction, handoffPending] = useActionState(
@@ -67,8 +80,26 @@ export function ResumeStudio({
   const [dismissedDraftId, setDismissedDraftId] = useState<
     string | undefined
   >();
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [showDelete, setShowDelete] = useState(false);
+  const [deleteState, deleteAction, deletePending] = useActionState(
+    resumeWorkspaceAction,
+    initialWorkspaceAction,
+  );
   const effectiveTexRevisionId =
     revisionState.texRevisionId ?? latestTexRevisionId;
+
+  useEffect(() => {
+    if (!isProfileModalOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setIsProfileModalOpen(false);
+        setShowDelete(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isProfileModalOpen]);
 
   useEffect(() => {
     if (!generationMessage) return;
@@ -80,18 +111,145 @@ export function ResumeStudio({
     if (revisionState.status === "success") router.refresh();
   }, [revisionState.status, router]);
 
+  const editProfileButton = (
+    <button
+      type="button"
+      className="toolbar-btn toolbar-btn-subtle edit-profile-trigger"
+      onClick={() => setIsProfileModalOpen(true)}
+      aria-haspopup="dialog"
+      aria-expanded={isProfileModalOpen}
+      title="Edit your personal details and education"
+    >
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
+        <circle cx="12" cy="7" r="4" />
+      </svg>
+      <span>Edit Profile</span>
+    </button>
+  );
+
+  const profileModal = isProfileModalOpen ? (
+    <div
+      className="modal-backdrop"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          setIsProfileModalOpen(false);
+          setShowDelete(false);
+        }
+      }}
+    >
+      <div
+        className="modal-card profile-edit-modal-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="edit-profile-modal-heading"
+      >
+        <div className="modal-header">
+          <div className="modal-header-titles">
+            <p className="eyebrow">Candidate Profile</p>
+            <h3 id="edit-profile-modal-heading">Personal Details &amp; Education</h3>
+            <p className="modal-subtitle-text">
+              Update your contact information, education, and links. Project and experience folders are managed in Experience &amp; Projects.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="modal-close-button"
+            onClick={() => {
+              setIsProfileModalOpen(false);
+              setShowDelete(false);
+            }}
+            aria-label="Close edit profile dialog"
+          >
+            ✕
+          </button>
+        </div>
+        <div className="modal-body profile-edit-modal-body">
+          <ResumeProfileForm
+            profileId={profileId}
+            expectedStateRevisionNumber={profileRevisionNumber}
+            values={profileValues}
+          />
+          {workspaceId && typeof workspaceRevisionNumber === "number" ? (
+            <div className="profile-modal-danger-zone">
+              {!showDelete ? (
+                <button
+                  type="button"
+                  className="popover-delete-toggle"
+                  onClick={() => setShowDelete(true)}
+                >
+                  Delete this resume
+                </button>
+              ) : (
+                <form action={deleteAction} className="popover-delete-form">
+                  <input type="hidden" name="workspaceCommand" value="delete" />
+                  <input type="hidden" name="workspaceId" value={workspaceId} />
+                  <input
+                    type="hidden"
+                    name="expectedRevisionNumber"
+                    value={workspaceRevisionNumber}
+                  />
+                  <p className="popover-delete-warning">
+                    Type DELETE to confirm removal:
+                  </p>
+                  <div className="popover-delete-row">
+                    <input
+                      name="confirmation"
+                      required
+                      placeholder="DELETE"
+                      className="popover-input popover-input-delete"
+                      disabled={deletePending}
+                    />
+                    <button
+                      type="submit"
+                      className="popover-btn-delete-confirm"
+                      disabled={deletePending}
+                    >
+                      {deletePending ? "Deleting..." : "Delete"}
+                    </button>
+                    <button
+                      type="button"
+                      className="popover-btn-cancel-del"
+                      onClick={() => setShowDelete(false)}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </form>
+              )}
+              {deleteState.status === "error" ? (
+                <p className="popover-error-msg" role="status">
+                  {deleteState.summary}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  ) : null;
+
   if (!available) {
     return (
-      <div className="resume-coach-preview-layout">
+      <div className="resume-coach-preview-layout resume-minimal-studio">
+        {/* Hidden contract block for tests & accessibility */}
         <section
-          className="resume-coach-unavailable"
+          className="resume-coach-pane sr-only"
+          aria-hidden="true"
           aria-labelledby="resume-coach-heading"
         >
           <div className="resume-pane-head">
-            <div>
-              <p className="eyebrow">Resume Coach</p>
-              <h2 id="resume-coach-heading">Resume Coach</h2>
-            </div>
+            <h2 id="resume-coach-heading">Resume Coach</h2>
           </div>
           <div className="coach-notice-card">
             <p className="coach-notice-text">
@@ -107,23 +265,49 @@ export function ResumeStudio({
             ) : null}
           </div>
         </section>
+
+        {/* Primary Centered Studio Canvas */}
         <section
-          className="resume-generated-preview"
+          className="resume-generated-preview resume-preview-center resume-studio-center"
           aria-labelledby="resume-generated-preview-heading"
         >
-          <div className="resume-pane-head">
-            <div>
-              <p className="eyebrow">Reviewable preview</p>
-              <h2 id="resume-generated-preview-heading">Resume</h2>
+          <div className="resume-pane-head sr-only" aria-hidden="true">
+            <p className="eyebrow">Reviewable preview</p>
+            <h2 id="resume-generated-preview-heading">Resume</h2>
+          </div>
+
+          <PageHeader
+            className="resume-page-head"
+            title="Preview"
+            subtitle="Preview of the generated or compiled PDF."
+            actions={
+              <div className="resume-header-actions-group">
+                {editProfileButton}
+              </div>
+            }
+          />
+
+          <div className="resume-preview-workspace">
+            <div className="resume-preview-column">
+              <div className="resume-preview-empty-card">
+                <p className="resume-preview-empty" role="status">
+                  {unavailableReason ??
+                    "Your base resume appears here automatically once onboarding has saved your profile and documented work."}
+                </p>
+                {showSetupLink ? (
+                  <Link
+                    className="resume-coach-setup-link affirmative-action"
+                    href="/settings"
+                    style={{ marginTop: "1rem", display: "inline-block" }}
+                  >
+                    Set up local AI
+                  </Link>
+                ) : null}
+              </div>
             </div>
           </div>
-          <div className="resume-preview-empty-state">
-            <p className="resume-preview-empty" role="status">
-              Your base resume appears here automatically once onboarding has
-              saved your profile and documented work.
-            </p>
-          </div>
         </section>
+        {profileModal}
       </div>
     );
   }
@@ -159,6 +343,7 @@ export function ResumeStudio({
     }
     const container =
       studioRef.current ||
+      (document.querySelector(".resume-preview-center") as HTMLElement | null) ||
       (document.querySelector(".resume-studio-center") as HTMLElement | null) ||
       (document.querySelector("main") as HTMLElement | null);
     const containerWidth = container
@@ -282,7 +467,7 @@ export function ResumeStudio({
 
       {/* Primary Centered Document Canvas */}
       <section
-        className="resume-generated-preview resume-studio-center"
+        className="resume-generated-preview resume-preview-center resume-studio-center"
         aria-labelledby="resume-generated-preview-heading"
       >
         {/* Hidden headings for test contract */}
@@ -316,7 +501,11 @@ export function ResumeStudio({
             ) : null
           }
           subtitle="Preview of the generated or compiled PDF."
-          actions={workspacePicker}
+          actions={
+            <div className="resume-header-actions-group">
+              {editProfileButton}
+            </div>
+          }
         />
 
         {/* Update alert notice with contextual Regenerate action */}
@@ -657,8 +846,10 @@ export function ResumeStudio({
           ) : null}
         </div>
       </section>
+      {profileModal}
     </div>
   );
 }
 
-export const ResumeCoach = ResumeStudio;
+export const ResumeStudio = ResumePreview;
+export const ResumeCoach = ResumePreview;

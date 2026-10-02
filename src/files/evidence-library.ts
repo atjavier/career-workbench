@@ -13,7 +13,7 @@ import type { Stats } from "node:fs";
 import { basename, extname, join, relative, resolve, sep } from "node:path";
 import { WorkspaceError } from "@/domain/workspace/types";
 import { getResumeAgentSkill } from "@/domain/resume-agent/skill-registry";
-import { extractPdfText } from "@/adapters/resume-parser/pdf-text-parser";
+import { extractPdfText } from "@/adapters/pdf-parser/pdf-text-extractor";
 
 export type LibraryCategory = "project" | "experience";
 export type MarkdownDocument = {
@@ -1216,7 +1216,7 @@ const fileToolLimits = {
   maxReadLines: 600,
   maxDepth: 20,
   maxListEntries: 80,
-  maxElapsedMs: 90_000,
+  maxElapsedMs: 900_000,
 } as const;
 const toolPath = (value: string | undefined): string | undefined => {
   if (value === undefined || value === "") return "";
@@ -1246,6 +1246,7 @@ export type ResumeManagedRootDescriptor =
 export async function createResumeFileReadSession(input: {
   applicationRoot?: string;
   managedRoots: ResumeManagedRootDescriptor[];
+  maxElapsedMs?: number;
 }): Promise<ResumeFileReadSession> {
   const skill = getResumeAgentSkill("resume.generate-base-resume");
   const extensions = new Set(skill.allowedExtensions);
@@ -1312,11 +1313,12 @@ export async function createResumeFileReadSession(input: {
   let bytes = 0;
   let ordinal = 0;
   const started = Date.now();
+  const sessionMaxElapsedMs = input.maxElapsedMs ?? fileToolLimits.maxElapsedMs;
   const exhausted = () =>
     calls >= fileToolLimits.maxCalls ||
     files >= fileToolLimits.maxFiles ||
     bytes >= fileToolLimits.maxBytes ||
-    Date.now() - started > fileToolLimits.maxElapsedMs;
+    Date.now() - started > sessionMaxElapsedMs;
   const targetFor = async (root: ResumeFileRoot, path: string) => {
     const target = resolve(root.root, path);
     if (!withinRoot(root.root, target)) return undefined;

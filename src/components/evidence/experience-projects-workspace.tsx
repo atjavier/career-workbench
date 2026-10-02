@@ -1,10 +1,8 @@
 import Link from "next/link";
 
-import { EvidenceLibrary } from "@/app/evidence-library";
-import { PageHeader } from "@/app/page-header";
-import { ResumeWorkspacePicker } from "@/app/resume-workspace-picker";
+import { EvidenceLibrary } from "@/components/evidence/experience-projects";
+import { PageHeader } from "@/components/common/page-header";
 import { listExperienceProjectCollection } from "@/domain/evidence/evidence-library";
-import { readResumeWorkspaceState } from "@/domain/resume-generation/resume-workspace-commands";
 
 const safeError = (error: unknown) =>
   error instanceof Error && "summary" in error && "safeNextAction" in error
@@ -19,29 +17,15 @@ const safeError = (error: unknown) =>
       };
 
 export async function EvidenceLibraryWorkspace() {
-  const [collection, workspaceState] = await Promise.all([
-    listExperienceProjectCollection()
-      .then((items) => ({ items, error: undefined }))
-      .catch((error) => ({ items: [], error: safeError(error) })),
-    readResumeWorkspaceState().catch(() => ({
-      workspaces: [],
-      activeWorkspace: undefined,
-      revisionNumber: 0,
-    })),
-  ]);
+  const collection = await listExperienceProjectCollection()
+    .then((items) => ({ items, error: undefined }))
+    .catch((error) => ({ items: [], error: safeError(error) }));
   return (
     <div className="workspace-shell resume-workspace experience-projects-workspace">
       <PageHeader
         className="resume-page-head"
         title="Experience &amp; Projects"
         subtitle="Keep source folders separate from the reviewable evidence behind your resume."
-        actions={
-          <ResumeWorkspacePicker
-            workspaces={workspaceState.workspaces}
-            activeWorkspaceId={workspaceState.activeWorkspace?.id}
-            revisionNumber={workspaceState.revisionNumber}
-          />
-        }
       />
       <div className="resume-view-tabs sr-only" aria-hidden="true" />
       <section id="experience-projects" aria-label="Experience and Projects">
@@ -53,3 +37,6 @@ export async function EvidenceLibraryWorkspace() {
     </div>
   );
 }
+
+export const ExperienceProjectsWorkspace = EvidenceLibraryWorkspace;
+

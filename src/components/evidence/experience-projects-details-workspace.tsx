@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState, useMemo, type ReactNode } from "react";
 import type { ExperienceProjectCollection } from "@/domain/evidence/evidence-library";
-import { SegmentedTabs } from "@/app/segmented-tabs";
+import { SegmentedTabs } from "@/components/common/segmented-tabs";
 
 type ParsedBullet = {
   id: string;
@@ -32,11 +32,16 @@ function formatInlineText(text: string): ReactNode {
     if (chunk.startsWith("**") && chunk.endsWith("**")) {
       parts.push(<strong key={match.index}>{chunk.slice(2, -2)}</strong>);
     } else if (chunk.startsWith("`") && chunk.endsWith("`")) {
-      parts.push(
-        <code key={match.index} className="inline-code">
-          {chunk.slice(1, -1)}
-        </code>,
-      );
+      const codeContent = chunk.slice(1, -1);
+      if (codeContent.length <= 60 && !codeContent.includes("\n")) {
+        parts.push(
+          <code key={match.index} className="inline-code">
+            {codeContent}
+          </code>,
+        );
+      } else {
+        parts.push(codeContent);
+      }
     }
     lastIndex = regex.lastIndex;
   }
@@ -72,8 +77,8 @@ function sanitizeFilePathsAndCode(text: string): string {
     .replace(/\s*\(`?[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_./-]+`?\)/gi, "")
     .replace(/`[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_./-]+`/g, "")
     .replace(/\b(?:src|app|api|components|instance|tests?|lib|utils|pages)\/[a-zA-Z0-9_./-]+\b/gi, "")
-    .replace(/\b[a-zA-Z0-9_-]+\.(?:db|sqlite|md|tex|json|ts|tsx|js|mjs|py|go|html|css)\b/gi, "")
     .replace(/`([^`]+)`/g, "$1")
+    .replace(/`+/g, "")
     .replace(/\s{2,}/g, " ")
     .replace(/\s+([,.;:])/g, "$1")
     .replace(/;\s*;/g, ";")
@@ -81,13 +86,22 @@ function sanitizeFilePathsAndCode(text: string): string {
 }
 
 function cleanContentLine(line: string): string {
-  const base = line
+  let base = line
     .replace(/^[-*+]\s+/, "")
     .replace(/\s*—\s*Source:.*$/i, "")
     .replace(/\s*Source:.*$/i, "")
     .replace(/Placeholder:\s*file:\{[^}]+\}/gi, "")
     .replace(/\r?\n\s*/g, " ")
     .trim();
+  base = base.replace(
+    /^\*\*(?:Project Identity|Project Purpose|Purpose|Problem\/Purpose|Role Transition & Scope|Overview|Description|Role & Scope|About the Project|About the Role|Summary)(?::\*\*|\*\*:\s*|\*\*)\s*/i,
+    "",
+  );
+  base = base.replace(
+    /^(?:Project Identity|Project Purpose|Purpose|Problem\/Purpose|Role Transition & Scope|Overview|Description|Role & Scope|About the Project|About the Role|Summary)\s*:\s*/i,
+    "",
+  );
+  base = base.replace(/^[:\s-]+/, "");
   return sanitizeFilePathsAndCode(base);
 }
 
@@ -204,13 +218,28 @@ function extractTechStack(item: ExperienceProjectCollection): string[] {
   if (techStackDoc) {
     const lines = techStackDoc.text.split(/\r?\n/);
     for (const line of lines) {
-      if (line.startsWith("|") && !line.includes("---") && !line.includes("Category")) {
-        const parts = line.split("|").map((p) => p.trim()).filter(Boolean);
+      if (
+        line.startsWith("|") &&
+        !line.includes("---") &&
+        !line.includes("Category")
+      ) {
+        const parts = line
+          .split("|")
+          .map((p) => p.trim())
+          .filter(Boolean);
         if (parts.length >= 2) {
           const categoryCol = parts[0].toLowerCase();
           const rawDetail = parts[1];
 
-          // If container orchestration or an image reference, map to Docker and skip container name
+          // Skip package-level utility dependencies; only architectural classifications belong in the primary stack
+          if (
+            categoryCol.includes("application dependency") ||
+            categoryCol.includes("development tooling")
+          ) {
+            continue;
+          }
+
+          // If container orchestration or an image reference, map to Docker
           if (categoryCol.includes("container") || /image:/i.test(rawDetail)) {
             techSet.add("Docker");
             continue;
@@ -221,6 +250,7 @@ function extractTechStack(item: ExperienceProjectCollection): string[] {
             .replace(/^[a-z]+:\s*/i, "")
             .replace(/[<>=^~].*$/, "")
             .trim();
+
           if (
             cleanName &&
             cleanName.length <= 25 &&
@@ -228,12 +258,15 @@ function extractTechStack(item: ExperienceProjectCollection): string[] {
             !cleanName.includes(" ") &&
             !cleanName.includes(":") &&
             !/latest|nightly/i.test(cleanName) &&
-            !/^(@types|eslint)/i.test(cleanName) &&
-            !/^(react-dom|next|pdfjs-dist|tsx|ts-node|vitest|jest|nodemon)$/i.test(cleanName)
+            !/^(@types|eslint)/i.test(cleanName)
           ) {
             const capitalized =
               cleanName.charAt(0).toUpperCase() + cleanName.slice(1);
-            if (!Array.from(techSet).some((existing) => existing.toLowerCase() === cleanName.toLowerCase())) {
+            if (
+              !Array.from(techSet).some(
+                (existing) => existing.toLowerCase() === cleanName.toLowerCase(),
+              )
+            ) {
               techSet.add(capitalized);
             }
           }
@@ -247,16 +280,82 @@ function extractTechStack(item: ExperienceProjectCollection): string[] {
 
 function categorizeTech(techList: string[]): TechCategory[] {
   const buckets: Record<string, string[]> = {
-    "Languages": [],
-    "Frontend": [],
+    Languages: [],
+    Frontend: [],
     "Backend & Cloud": [],
     "Tools & Workflow": [],
   };
 
-  const languageSet = new Set(["Python", "TypeScript", "JavaScript", "Go", "Golang", "HTML", "CSS", "SQL"]);
-  const frontendSet = new Set(["React", "Next.js", "Tailwind CSS", "React Router 7", "PDF.js", "Vue", "Svelte"]);
-  const backendSet = new Set(["FastAPI", "Flask", "Django", "Node.js", "Supabase", "SQLite", "PostgreSQL", "Postgres", "Redis", "GraphQL", "Swagger", "Bruno", "Waitress", "SendGrid"]);
-  const toolsSet = new Set(["Docker", "n8n", "Neovim", "Git", "Ensembl VEP", "SnpEff"]);
+  const languageSet = new Set([
+    "Python",
+    "TypeScript",
+    "JavaScript",
+    "Go",
+    "Golang",
+    "HTML",
+    "CSS",
+    "SQL",
+    "Rust",
+    "Java",
+    "C++",
+    "C#",
+    "Ruby",
+    "PHP",
+  ]);
+  const frontendSet = new Set([
+    "React",
+    "Next.js",
+    "Tailwind CSS",
+    "React Router",
+    "React Router 7",
+    "React-router-dom",
+    "PDF.js",
+    "Vue",
+    "Svelte",
+    "Vite",
+    "Redux",
+    "Angular",
+  ]);
+  const backendSet = new Set([
+    "FastAPI",
+    "Flask",
+    "Django",
+    "Node.js",
+    "Express",
+    "NestJS",
+    "Spring",
+    "Rails",
+    "Laravel",
+    "Supabase",
+    "SQLite",
+    "PostgreSQL",
+    "Postgres",
+    "MongoDB",
+    "Mongoose",
+    "Cloudinary",
+    "Redis",
+    "GraphQL",
+    "Swagger",
+    "Bruno",
+    "Waitress",
+    "SendGrid",
+    "Prisma",
+    "MySQL",
+    "Firebase",
+  ]);
+  const toolsSet = new Set([
+    "Docker",
+    "n8n",
+    "Neovim",
+    "Git",
+    "Jest",
+    "Vitest",
+    "Pytest",
+    "Playwright",
+    "Cypress",
+    "Ensembl VEP",
+    "SnpEff",
+  ]);
 
   const otherItems: string[] = [];
 
@@ -288,12 +387,47 @@ function categorizeTech(techList: string[]): TechCategory[] {
 
 function extractNarrativeSummary(item: ExperienceProjectCollection): string {
   const docs = item.documents ?? [];
+
+  // Strategy 1: Extract from resume-summary.md if available
+  const summaryDoc = docs.find((d) => d.name === "resume-summary.md");
+  if (summaryDoc) {
+    const lines = summaryDoc.text
+      .split(/\r?\n/)
+      .map((l) => l.trim());
+    const paragraphs: string[] = [];
+
+    for (const line of lines) {
+      if (!line || line.startsWith("#") || line.startsWith("<!--")) continue;
+      // Skip bullet lists or detailed technical breakdown sections
+      if (/^[-*+]\s+/.test(line)) continue;
+      if (
+        /^(?:Material Capabilities|Implementation Scope|Attribution or Impact Gaps|Attribution Gaps|Direct Evidence Gaps|Evidence Gaps|Explicit Unknowns)/i.test(
+          line,
+        )
+      ) {
+        continue;
+      }
+      const cleaned = cleanContentLine(line);
+      if (cleaned && !isUnhelpfulValue(cleaned)) {
+        paragraphs.push(cleaned);
+      }
+      if (paragraphs.length >= 2) break;
+    }
+
+    if (paragraphs.length > 0) {
+      const result = paragraphs.join("\n\n");
+      if (result.length >= 40) {
+        return result;
+      }
+    }
+  }
+
   const overviewDoc = docs.find(
     (d) => d.name === "project-overview.md" || d.name === "experience-overview.md",
   );
   const bulletDoc = docs.find((d) => d.name === "resume-bullet-candidates.md");
 
-  // Strategy 1: Extract from resume-bullet-candidates.md if structured context is rich
+  // Strategy 2: Extract from resume-bullet-candidates.md if structured context is rich
   if (bulletDoc) {
     const userWorkflowMatch = bulletDoc.text.match(
       /(?:\*\*User or workflow\*\*|User or workflow):\s*([^\r\n]+(?:\r?\n(?![-*#]|\*\*)[^\r\n]+)*)/i,
@@ -713,3 +847,5 @@ export function EvidenceDetailsWorkspace({
     </div>
   );
 }
+
+export { EvidenceDetailsWorkspace as ExperienceProjectsDetailsWorkspace };

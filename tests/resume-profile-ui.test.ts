@@ -7,9 +7,9 @@ const read = (path: string) =>
 
 test("Resume onboarding prepares evidence before the Coach interview", async () => {
   const [workspace, form, coach, styles] = await Promise.all([
-    read("src/app/resume-workspace.tsx"),
-    read("src/app/resume-onboarding.tsx"),
-    read("src/app/resume-studio.tsx"),
+    read("src/components/resume/resume-workspace.tsx"),
+    read("src/components/resume/resume-onboarding.tsx"),
+    read("src/components/resume/resume-preview.tsx"),
     read("src/app/globals.css"),
   ]);
 
@@ -30,7 +30,10 @@ test("Resume onboarding prepares evidence before the Coach interview", async () 
     "Process local evidence & start AI interview",
   ])
     assert.ok(form.includes(label));
-  assert.match(form, /Add every Project and Experience you want to start with/);
+  assert.doesNotMatch(
+    form,
+    /Bounded local inspection will analyze your work/,
+  );
   assert.match(form, /localModelDisclosure/);
   assert.match(form, /startTransition/);
   assert.match(form, /local-folder-input/);
@@ -56,7 +59,7 @@ test("Resume onboarding prepares evidence before the Coach interview", async () 
 
   assert.match(styles, /\.resume-onboarding-fields/);
   assert.match(styles, /\.resume-onboarding-progress/);
-  assert.match(form, /resume-onboarding-progress/);
+  assert.doesNotMatch(form, /resume-onboarding-progress/);
   assert.match(styles, /\.onboarding-work/);
   assert.match(styles, /\.resume-coach-preview-layout/);
   assert.match(
@@ -68,6 +71,13 @@ test("Resume onboarding prepares evidence before the Coach interview", async () 
     styles,
     /\.resume-coach-preview-layout\s*\{\s*grid-template-columns:\s*1fr;/,
   );
+
+  // Resume onboarding layout is scrollable and excludes redundant header duplication
+  assert.match(workspace, /resume-onboarding-workspace/);
+  assert.match(styles, /\.resume-workspace\.resume-onboarding-workspace\.workspace-shell/);
+  assert.match(styles, /:not\(\.resume-onboarding-workspace\)/);
+  assert.doesNotMatch(form, /<h2 id="resume-onboarding-heading">/);
+  assert.doesNotMatch(form, /<p className="eyebrow">Build Your Resume<\/p>/);
 });
 
 test("Candidate Profile action remains a thin append-only server boundary", async () => {
@@ -88,7 +98,7 @@ test("Candidate Profile action remains a thin append-only server boundary", asyn
 test("mandatory Coach Resume interview is chat-only and accessible", async () => {
   const [page, interview, action, streamRoute] = await Promise.all([
     read("src/app/resume/interview/page.tsx"),
-    read("src/app/resume-interview.tsx"),
+    read("src/components/coach/coach-qa.tsx"),
     read("src/app/actions.ts"),
     read("src/app/api/resume-interview/stream/route.ts"),
   ]);
@@ -158,16 +168,13 @@ test("mandatory Coach Resume interview is chat-only and accessible", async () =>
 
 test("Stitch-led Resume Builder provides separated work collections and accessible date/folder controls", async () => {
   const [form, styles] = await Promise.all([
-    read("src/app/resume-onboarding.tsx"),
+    read("src/components/resume/resume-onboarding.tsx"),
     read("src/app/globals.css"),
   ]);
 
-  // Three-stage progress roadmap
-  assert.match(form, /resume-onboarding-progress/);
-  assert.match(form, /stage-goals-grid/);
-  assert.match(form, /Profile &amp; Evidence Intake/);
-  assert.match(form, /AI Clarification Interview/);
-  assert.match(form, /Resume Generation &amp; Review/);
+  // Stage status progress removed per design simplification
+  assert.doesNotMatch(form, /stage-goals-grid/);
+  assert.doesNotMatch(form, /resume-onboarding-progress/);
 
   // Separated collections
   assert.match(form, /onboarding-projects/);
@@ -210,3 +217,28 @@ test("Stitch-led Resume Builder provides separated work collections and accessib
   assert.match(styles, /\.onboarding-projects/);
   assert.match(styles, /\.onboarding-experiences/);
 });
+
+test("Single resume workflow provides profile editing and eliminates multi-resume creation affordances", async () => {
+  const [studio, workspace, styles] = await Promise.all([
+    read("src/components/resume/resume-preview.tsx"),
+    read("src/components/resume/resume-workspace.tsx"),
+    read("src/app/globals.css"),
+  ]);
+
+  // Studio provides an Edit Profile trigger and accessible modal dialog
+  assert.match(studio, /edit-profile-trigger/);
+  assert.match(studio, /Edit Profile/);
+  assert.match(studio, /profile-edit-modal-dialog/);
+  assert.match(studio, /ResumeProfileForm/);
+  assert.match(studio, /Personal Details &amp; Education/);
+
+  // Multi-resume creation is removed: single resume workflow with no workspace switcher or creation controls
+  assert.doesNotMatch(workspace, /Choose a resume workspace/);
+  assert.doesNotMatch(workspace, /ResumeWorkspacePicker/);
+  assert.doesNotMatch(studio, /ResumeWorkspacePicker/);
+
+  // Modal styling is present
+  assert.match(styles, /\.profile-edit-modal-dialog/);
+  assert.match(styles, /\.profile-edit-modal-body/);
+});
+

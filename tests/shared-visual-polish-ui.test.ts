@@ -2,8 +2,48 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const source = (file: string) =>
-  readFile(new URL(`../src/app/${file}`, import.meta.url), "utf8");
+const componentSubdirs: Record<string, string> = {
+  "application-shell.tsx": "common",
+  "compact-navigation.tsx": "common",
+  "empty-state-card.tsx": "common",
+  "page-header.tsx": "common",
+  "segmented-tabs.tsx": "common",
+  "sidebar-collapse-toggle.tsx": "common",
+  "tier-badge.tsx": "common",
+  "job-listings.tsx": "jobs",
+  "opportunity-assessment.tsx": "jobs",
+  "opportunity-capture.tsx": "jobs",
+  "opportunity-card.tsx": "jobs",
+  "opportunity-empty-state.tsx": "jobs",
+  "opportunity-search.tsx": "jobs",
+  "opportunity-subnav.tsx": "jobs",
+  "base-resume-importer.tsx": "resume",
+  "editable-tex-draft.tsx": "resume",
+  "resume-onboarding.tsx": "resume",
+  "resume-pdf-preview.tsx": "resume",
+  "resume-preview.tsx": "resume",
+  "resume-profile-form.tsx": "resume",
+  "resume-workspace.tsx": "resume",
+  "coach-qa.tsx": "coach",
+  "resume-intake-status.tsx": "coach",
+  "experience-projects-details-workspace.tsx": "evidence",
+  "experience-projects-workspace.tsx": "evidence",
+  "experience-projects.tsx": "evidence",
+  "data-storage.tsx": "settings",
+  "job-preferences.tsx": "settings",
+  "local-model-settings.tsx": "settings",
+  "permitted-sources.tsx": "settings",
+  "applications.tsx": "pro",
+  "career-assistant-workspace.tsx": "pro",
+  "career-assistant.tsx": "pro",
+  "google-sheets-workspace.tsx": "pro",
+};
+
+const source = (file: string) => {
+  const subdir = componentSubdirs[file];
+  const basePath = subdir ? `../src/components/${subdir}/${file}` : `../src/app/${file}`;
+  return readFile(new URL(basePath, import.meta.url), "utf8");
+};
 
 test("compact navigation preserves Jobs-first routes and keyboard-close focus behavior", async () => {
   const [shell, compact, styles] = await Promise.all([
@@ -29,13 +69,12 @@ test("compact navigation preserves Jobs-first routes and keyboard-close focus be
 });
 
 test("shared visual polish uses semantic actions, resilient cards, and disclosure", async () => {
-  const [styles, jobs, applications, current, evidence, assistant, storage] =
+  const [styles, jobs, applications, evidence, assistant, storage] =
     await Promise.all([
       source("globals.css"),
       source("job-listings.tsx"),
       source("applications.tsx"),
-      source("current-base-resume.tsx"),
-      source("evidence-review.tsx"),
+      source("experience-projects.tsx"),
       source("career-assistant.tsx"),
       source("data-storage.tsx"),
     ]);
@@ -53,12 +92,7 @@ test("shared visual polish uses semantic actions, resilient cards, and disclosur
   assert.match(styles, /overflow-wrap: anywhere/);
   assert.match(jobs, /className="affirmative-action add-opportunity-action"/);
   assert.match(applications, /applications-future-fields/);
-  assert.match(current, /className="danger-action"/);
-  assert.doesNotMatch(
-    current,
-    /Technical support details|Retained evidence revision identifiers/,
-  );
-  assert.match(evidence, /className="danger-action"/);
+  assert.match(evidence, /className="danger-action/);
   assert.match(assistant, /className="danger-action"/);
   assert.match(storage, /danger-action/);
 });
@@ -72,9 +106,7 @@ test("polished presentation stays local, truthful, and accessible", async () => 
         "job-listings.tsx",
         "opportunity-empty-state.tsx",
         "applications.tsx",
-        "current-base-resume.tsx",
-        "evidence-review.tsx",
-        "evidence-library.tsx",
+        "experience-projects.tsx",
         "career-assistant.tsx",
         "google-sheets-workspace.tsx",
         "data-storage.tsx",
@@ -83,7 +115,6 @@ test("polished presentation stays local, truthful, and accessible", async () => 
   ).join("\n");
   assert.match(combined, /No applications to track yet/);
   assert.match(combined, /Google Sheets is not connected yet/);
-  assert.match(combined, /Editing this draft does not change the original PDF/);
   assert.match(combined, /No captured opportunities match your search/);
   assert.doesNotMatch(
     combined,

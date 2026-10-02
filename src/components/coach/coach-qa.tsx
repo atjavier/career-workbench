@@ -661,3 +661,5 @@ export function ResumeInterview({
     </section>
   );
 }
+
+export { ResumeInterview as CoachQA };

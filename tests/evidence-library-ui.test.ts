@@ -5,9 +5,9 @@ import test from "node:test";
 test("Experience & Projects exposes category-specific source-folder handoff and safe generated-document import", async () => {
   const [evidenceUi, tabsUi, workspace, actions, page] = await Promise.all(
     [
-      "../src/app/evidence-library.tsx",
-      "../src/app/segmented-tabs.tsx",
-      "../src/app/evidence-library-workspace.tsx",
+      "../src/components/evidence/experience-projects.tsx",
+      "../src/components/common/segmented-tabs.tsx",
+      "../src/components/evidence/experience-projects-workspace.tsx",
       "../src/app/actions.ts",
       "../src/app/evidence/page.tsx",
     ].map((file) => readFile(new URL(file, import.meta.url), "utf8")),
@@ -62,7 +62,7 @@ test("collection implementation stays local, artifact-only, and avoids network, 
       [
         "../src/files/evidence-library.ts",
         "../src/domain/evidence/evidence-library.ts",
-        "../src/app/evidence-library.tsx",
+        "../src/components/evidence/experience-projects.tsx",
       ].map((file) => readFile(new URL(file, import.meta.url), "utf8")),
     )
   ).join("\n");
@@ -73,7 +73,7 @@ test("collection implementation stays local, artifact-only, and avoids network, 
   assert.doesNotMatch(source, /watch\s*\(|fetch\s*\(|https?:\/\//i);
   assert.doesNotMatch(
     await readFile(
-      new URL("../src/app/evidence-library.tsx", import.meta.url),
+      new URL("../src/components/evidence/experience-projects.tsx", import.meta.url),
       "utf8",
     ),
     /sourceSection|sourceDocument|contentDigest|absolutePath|diagnostic/i,
