@@ -1,5 +1,5 @@
-import { ApplicationShell } from "@/app/application-shell";
-import { ResumeWorkspace } from "@/app/resume-workspace";
+import { ApplicationShell } from "@/components/common/application-shell";
+import { ResumeWorkspace } from "@/components/resume/resume-workspace";
 
 export const dynamic = "force-dynamic";
 

@@ -6,8 +6,8 @@ import type {
 } from "@/domain/fit/ai-opportunity-assessment";
 import type { CapturedOpportunityLibraryItem } from "@/domain/opportunities/captured-opportunities";
 import type { FitFactor } from "@/domain/fit/fit-assessment";
-import { OpportunityAssessment } from "@/app/opportunity-assessment";
-import { TierBadge, fitLabelToTier } from "@/app/tier-badge";
+import { OpportunityAssessment } from "@/components/jobs/opportunity-assessment";
+import { TierBadge, fitLabelToTier } from "@/components/common/tier-badge";
 
 export function sourceHost(url: string) {
   try {

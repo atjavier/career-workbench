@@ -49,17 +49,6 @@ import {
   resolveDocumenterProposal,
 } from "@/domain/evidence/evidence-documenter";
 import {
-  approveCurrentBaseResumeVersion,
-  generateCurrentBaseResumeProposals,
-  importCurrentBaseResume,
-  resolveCurrentBaseResumeProposal,
-  saveCurrentBaseResumeDraft,
-} from "@/domain/current-base-resume/current-base-resume-commands";
-import {
-  maximumCurrentResumeText,
-  type ResumeDraftContent,
-} from "@/adapters/resume-parser/pdf-text-parser";
-import {
   saveJobPreferences,
   type Country,
   type RoleIntent,
@@ -718,7 +707,7 @@ export async function generateBaseResumeAction(
         category: group.category,
         documents: group.documents
           .filter((document) =>
-            /(?:resume-evidence|resume-bullet-candidates)\.md$/i.test(
+            /(?:resume-evidence|resume-bullet-candidates|technology-stack|project-overview|experience-overview|resume-summary|resume-clarifications)\.md$/i.test(
               document.libraryPath,
             ),
           )
@@ -1015,7 +1004,7 @@ export async function resumeCoachReviewAction(
         category: group.category,
         documents: group.documents
           .filter((document) =>
-            /(?:resume-evidence|resume-bullet-candidates)\.md$/i.test(
+            /(?:resume-evidence|resume-bullet-candidates|technology-stack|project-overview|experience-overview|resume-summary|resume-clarifications)\.md$/i.test(
               document.libraryPath,
             ),
           )
@@ -1604,30 +1593,6 @@ export async function importBaseResumeAction(
   }
 }
 
-function draftFromForm(formData: FormData): ResumeDraftContent {
-  const read = (name: string) => {
-    const value = String(formData.get(name) ?? "");
-    if (value.length > maximumCurrentResumeText)
-      throw new WorkspaceError(
-        "CURRENT_BASE_RESUME_INVALID",
-        "The Current Base Resume draft is too large.",
-        "Shorten the draft and try again.",
-      );
-    return value
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean);
-  };
-  return {
-    contact: read("contact"),
-    summary: read("summary"),
-    experience: read("experience"),
-    projects: read("projects"),
-    education: read("education"),
-    skills: read("skills"),
-    other: read("other"),
-  };
-}
 
 function revalidateCareerWorkspaces() {
   revalidatePath("/");
@@ -1787,78 +1752,6 @@ export async function resumeInterviewCoachAction(
   }
 }
 
-export async function currentBaseResumeAction(
-  _: WorkspaceActionState,
-  formData: FormData,
-): Promise<WorkspaceActionState> {
-  try {
-    const command = String(formData.get("currentResumeCommand") ?? "");
-    if (command === "import") {
-      const file = formData.get("currentResumePdf");
-      if (!(file instanceof File))
-        throw new WorkspaceError(
-          "CURRENT_BASE_RESUME_INVALID",
-          "Choose one resume PDF to import.",
-          "Choose a text-readable PDF and try again.",
-        );
-      await importCurrentBaseResume({
-        filename: file.name,
-        bytes: new Uint8Array(await file.arrayBuffer()),
-      });
-    } else if (command === "save")
-      await saveCurrentBaseResumeDraft({
-        draftId: String(formData.get("draftId") ?? ""),
-        content: draftFromForm(formData),
-      });
-    else if (command === "propose")
-      await generateCurrentBaseResumeProposals({
-        draftId: String(formData.get("draftId") ?? ""),
-      });
-    else if (command === "resolve") {
-      const decision = String(formData.get("decision") ?? "");
-      if (
-        decision !== "approved" &&
-        decision !== "edited" &&
-        decision !== "rejected"
-      )
-        throw new WorkspaceError(
-          "CURRENT_BASE_RESUME_INVALID",
-          "The proposed change decision is unavailable.",
-          "Choose approve, save edited, or reject and try again.",
-        );
-      await resolveCurrentBaseResumeProposal({
-        proposalId: String(formData.get("proposalId") ?? ""),
-        expectedDecisionRevisionId: String(
-          formData.get("expectedDecisionRevisionId") ?? "",
-        ),
-        decision,
-        text: String(formData.get("proposalText") ?? "") || undefined,
-      });
-    } else if (command === "approve-version")
-      await approveCurrentBaseResumeVersion({
-        draftId: String(formData.get("draftId") ?? ""),
-        explicitApproval: formData.get("explicitApproval") === "yes",
-      });
-    else
-      throw new WorkspaceError(
-        "CURRENT_BASE_RESUME_INVALID",
-        "The requested Current Base Resume action is unavailable.",
-        "Choose a Current Base Resume action and try again.",
-      );
-    revalidateCareerWorkspaces();
-    return {
-      status: "success",
-      summary: "Current Base Resume action completed.",
-    };
-  } catch (error) {
-    const safeError = toSafeWorkspaceError(error);
-    return {
-      status: "error",
-      summary: safeError.summary,
-      safeNextAction: safeError.safeNextAction,
-    };
-  }
-}
 
 export async function evidenceAction(
   _: WorkspaceActionState,
@@ -2168,52 +2061,139 @@ export async function evidenceLibraryAction(
           applyMigrations(db);
           const now = new Date().toISOString();
           if (dateText) {
-            const task = db
+            let task = db
               .prepare(
-                "SELECT id, item_key AS itemKey, item_name AS itemName FROM resume_clarification_tasks WHERE workspace_id = ? AND item_name = ? AND category = 'dates' AND status = 'pending'",
+                "SELECT id, item_key AS itemKey, item_name AS itemName FROM resume_clarification_tasks WHERE workspace_id = ? AND category = 'dates' AND (item_name = ? OR item_key = ?)",
               )
-              .get(documentedWorkspaceId, itemName) as
-              { id: string; itemKey: string; itemName: string } | undefined;
-            if (task) {
-              const responseId = createUuidV7();
-              db.prepare(
-                "INSERT INTO resume_clarification_task_responses (id, workspace_id, task_id, disposition, answer_text, created_at) VALUES (?, ?, ?, 'answered', ?, ?)",
-              ).run(responseId, documentedWorkspaceId, task.id, dateText, now);
-              db.prepare(
-                "UPDATE resume_clarification_tasks SET status = 'answered' WHERE id = ? AND workspace_id = ?",
-              ).run(task.id, documentedWorkspaceId);
-              persistClarifiedEvidenceForResponseInDatabase(db, {
-                workspaceId: documentedWorkspaceId,
-                taskId: task.id,
-                responseId,
-                candidateText: dateText,
-                now,
+              .get(
+                documentedWorkspaceId,
+                itemName,
+                `project:${itemName}`,
+              ) as { id: string; itemKey: string; itemName: string } | undefined;
+            if (!task) {
+              const allTasks = db
+                .prepare(
+                  "SELECT id, item_key AS itemKey, item_name AS itemName FROM resume_clarification_tasks WHERE workspace_id = ? AND category = 'dates'",
+                )
+                .all(documentedWorkspaceId) as Array<{
+                id: string;
+                itemKey: string;
+                itemName: string;
+              }>;
+              const normalizedName = itemName
+                .toLowerCase()
+                .replace(/[^a-z0-9]/g, "");
+              task = allTasks.find((t) => {
+                const norm = t.itemName.toLowerCase().replace(/[^a-z0-9]/g, "");
+                return (
+                  norm === normalizedName ||
+                  norm.includes(normalizedName) ||
+                  normalizedName.includes(norm)
+                );
               });
             }
+            if (!task) {
+              const taskId = createUuidV7();
+              const category = String(
+                formData.get("category") ?? "project",
+              ) as "project" | "experience";
+              const itemKey = `${category}:${itemName}`;
+              const question =
+                category === "experience"
+                  ? `When did your work or internship at ${itemName} take place?`
+                  : `When did you work on ${itemName}?`;
+              db.prepare(
+                "INSERT INTO resume_clarification_tasks (id, workspace_id, item_key, item_name, item_category, category, question, created_at, status) VALUES (?, ?, ?, ?, ?, 'dates', ?, ?, 'answered')",
+              ).run(
+                taskId,
+                documentedWorkspaceId,
+                itemKey,
+                itemName,
+                category,
+                question,
+                now,
+              );
+              task = { id: taskId, itemKey, itemName };
+            }
+            const responseId = createUuidV7();
+            db.prepare(
+              "INSERT INTO resume_clarification_task_responses (id, workspace_id, task_id, disposition, answer_text, created_at) VALUES (?, ?, ?, 'answered', ?, ?) ON CONFLICT(task_id) DO UPDATE SET answer_text = excluded.answer_text, disposition = 'answered'",
+            ).run(responseId, documentedWorkspaceId, task.id, dateText, now);
+            db.prepare(
+              "UPDATE resume_clarification_tasks SET status = 'answered' WHERE id = ? AND workspace_id = ?",
+            ).run(task.id, documentedWorkspaceId);
+            persistClarifiedEvidenceForResponseInDatabase(db, {
+              workspaceId: documentedWorkspaceId,
+              taskId: task.id,
+              responseId,
+              candidateText: dateText,
+              now,
+            });
           }
           if (role) {
-            const roleTask = db
+            let roleTask = db
               .prepare(
-                "SELECT id, item_key AS itemKey, item_name AS itemName FROM resume_clarification_tasks WHERE workspace_id = ? AND item_name = ? AND category = 'role' AND status = 'pending'",
+                "SELECT id, item_key AS itemKey, item_name AS itemName FROM resume_clarification_tasks WHERE workspace_id = ? AND category = 'role' AND (item_name = ? OR item_key = ?)",
               )
-              .get(documentedWorkspaceId, itemName) as
-              { id: string; itemKey: string; itemName: string } | undefined;
-            if (roleTask) {
-              const responseId = createUuidV7();
-              db.prepare(
-                "INSERT INTO resume_clarification_task_responses (id, workspace_id, task_id, disposition, answer_text, created_at) VALUES (?, ?, ?, 'answered', ?, ?)",
-              ).run(responseId, documentedWorkspaceId, roleTask.id, role, now);
-              db.prepare(
-                "UPDATE resume_clarification_tasks SET status = 'answered' WHERE id = ? AND workspace_id = ?",
-              ).run(roleTask.id, documentedWorkspaceId);
-              persistClarifiedEvidenceForResponseInDatabase(db, {
-                workspaceId: documentedWorkspaceId,
-                taskId: roleTask.id,
-                responseId,
-                candidateText: role,
-                now,
+              .get(
+                documentedWorkspaceId,
+                itemName,
+                `experience:${itemName}`,
+              ) as { id: string; itemKey: string; itemName: string } | undefined;
+            if (!roleTask) {
+              const allTasks = db
+                .prepare(
+                  "SELECT id, item_key AS itemKey, item_name AS itemName FROM resume_clarification_tasks WHERE workspace_id = ? AND category = 'role'",
+                )
+                .all(documentedWorkspaceId) as Array<{
+                id: string;
+                itemKey: string;
+                itemName: string;
+              }>;
+              const normalizedName = itemName
+                .toLowerCase()
+                .replace(/[^a-z0-9]/g, "");
+              roleTask = allTasks.find((t) => {
+                const norm = t.itemName.toLowerCase().replace(/[^a-z0-9]/g, "");
+                return (
+                  norm === normalizedName ||
+                  norm.includes(normalizedName) ||
+                  normalizedName.includes(norm)
+                );
               });
             }
+            if (!roleTask) {
+              const taskId = createUuidV7();
+              const category = "experience";
+              const itemKey = `${category}:${itemName}`;
+              const question = `What was your job title and primary role at ${itemName}?`;
+              db.prepare(
+                "INSERT INTO resume_clarification_tasks (id, workspace_id, item_key, item_name, item_category, category, question, created_at, status) VALUES (?, ?, ?, ?, ?, 'role', ?, ?, 'answered')",
+              ).run(
+                taskId,
+                documentedWorkspaceId,
+                itemKey,
+                itemName,
+                category,
+                question,
+                now,
+              );
+              roleTask = { id: taskId, itemKey, itemName };
+            }
+            const responseId = createUuidV7();
+            db.prepare(
+              "INSERT INTO resume_clarification_task_responses (id, workspace_id, task_id, disposition, answer_text, created_at) VALUES (?, ?, ?, 'answered', ?, ?) ON CONFLICT(task_id) DO UPDATE SET answer_text = excluded.answer_text, disposition = 'answered'",
+            ).run(responseId, documentedWorkspaceId, roleTask.id, role, now);
+            db.prepare(
+              "UPDATE resume_clarification_tasks SET status = 'answered' WHERE id = ? AND workspace_id = ?",
+            ).run(roleTask.id, documentedWorkspaceId);
+            persistClarifiedEvidenceForResponseInDatabase(db, {
+              workspaceId: documentedWorkspaceId,
+              taskId: roleTask.id,
+              responseId,
+              candidateText: role,
+              now,
+            });
           }
         } finally {
           db.close();

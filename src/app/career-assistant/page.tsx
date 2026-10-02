@@ -1,5 +1,5 @@
-import { ApplicationShell } from "@/app/application-shell";
-import { CareerAssistantWorkspace } from "@/app/career-assistant-workspace";
+import { ApplicationShell } from "@/components/common/application-shell";
+import { CareerAssistantWorkspace } from "@/components/pro/career-assistant-workspace";
 
 export const dynamic = "force-dynamic";
 

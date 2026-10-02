@@ -4,7 +4,7 @@ import test from "node:test";
 
 test("application shell presents Jobs first with human-facing destinations", async () => {
   const shell = await readFile(
-    new URL("../src/app/application-shell.tsx", import.meta.url),
+    new URL("../src/components/common/application-shell.tsx", import.meta.url),
     "utf8",
   );
   assert.match(shell, /Jobs/);
@@ -26,7 +26,7 @@ test("application shell presents Jobs first with human-facing destinations", asy
 
 test("home composition uses the application shell and human product identity", async () => {
   const shell = await readFile(
-    new URL("../src/app/application-shell.tsx", import.meta.url),
+    new URL("../src/components/common/application-shell.tsx", import.meta.url),
     "utf8",
   );
   const page = await readFile(
@@ -60,3 +60,49 @@ test("shell styling uses the approved premium header and visible focus token", a
   assert.match(styles, /outline: 3px solid var\(--focus-ring\)/);
   assert.match(styles, /input\[type="checkbox"\]/);
 });
+
+test("application shell removes Resume sub-items when no workspace is active and routes redirect to default /resume", async () => {
+  const [shell, evidencePage, interviewPage, detailsPage, workspace] = await Promise.all([
+    readFile(new URL("../src/components/common/application-shell.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/app/evidence/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/app/resume/interview/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/app/evidence/details/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/components/resume/resume-workspace.tsx", import.meta.url), "utf8"),
+  ]);
+
+  // destinations does not statically attach subItems to Resume
+  assert.doesNotMatch(shell, /subItems:\s*\[\s*\{\s*href:\s*"\/evidence"/);
+
+  // Shell conditionally provides subItems only when an active workspace exists
+  assert.match(shell, /hasActiveResumeWorkspace\s*=\s*Boolean\(workspaceState\.activeWorkspace\)/);
+  assert.match(shell, /subItems:\s*hasActiveResumeWorkspace\s*\?\s*resumeSubItems\s*:\s*undefined/);
+
+  // Sub-routes redirect to the default /resume when no workspace is active
+  assert.match(evidencePage, /if\s*\(!workspaceState\.activeWorkspace\)\s*\{\s*redirect\("\/resume"\)/);
+  assert.match(detailsPage, /if\s*\(!workspaceState\.activeWorkspace\)\s*\{\s*redirect\("\/resume"\)/);
+  assert.match(interviewPage, /if\s*\(!state\.activeWorkspace\)\s*\{\s*redirect\("\/resume"\)/);
+
+  // Resume default view cleanly handles when no workspace is active
+  assert.match(workspace, /if\s*\(!workspaceState\.activeWorkspace\)/);
+  assert.match(workspace, /ResumeOnboarding/);
+});
+
+test("Loading screen during evidence intake hides sub-tabs and keeps single base Resume tab", async () => {
+  const [shell, evidencePage, interviewPage] = await Promise.all([
+    readFile(new URL("../src/components/common/application-shell.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/app/evidence/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/app/resume/interview/page.tsx", import.meta.url), "utf8"),
+  ]);
+
+  // Shell suppresses resumeSubItems during documenting phase
+  assert.match(shell, /isDocumenting\s*=\s*phase === "documenting"/);
+  assert.match(shell, /hasActiveResumeWorkspace\s*&&\s*!isDocumenting/);
+
+  // Evidence routes redirect to interview intake screen when documenting
+  assert.match(evidencePage, /phase === "documenting"[\s\S]*?redirect\("\/resume\/interview"\)/);
+
+  // Interview page sets active to Resume when still processing
+  assert.match(interviewPage, /shouldShowInterview\s*\?\s*"Coach Q&A"\s*:\s*"Resume"/);
+});
+
+

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { CompactNavigation } from "@/app/compact-navigation";
-import { SidebarCollapseToggle } from "@/app/sidebar-collapse-toggle";
+import { CompactNavigation } from "@/components/common/compact-navigation";
+import { SidebarCollapseToggle } from "@/components/common/sidebar-collapse-toggle";
 import { readResumeWorkspaceState } from "@/domain/resume-generation/resume-workspace-commands";
 
 export type NavSubItem = {
@@ -90,18 +90,6 @@ const destinations: readonly NavItem[] = [
     label: "Resume",
     description: "Shape your base resume and evidence",
     icon: <ResumeIcon />,
-    subItems: [
-      {
-        href: "/evidence",
-        label: "Experience & Projects",
-        description: "Documented collections & folders",
-      },
-      {
-        href: "/resume",
-        label: "Resume Preview",
-        description: "Coach review & live PDF canvas",
-      },
-    ],
   },
   {
     href: "/settings",
@@ -126,6 +114,7 @@ export async function ApplicationShell({
     revisionNumber: 0,
   }));
   const phase = workspaceState.activeWorkspace?.journey?.phase;
+  const hasActiveResumeWorkspace = Boolean(workspaceState.activeWorkspace);
 
   const effectiveSubActive =
     activeSubItem ??
@@ -135,55 +124,56 @@ export async function ApplicationShell({
         ? "Coach Q&A"
         : active === "Resume Preview"
           ? "Resume Preview"
-          : active === "Resume Studio"
+          : active === "Resume"
             ? "Resume Preview"
-            : active === "Resume"
+            : active === "Base Resume"
               ? "Resume Preview"
-              : active === "Base Resume"
-                ? "Resume Preview"
-                : active);
+              : active);
 
   const isResumeActive =
     active === "Resume" ||
     active === "Resume Preview" ||
-    active === "Resume Studio" ||
     active === "Base Resume" ||
     active === "Experience & Projects" ||
     active === "Coach Q&A" ||
     effectiveSubActive === "Resume Preview" ||
-    effectiveSubActive === "Resume Studio" ||
     effectiveSubActive === "Base Resume" ||
     effectiveSubActive === "Coach Q&A" ||
     effectiveSubActive === "Experience & Projects";
 
-  const resumeSubItems: NavSubItem[] = [
-    {
-      href: "/evidence",
-      label: "Experience & Projects",
-      description: "Documented collections & folders",
-    },
-    ...(phase === "interview" || active === "Coach Q&A"
+  const isDocumenting = phase === "documenting";
+  const isOnboarding = phase === "onboarding";
+  const resumeSubItems: NavSubItem[] | undefined =
+    hasActiveResumeWorkspace && !isDocumenting && !isOnboarding
       ? [
           {
-            href: "/resume/interview",
-            label: "Coach Q&A",
-            description: "Clarification questions & evidence prep",
+            href: "/evidence",
+            label: "Experience & Projects",
+            description: "Documented collections & folders",
+          },
+          ...(phase === "interview" || active === "Coach Q&A"
+            ? [
+                {
+                  href: "/resume/interview",
+                  label: "Coach Q&A",
+                  description: "Clarification questions & evidence prep",
+                },
+              ]
+            : []),
+          {
+            href: "/resume",
+            label: "Resume Preview",
+            description: "Coach review & live PDF canvas",
           },
         ]
-      : []),
-    {
-      href: "/resume",
-      label: "Resume Preview",
-      description: "Coach review & live PDF canvas",
-    },
-  ];
+      : undefined;
 
   const effectiveDestinations: readonly NavItem[] = destinations.map(
     (destination) => {
       if (destination.label === "Resume") {
         return {
           ...destination,
-          subItems: resumeSubItems,
+          subItems: hasActiveResumeWorkspace ? resumeSubItems : undefined,
         };
       }
       return destination;
@@ -207,7 +197,13 @@ export async function ApplicationShell({
         </div>
         <CompactNavigation
           destinations={effectiveDestinations}
-          active={active}
+          active={
+            hasActiveResumeWorkspace && !isDocumenting && !isOnboarding
+              ? (activeSubItem ?? active)
+              : isResumeActive
+                ? "Resume"
+                : active
+          }
         />
         <nav className="primary-navigation" aria-label="Primary navigation">
           {effectiveDestinations.map((destination) => {

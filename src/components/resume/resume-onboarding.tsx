@@ -314,84 +314,9 @@ export function ResumeOnboarding({ localAiReady }: { localAiReady: boolean }) {
     <div className="resume-builder-layout">
       <section
         className="resume-onboarding panel resume-builder-main"
-        aria-labelledby="resume-onboarding-heading"
+        aria-label="Resume Setup"
       >
-        <div className="builder-header-block">
-          <p className="eyebrow">Build Your Resume</p>
-          <h2 id="resume-onboarding-heading">
-            Your basic information and local work folders
-          </h2>
-          <p className="builder-subtitle">
-            Complete your profile to generate a tailored, ATS-friendly resume.
-            Add every Project and Experience you want to start with. The local
-            evidence agent reads each chosen folder directly within its
-            allowlist and safety limits, then Coach Resume will ask about
-            important context the folders cannot establish. Folder paths and raw
-            files are not retained.
-          </p>
-        </div>
 
-        <div
-          className="resume-onboarding-progress stage-goals-grid"
-          aria-label="Resume milestones and goals"
-        >
-          <div className="stage-goal-card stage-active" aria-current="step">
-            <div className="stage-goal-header">
-              <span className="stage-number-pill">Stage 1</span>
-              <span className="stage-status-badge stage-badge-active">
-                In Progress
-              </span>
-            </div>
-            <h3 className="stage-goal-title">Profile &amp; Evidence Intake</h3>
-            <p className="stage-goal-desc">
-              Input verified details and select local work folders for bounded
-              inspection.
-            </p>
-            <div className="stage-goal-meta">
-              <span className="stage-meta-item">
-                Goal: Extract source-backed technical facts
-              </span>
-            </div>
-          </div>
-
-          <div className="stage-goal-card stage-upcoming">
-            <div className="stage-goal-header">
-              <span className="stage-number-pill">Stage 2</span>
-              <span className="stage-status-badge stage-badge-upcoming">
-                Next Up
-              </span>
-            </div>
-            <h3 className="stage-goal-title">AI Clarification Interview</h3>
-            <p className="stage-goal-desc">
-              Your local Coach clarifies architectural decisions, tradeoffs, and
-              outcomes.
-            </p>
-            <div className="stage-goal-meta">
-              <span className="stage-meta-item">
-                Goal: Turn facts into validated achievements
-              </span>
-            </div>
-          </div>
-
-          <div className="stage-goal-card stage-upcoming">
-            <div className="stage-goal-header">
-              <span className="stage-number-pill">Stage 3</span>
-              <span className="stage-status-badge stage-badge-upcoming">
-                Final Milestone
-              </span>
-            </div>
-            <h3 className="stage-goal-title">Resume Generation &amp; Review</h3>
-            <p className="stage-goal-desc">
-              Synthesize ATS-optimized resumes with side-by-side evidence
-              inspection.
-            </p>
-            <div className="stage-goal-meta">
-              <span className="stage-meta-item">
-                Goal: Export verifiable, tailored resumes
-              </span>
-            </div>
-          </div>
-        </div>
 
         {!localAiReady ? (
           <div className="status status-warning ai-setup-banner">

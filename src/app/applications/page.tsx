@@ -1,5 +1,5 @@
-import { ApplicationsWorkspace } from "@/app/applications";
-import { ApplicationShell } from "@/app/application-shell";
+import { ApplicationsWorkspace } from "@/components/pro/applications";
+import { ApplicationShell } from "@/components/common/application-shell";
 
 export default function ApplicationsPage() {
   return (

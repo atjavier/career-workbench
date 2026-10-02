@@ -1,5 +1,5 @@
-import { ApplicationShell } from "@/app/application-shell";
-import { GoogleSheetsWorkspace } from "@/app/google-sheets-workspace";
+import { ApplicationShell } from "@/components/common/application-shell";
+import { GoogleSheetsWorkspace } from "@/components/pro/google-sheets-workspace";
 
 export const dynamic = "force-dynamic";
 

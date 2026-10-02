@@ -2,19 +2,19 @@
 
 import { useRef, useState, type MouseEvent } from "react";
 
-import { OpportunityCapture } from "@/app/opportunity-capture";
-import { PageHeader } from "@/app/page-header";
-import { OpportunityCard, sourceHost } from "@/app/opportunity-card";
+import { OpportunityCapture } from "@/components/jobs/opportunity-capture";
+import { PageHeader } from "@/components/common/page-header";
+import { OpportunityCard, sourceHost } from "@/components/jobs/opportunity-card";
 import {
   OpportunitySearch,
   OpportunityResultCount,
-} from "@/app/opportunity-search";
-import { OpportunitySubnav, type JobsView } from "@/app/opportunity-subnav";
+} from "@/components/jobs/opportunity-search";
+import { OpportunitySubnav, type JobsView } from "@/components/jobs/opportunity-subnav";
 import {
   OpportunityEmptyLibrary,
   OpportunityEmptySearch,
   OpportunityEmptyApplied,
-} from "@/app/opportunity-empty-state";
+} from "@/components/jobs/opportunity-empty-state";
 import type {
   OpportunityAssessmentView,
   OpportunityDecisionView,

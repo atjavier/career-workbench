@@ -5,7 +5,7 @@ import test from "node:test";
 test("Permitted Sources remains an accessible historical policy control outside the active Jobs experience", async () => {
   const [ui, page, actions, sourceConfigurations] = await Promise.all([
     readFile(
-      new URL("../src/app/permitted-sources.tsx", import.meta.url),
+      new URL("../src/components/settings/permitted-sources.tsx", import.meta.url),
       "utf8",
     ),
     readFile(new URL("../src/app/page.tsx", import.meta.url), "utf8"),

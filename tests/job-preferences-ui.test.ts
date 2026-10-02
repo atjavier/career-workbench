@@ -5,7 +5,7 @@ import test from "node:test";
 test("Search Preferences remains an accessible historical local-only control outside the active Jobs experience", async () => {
   const [ui, page, actions] = await Promise.all([
     readFile(
-      new URL("../src/app/job-preferences.tsx", import.meta.url),
+      new URL("../src/components/settings/job-preferences.tsx", import.meta.url),
       "utf8",
     ),
     readFile(new URL("../src/app/page.tsx", import.meta.url), "utf8"),

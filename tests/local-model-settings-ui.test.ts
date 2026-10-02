@@ -4,7 +4,7 @@ import test from "node:test";
 
 test("Local AI Settings and Resume recovery keep secrets and diagnostics out of Resume Edit", async () => {
   const settings = await readFile(
-    new URL("../src/app/local-model-settings.tsx", import.meta.url),
+    new URL("../src/components/settings/local-model-settings.tsx", import.meta.url),
     "utf8",
   );
   const page = await readFile(
@@ -12,7 +12,7 @@ test("Local AI Settings and Resume recovery keep secrets and diagnostics out of 
     "utf8",
   );
   const coach = await readFile(
-    new URL("../src/app/resume-studio.tsx", import.meta.url),
+    new URL("../src/components/resume/resume-preview.tsx", import.meta.url),
     "utf8",
   );
   assert.doesNotMatch(settings, /type="password"|name="token"|authorization/i);

@@ -1,6 +1,6 @@
-import { JobListings } from "@/app/job-listings";
+import { JobListings } from "@/components/jobs/job-listings";
 import { listCapturedOpportunities } from "@/domain/opportunities/captured-opportunities";
-import { ApplicationShell } from "@/app/application-shell";
+import { ApplicationShell } from "@/components/common/application-shell";
 import { resolveAppDataPaths } from "@/files/app-data";
 import { applyMigrations, openDatabase } from "@/persistence/database";
 import { listApprovedEvidence } from "@/persistence/evidence-repository";

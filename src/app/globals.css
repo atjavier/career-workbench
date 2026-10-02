@@ -748,40 +748,6 @@ form button {
 .evidence-lifecycle dd {
   margin: 0.2rem 0 0;
 }
-.resume-stepper {
-  background: var(--surface-base);
-  border: 1px solid var(--border);
-  border-radius: 0.75rem;
-  margin-top: 1.25rem;
-  padding: 1rem;
-}
-.resume-stepper h2 {
-  font-size: 1rem;
-  margin-top: 0;
-}
-.resume-stepper ol {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-.resume-stepper li {
-  background: var(--surface-raised);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  font-size: 0.9rem;
-  padding: 0.4rem 0.7rem;
-}
-.resume-stepper li:has(a[aria-current="step"]) {
-  background: var(--primary);
-  border-color: var(--primary);
-  font-weight: 700;
-}
-.resume-stepper a[aria-current="step"] {
-  color: #fff;
-}
 .resume-review-jumps {
   display: flex;
   flex-wrap: wrap;
@@ -997,10 +963,6 @@ form button {
     grid-template-columns: 1fr;
   }
   .evidence-lifecycle {
-    grid-template-columns: 1fr;
-  }
-  .resume-stepper ol {
-    display: grid;
     grid-template-columns: 1fr;
   }
   .resume-editor-preview {
@@ -2578,6 +2540,85 @@ button.card-delete-icon-btn:hover:not(:disabled) {
   font-weight: 650;
 }
 .doc-viewer-panel {
+
+/* Profile Edit Modal Dialog */
+.modal-card.profile-edit-modal-dialog {
+  animation: modalCardAppear 0.15s ease-out;
+  background: var(--surface-base);
+  border: 1px solid var(--border);
+  border-radius: clamp(12px, calc(0.9vw * var(--ui-scale)), 18px);
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  max-height: min(90vh, 760px);
+  max-width: clamp(680px, calc(52vw * var(--ui-scale)), 860px);
+  overflow: hidden;
+  padding: 0;
+  width: 100%;
+}
+
+.profile-edit-modal-dialog .modal-header {
+  align-items: flex-start;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  padding: clamp(16px, calc(1.2vw * var(--ui-scale)), 22px) clamp(22px, calc(1.7vw * var(--ui-scale)), 32px);
+}
+
+.profile-edit-modal-dialog .modal-header-titles {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.profile-edit-modal-dialog .modal-header-titles .eyebrow {
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  margin: 0 0 2px;
+  text-transform: uppercase;
+}
+
+.profile-edit-modal-dialog .modal-header-titles h3 {
+  font-size: 18px;
+  font-weight: 700;
+  margin: 0 0 4px;
+}
+
+.profile-edit-modal-dialog .modal-subtitle-text {
+  color: var(--muted-ink);
+  font-size: 13px;
+  margin: 0;
+}
+
+.profile-edit-modal-body {
+  overflow-y: auto;
+  padding: clamp(18px, calc(1.4vw * var(--ui-scale)), 26px) clamp(22px, calc(1.7vw * var(--ui-scale)), 32px);
+}
+
+.profile-edit-modal-body .resume-profile-card {
+  border: 0;
+  padding: 0;
+}
+
+.profile-edit-modal-body .resume-profile-card .resume-pane-head {
+  display: none;
+}
+
+.profile-modal-danger-zone {
+  border-top: 1px solid var(--border);
+  margin-top: 24px;
+  padding-top: 18px;
+}
+
+.resume-header-actions-group {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
   background: var(--canvas);
   border: 1px solid var(--border);
   border-radius: clamp(7px, calc(0.5vw * var(--ui-scale)), 10px);
@@ -8135,7 +8176,7 @@ h1 {
 }
 
 /* Minimalist Fixed-Height Studio Layout (Active Resume Canvas) */
-.resume-workspace:not(.experience-projects-workspace):not(.evidence-details-workspace):not(.resume-interview-workspace).workspace-shell {
+.resume-workspace:not(.experience-projects-workspace):not(.evidence-details-workspace):not(.resume-interview-workspace):not(.resume-onboarding-workspace).workspace-shell {
   box-sizing: border-box !important;
   display: flex !important;
   flex: 1 1 auto !important;
@@ -8147,6 +8188,35 @@ h1 {
   padding: clamp(1.5rem, calc(2vw * var(--ui-scale)), 3.25rem) clamp(1.5rem, calc(2.8vw * var(--ui-scale)), 4.5rem) 1.25rem !important;
   width: 100%;
 }
+
+/* Resume Onboarding / Initial Setup Layout (Scrollable Container, Fixed Screen) */
+.resume-workspace.resume-onboarding-workspace.workspace-shell {
+  box-sizing: border-box !important;
+  display: flex !important;
+  flex: 1 1 auto !important;
+  flex-direction: column !important;
+  height: 100% !important;
+  max-height: calc(100dvh - 2.25rem) !important;
+  min-height: 0 !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  padding: clamp(1.25rem, calc(1.8vw * var(--ui-scale)), 2rem) clamp(1.5rem, calc(2.8vw * var(--ui-scale)), 4.5rem) 3.5rem !important;
+  width: 100%;
+}
+
+.resume-onboarding-workspace .resume-page-head {
+  margin-bottom: 0.75rem;
+  padding-bottom: 1.25rem;
+}
+
+@media (max-width: 64rem) {
+  .resume-workspace.resume-onboarding-workspace.workspace-shell {
+    height: calc(100dvh - 4.5rem) !important;
+    max-height: calc(100dvh - 4.5rem) !important;
+    padding: 1rem 1rem 2.5rem !important;
+  }
+}
+
 
 /* Coach Interview Workspace (Centered Chatbox & Roadmap Canvas) */
 .resume-workspace.resume-interview-workspace.workspace-shell {
@@ -8202,6 +8272,7 @@ h1 {
   display: none !important;
 }
 
+.resume-minimal-studio .resume-preview-center,
 .resume-minimal-studio .resume-studio-center,
 .resume-minimal-studio .resume-generated-preview {
   background: transparent !important;
@@ -8369,26 +8440,6 @@ h1 {
   width: 1px;
   margin: 0 0.15rem;
   flex-shrink: 0;
-}
-
-/* Toolbar-integrated Workspace Picker */
-.toolbar-workspace-picker-wrap {
-  display: inline-flex;
-  align-items: center;
-  flex-shrink: 0;
-}
-
-.toolbar-workspace-picker-wrap .resume-compact-picker {
-  display: inline-flex;
-  align-items: center;
-  position: relative;
-}
-
-.toolbar-workspace-picker-wrap .resume-picker-popover {
-  left: auto !important;
-  right: 0 !important;
-  top: calc(100% + 0.4rem) !important;
-  z-index: 70 !important;
 }
 
 .status-dot {

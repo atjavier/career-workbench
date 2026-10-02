@@ -1,7 +1,7 @@
 "use client";
 
 import type { MouseEvent } from "react";
-import { EmptyStateCard } from "@/app/empty-state-card";
+import { EmptyStateCard } from "@/components/common/empty-state-card";
 
 interface OpportunityEmptyLibraryProps {
   onOpenCapture: (event: MouseEvent<HTMLButtonElement>) => void;

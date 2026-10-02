@@ -1,9 +1,8 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { BaseResumeImporter } from "@/app/base-resume-importer";
-import { ResumeStudio } from "@/app/resume-studio";
-import { ResumeWorkspacePicker } from "@/app/resume-workspace-picker";
-import { ResumeOnboarding } from "@/app/resume-onboarding";
+import { BaseResumeImporter } from "@/components/resume/base-resume-importer";
+import { ResumePreview } from "@/components/resume/resume-preview";
+import { ResumeOnboarding } from "@/components/resume/resume-onboarding";
 import { bootstrapBundledBaseResume } from "@/domain/base-resume/import-base-resume";
 import { readInitialResumeTemplateContract } from "@/domain/base-resume/resume-template-contract";
 import { readCandidateProfileState } from "@/domain/resume-generation/candidate-profile-commands";
@@ -150,9 +149,15 @@ export async function ResumeWorkspace() {
     profile.revision &&
     materials.length,
   );
-  if (!workspaceState.activeWorkspace && workspaceState.workspaces.length === 0)
+  const hasCompletedProfile =
+    !("error" in profile) && Boolean(profile.revision);
+  const isOnboarding =
+    workspaceState.activeWorkspace?.journey?.phase === "onboarding" ||
+    !hasCompletedProfile;
+
+  if (!workspaceState.activeWorkspace) {
     return (
-      <div className="workspace-shell resume-workspace">
+      <div className="workspace-shell resume-workspace resume-onboarding-workspace">
         <header className="resume-page-head">
           <div className="resume-head-copy">
             <p className="eyebrow">Resume</p>
@@ -162,15 +167,29 @@ export async function ResumeWorkspace() {
               document. You can add more folders anytime.
             </p>
           </div>
-          <ResumeWorkspacePicker
-            workspaces={workspaceState.workspaces}
-            activeWorkspaceId={undefined}
-            revisionNumber={workspaceState.revisionNumber}
-          />
         </header>
         <ResumeOnboarding localAiReady={localModel.ready} />
       </div>
     );
+  }
+
+  if (isOnboarding) {
+    return (
+      <div className="workspace-shell resume-workspace resume-onboarding-workspace">
+        <header className="resume-page-head">
+          <div className="resume-head-copy">
+            <p className="eyebrow">Resume</p>
+            <h1>Start your resume</h1>
+            <p>
+              Save your basic information and choose your local work folders to
+              document. You can add more folders anytime.
+            </p>
+          </div>
+        </header>
+        <ResumeOnboarding localAiReady={localModel.ready} />
+      </div>
+    );
+  }
   return (
     <div className="workspace-shell resume-workspace">
       <div className="sr-only" aria-hidden="true">
@@ -186,14 +205,15 @@ export async function ResumeWorkspace() {
       </div>
       {!baselineReady ? <BaseResumeImporter /> : null}
       <section id="resume-edit" aria-label="Resume Edit">
-        <ResumeStudio
-          workspacePicker={
-            <ResumeWorkspacePicker
-              workspaces={workspaceState.workspaces}
-              activeWorkspaceId={workspaceState.activeWorkspace?.id}
-              revisionNumber={workspaceState.revisionNumber}
-            />
+        <ResumePreview
+          profileId={!("error" in profile) ? profile.profile?.id : undefined}
+          profileRevisionNumber={
+            !("error" in profile) ? profile.state.revisionNumber : 0
           }
+          profileValues={
+            !("error" in profile) ? profile.revision?.values : undefined
+          }
+          workspaceRevisionNumber={workspaceState.revisionNumber}
           available={Boolean(
             workspaceState.activeWorkspace &&
             baselineReady &&

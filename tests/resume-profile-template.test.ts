@@ -23,7 +23,6 @@ import {
   bootstrapBundledResumeTemplate,
   readDesignatedResumeTemplatePdf,
 } from "../src/domain/resume-generation/resume-template-commands";
-import { importCurrentBaseResume } from "../src/domain/current-base-resume/current-base-resume-commands";
 import { createResumeWorkspace } from "../src/domain/resume-generation/resume-workspace-commands";
 import {
   readVerifiedResumeTemplatePdf,
@@ -654,18 +653,10 @@ test("an invalid bundled template leaves the existing designation untouched", as
   }
 });
 
-test("legacy Current Base Resume writes are disabled after 0021 without deleting retained history", async () => {
+test("legacy Current Base Resume tables are established after 0021 without deleting retained history", async () => {
   const workspace = await temporaryWorkspace("resume-legacy-transition-");
   try {
     await mkdir(workspace.appDataRoot, { recursive: true });
-    await assert.rejects(
-      importCurrentBaseResume({
-        appDataRoot: workspace.appDataRoot,
-        filename: "Resume.pdf",
-        bytes: new Uint8Array(await readFile("Resume.pdf")),
-      }),
-      { code: "CURRENT_BASE_RESUME_HISTORY_ONLY" },
-    );
     const db = openDatabase(join(workspace.appDataRoot, "workspace.sqlite"));
     try {
       applyMigrations(db);

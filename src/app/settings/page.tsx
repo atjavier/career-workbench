@@ -1,6 +1,6 @@
-import { ApplicationShell } from "@/app/application-shell";
-import { LocalModelSettings } from "@/app/local-model-settings";
-import { DataStorage } from "@/app/data-storage";
+import { ApplicationShell } from "@/components/common/application-shell";
+import { LocalModelSettings } from "@/components/settings/local-model-settings";
+import { DataStorage } from "@/components/settings/data-storage";
 import { listDataStorage } from "@/domain/data-storage/data-storage";
 import { storageProtectionMessage } from "@/domain/workspace/status-message";
 import { readLocalModelReadiness } from "@/domain/resume-generation/local-model-configuration-commands";

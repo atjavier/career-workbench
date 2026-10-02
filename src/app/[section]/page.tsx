@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import {
   ApplicationShell,
   applicationDestinations,
-} from "@/app/application-shell";
+} from "@/components/common/application-shell";
 
 const titles: Record<string, { title: string; summary: string }> = {
   settings: {

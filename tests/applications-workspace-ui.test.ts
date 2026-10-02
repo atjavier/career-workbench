@@ -18,7 +18,7 @@ test("Applications has a dedicated shared-shell route rather than the generic pl
 
 test("Applications gives an honest, accessible empty tracking state and useful handoffs", async () => {
   const workspace = await readFile(
-    new URL("../src/app/applications.tsx", import.meta.url),
+    new URL("../src/components/pro/applications.tsx", import.meta.url),
     "utf8",
   );
   for (const text of [
@@ -45,7 +45,7 @@ test("Applications gives an honest, accessible empty tracking state and useful h
 
 test("Applications preserves local-first scope and does not manufacture tracking or sync behavior", async () => {
   const [workspace, styles] = await Promise.all([
-    readFile(new URL("../src/app/applications.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/components/pro/applications.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/app/globals.css", import.meta.url), "utf8"),
   ]);
   assert.doesNotMatch(

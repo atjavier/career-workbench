@@ -4,11 +4,11 @@ import test from "node:test";
 
 const readJobsUI = async () => {
   const files = await Promise.all([
-    readFile(new URL("../src/app/job-listings.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../src/app/opportunity-card.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../src/app/opportunity-search.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../src/app/opportunity-subnav.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../src/app/opportunity-empty-state.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/components/jobs/job-listings.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/components/jobs/opportunity-card.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/components/jobs/opportunity-search.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/components/jobs/opportunity-subnav.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/components/jobs/opportunity-empty-state.tsx", import.meta.url), "utf8"),
   ]);
   return files.join("\n");
 };
@@ -103,7 +103,7 @@ test("Fit explanation requires consent and preserves local-AI provenance and han
   const [ui, assessment] = await Promise.all([
     readJobsUI(),
     readFile(
-      new URL("../src/app/opportunity-assessment.tsx", import.meta.url),
+      new URL("../src/components/jobs/opportunity-assessment.tsx", import.meta.url),
       "utf8",
     ),
   ]);

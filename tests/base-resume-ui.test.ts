@@ -4,11 +4,11 @@ import test from "node:test";
 
 test("Template importer is available only until the active resume has an imported contract", async () => {
   const page = await readFile(
-    new URL("../src/app/resume-workspace.tsx", import.meta.url),
+    new URL("../src/components/resume/resume-workspace.tsx", import.meta.url),
     "utf8",
   );
   const importer = await readFile(
-    new URL("../src/app/base-resume-importer.tsx", import.meta.url),
+    new URL("../src/components/resume/base-resume-importer.tsx", import.meta.url),
     "utf8",
   );
 

@@ -1,4 +1,4 @@
-import { CareerAssistant } from "@/app/career-assistant";
+import { CareerAssistant } from "@/components/pro/career-assistant";
 import { listDocumenterProposals } from "@/domain/evidence/evidence-documenter";
 
 const safeError = (error: unknown) =>

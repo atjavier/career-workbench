@@ -5,11 +5,11 @@ import test from "node:test";
 test("Opportunity capture is an accessible local review flow, not a source retrieval flow", async () => {
   const [capture, actions, jobs, styles, domain] = await Promise.all([
     readFile(
-      new URL("../src/app/opportunity-capture.tsx", import.meta.url),
+      new URL("../src/components/jobs/opportunity-capture.tsx", import.meta.url),
       "utf8",
     ),
     readFile(new URL("../src/app/actions.ts", import.meta.url), "utf8"),
-    readFile(new URL("../src/app/job-listings.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/components/jobs/job-listings.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/app/globals.css", import.meta.url), "utf8"),
     readFile(
       new URL("../src/domain/opportunities/capture-draft.ts", import.meta.url),
@@ -74,7 +74,7 @@ test("Opportunity capture is an accessible local review flow, not a source retri
 test("Opportunity capture uses a focus-safe, centered native modal with vertically ordered compact fields", async () => {
   const [capture, styles] = await Promise.all([
     readFile(
-      new URL("../src/app/opportunity-capture.tsx", import.meta.url),
+      new URL("../src/components/jobs/opportunity-capture.tsx", import.meta.url),
       "utf8",
     ),
     readFile(new URL("../src/app/globals.css", import.meta.url), "utf8"),

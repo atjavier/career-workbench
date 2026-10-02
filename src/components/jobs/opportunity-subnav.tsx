@@ -1,6 +1,6 @@
 "use client";
 
-import { SegmentedTabs, type TabItem } from "@/app/segmented-tabs";
+import { SegmentedTabs, type TabItem } from "@/components/common/segmented-tabs";
 
 export type JobsView = "all" | "applied";
 

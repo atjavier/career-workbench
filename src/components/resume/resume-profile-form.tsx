@@ -103,6 +103,11 @@ export function ResumeProfileForm({
   const [formValues, setFormValues] = useState<FormValues>(() =>
     valuesFromProfile(values),
   );
+  useEffect(() => {
+    if (values) {
+      setFormValues(valuesFromProfile(values));
+    }
+  }, [values]);
   const initialState: CandidateProfileActionState = {
     status: "idle",
     summary: values ? "Details saved." : "Save details to generate.",

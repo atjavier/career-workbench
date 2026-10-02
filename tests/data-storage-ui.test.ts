@@ -4,7 +4,7 @@ import test from "node:test";
 
 test("Data & Storage exposes local-only consequences and semantic confirmations", async () => {
   const ui = await readFile(
-    new URL("../src/app/data-storage.tsx", import.meta.url),
+    new URL("../src/components/settings/data-storage.tsx", import.meta.url),
     "utf8",
   );
   assert.match(ui, /workspace database snapshot/);
