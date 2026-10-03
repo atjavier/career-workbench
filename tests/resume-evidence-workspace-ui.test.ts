@@ -173,7 +173,7 @@ test("generated resumes offer an accessible evidence-based regeneration control 
 
   assert.match(
     coach,
-    /<form[\s\S]*?action=\{revisionAction\}[\s\S]*?name="generationCommand"[\s\S]*?value="revision"[\s\S]*?<button[^>]*type="submit"[^>]*>[\s\S]*?\{revisionPending[\s\S]*?\?[\s\S]*?"Regenerating resume…"[\s\S]*?:[\s\S]*?"Regenerate resume"\}[\s\S]*?<\/button>/,
+    /<form[\s\S]*?action=\{revisionAction\}[\s\S]*?name="generationCommand"[\s\S]*?value=\{activeDraftId \? "revision" : "initial"\}[\s\S]*?<button[^>]*type="submit"[^>]*>[\s\S]*?\{revisionPending[\s\S]*?\?[\s\S]*?"Generating resume…"[\s\S]*?:[\s\S]*?"Generate resume"\}[\s\S]*?<\/button>/,
   );
   assert.doesNotMatch(
     coach,

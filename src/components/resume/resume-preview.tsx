@@ -314,7 +314,7 @@ export function ResumePreview({
 
   const activeDraftId = revisionState.draftId ?? initialDraft?.id;
   const proposalVisible = Boolean(
-    activeDraftId && activeDraftId !== dismissedDraftId,
+    activeDraftId && !generationNeeded && activeDraftId !== dismissedDraftId,
   );
   const isGenerating =
     revisionPending ||
@@ -508,71 +508,6 @@ export function ResumePreview({
           }
         />
 
-        {/* Update alert notice with contextual Regenerate action */}
-        {generationNeeded || revisionPending ? (
-          <div
-            className="resume-update-alert"
-            role="status"
-            aria-live="polite"
-          >
-            <div className="update-alert-content">
-              <div className="update-alert-copy">
-                <strong>Resume update available</strong>
-                <span>
-                  {" — "}Documented work has been updated.
-                  {hasPendingInterview ? (
-                    <>
-                      {" "}
-                      You can also answer pending questions in{" "}
-                      <Link href="/resume/interview" className="interview-link">
-                        Coach Q&A
-                      </Link>
-                      .
-                    </>
-                  ) : null}
-                </span>
-              </div>
-              <form
-                action={revisionAction}
-                aria-busy={revisionPending}
-                className="toolbar-action-form update-alert-action"
-              >
-                <input
-                  type="hidden"
-                  name="generationCommand"
-                  value="revision"
-                />
-                <input
-                  type="hidden"
-                  name="workspaceId"
-                  value={workspaceId ?? ""}
-                />
-                <button
-                  type="submit"
-                  disabled={revisionPending}
-                  className="toolbar-btn toolbar-btn-highlight"
-                  title="Regenerate resume with local AI"
-                >
-                  <svg
-                    width="13"
-                    height="13"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
-                    className={revisionPending ? "spin-icon" : ""}
-                  >
-                    <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
-                  </svg>
-                  <span>{revisionPending ? "Regenerating resume…" : "Regenerate resume"}</span>
-                </button>
-              </form>
-            </div>
-          </div>
-        ) : null}
 
         {/* Document Preview Workspace */}
         <div className="resume-preview-workspace">
@@ -681,7 +616,7 @@ export function ResumePreview({
                 >
                   {generationMessage ??
                     (generationNeeded
-                      ? "Changes detected — your resume needs to be regenerated from the updated documented work."
+                      ? "Changes detected — your resume can be generated from the updated documented work."
                       : "Your base resume has not been generated yet.")}
                 </p>
                 {generationNeeded ? (
@@ -690,7 +625,11 @@ export function ResumePreview({
                     aria-busy={revisionPending}
                     className="empty-generate-form"
                   >
-                    <input type="hidden" name="generationCommand" value="initial" />
+                    <input
+                      type="hidden"
+                      name="generationCommand"
+                      value={activeDraftId ? "revision" : "initial"}
+                    />
                     <input
                       type="hidden"
                       name="workspaceId"
@@ -703,6 +642,15 @@ export function ResumePreview({
                     >
                       {revisionPending ? "Generating resume…" : "Generate resume"}
                     </button>
+                    {hasPendingInterview ? (
+                      <p className="resume-preview-interview-hint">
+                        You can also answer pending questions in{" "}
+                        <Link href="/resume/interview" className="interview-link">
+                          Coach Q&A
+                        </Link>{" "}
+                        before generating.
+                      </p>
+                    ) : null}
                     {revisionState.status !== "idle" ? (
                       <p
                         role="status"

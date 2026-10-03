@@ -19,13 +19,13 @@ test("evidence intake provides actionable next-step routing and Base Resume warn
   assert.match(library, /evidence-action-banner/);
   assert.match(library, /action-banner-cta/);
   assert.match(library, /Go to Coach Q&A →/);
-  assert.match(library, /Go to Resume →/);
+  assert.match(library, /Go to Resume Preview →/);
 
-  // Resume Coach renders the stale status pill and update alert when generationNeeded is true
+  // Resume Coach renders the stale status pill and empty card generate action when generationNeeded is true
   assert.match(coach, /preview-status-stale/);
   assert.match(coach, /Out of date — Changes detected/);
-  assert.match(coach, /resume-update-alert/);
-  assert.match(coach, /Resume update available/);
+  assert.match(coach, /resume-preview-empty-card/);
+  assert.match(coach, /Generate resume/);
 
   // CSS contains the styling rules for the alert and banner
   assert.match(styles, /\.preview-status-stale/);
@@ -40,15 +40,15 @@ test("removing a documented project prompts regeneration and detects changes", a
     "utf8",
   );
 
-  // Deleting documented item routes to /resume and notifies of changes detected
+  // Deleting documented item routes to /resume and notifies of deletion
   assert.match(actions, /command === "delete-documented-item"/);
   assert.match(
     actions,
-    /Changes detected — your base resume needs updating/,
+    /permanently deleted\./,
   );
   assert.match(
     actions,
-    /safeNextAction\s*=\s*["']Go to Resume to regenerate your draft with updated evidence\.["']/,
+    /safeNextAction\s*=\s*["']You can generate an updated resume in Resume Preview whenever you want\.["']/,
   );
 });
 

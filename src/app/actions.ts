@@ -1887,7 +1887,8 @@ export async function evidenceLibraryAction(
         if (workspace) {
           await reconcileResumeWorkspaceJourney(workspace.id);
           nextUrl = "/resume";
-          safeNextAction = "Go to Resume to regenerate your draft with updated evidence.";
+          safeNextAction =
+            "You can generate an updated resume in Resume Preview whenever you want.";
         }
       } finally {
         db.close();
@@ -1899,7 +1900,7 @@ export async function evidenceLibraryAction(
         safeNextAction,
         summary: deleted.artifactCleanupIncomplete
           ? `${deleted.findingsDeleted} documented finding${deleted.findingsDeleted === 1 ? "" : "s"} deleted. Close programs using the managed evidence folder to finish removing its files.`
-          : `${deleted.findingsDeleted} documented finding${deleted.findingsDeleted === 1 ? "" : "s"} and this ${category} were permanently deleted. Changes detected — your base resume needs updating.`,
+          : `${deleted.findingsDeleted} documented finding${deleted.findingsDeleted === 1 ? "" : "s"} and this ${category} were permanently deleted.`,
       };
     } else if (command === "import-documentation-artifacts") {
       const category = String(formData.get("category") ?? "");

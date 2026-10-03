@@ -73,12 +73,17 @@
 
 html,
 body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+body {
   background: var(--canvas);
   color: var(--ink);
   font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   line-height: 1.5;
-  margin: 0;
-  min-height: 100vh;
 }
 
 .application-shell {
@@ -115,7 +120,7 @@ button {
   transition: all 0.15s ease;
 }
 button:hover:not(:disabled) {
-  background: #505a38;
+  background: var(--accent-bright, #5b8f40);
 }
 button:disabled {
   cursor: wait;
@@ -140,7 +145,7 @@ select:focus-visible {
   color: #ffffff;
 }
 .affirmative-action:hover:not(:disabled) {
-  background: #505a38;
+  background: var(--accent-bright, #5b8f40);
 }
 .neutral-action,
 .secondary-action {
@@ -273,9 +278,7 @@ h6,
   padding: 2rem 1.5rem 4rem;
   width: 100%;
 }
-.application-shell {
-  min-height: 100vh;
-}
+
 .skip-link {
   background: var(--ink);
   color: #fff;
@@ -3685,6 +3688,21 @@ button.card-delete-icon-btn:hover:not(:disabled) {
   font-weight: 700;
   padding: 0.6rem 1.25rem;
 }
+.resume-preview-interview-hint {
+  color: var(--muted-ink);
+  font-size: 0.85rem;
+  margin: 0.75rem 0 0;
+}
+.resume-preview-interview-hint .interview-link {
+  color: var(--primary-olive);
+  font-weight: 650;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  transition: color 0.15s ease;
+}
+.resume-preview-interview-hint .interview-link:hover {
+  color: var(--accent-bright, #5b8f40);
+}
 .preview-status-pill {
   align-items: center;
   background: rgba(77, 122, 54, 0.1);
@@ -5390,7 +5408,7 @@ form .coach-send-button,
   margin-bottom: 0 !important;
 }
 .coach-send-button:hover:not(:disabled) {
-  background: #3c5225;
+  background: var(--accent-bright, #5b8f40);
   transform: translateY(-1px);
 }
 .coach-send-button:disabled {
@@ -5505,7 +5523,7 @@ form .coach-skip-button,
   transition: all 0.15s ease;
 }
 .coach-complete-cta:hover {
-  background: #3c5225;
+  background: var(--accent-bright, #5b8f40);
   transform: translateY(-1px);
 }
 
@@ -5557,11 +5575,17 @@ form .coach-skip-button,
 /* Structural shell layout: enclosed page card, brand rounded card, and no separating line. */
 .application-shell {
   background: var(--canvas);
+  box-sizing: border-box;
   display: grid;
   grid-template-columns: clamp(19.5rem, calc(16.5vw * var(--ui-scale)), 22.5rem) minmax(0, 1fr);
+  grid-template-rows: 1fr;
   gap: 1.25rem;
-  min-height: 100vh;
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
+  overscroll-behavior: none;
   padding: 1rem 1.25rem 1.25rem 1rem;
+  position: relative;
   transition: grid-template-columns 0.2s ease;
 }
 .application-shell > main {
@@ -5569,10 +5593,21 @@ form .coach-skip-button,
   border: 1px solid var(--border);
   border-radius: 1.5rem;
   box-shadow: 0 4px 24px -2px rgba(34, 41, 28, 0.06);
-  min-width: 0;
-  overflow-x: hidden;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
+  height: 100%;
+  max-height: 100%;
+  min-height: 0;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  position: relative;
+}
+.application-shell > main:has(.resume-preview-workspace),
+.application-shell > main:has(#resume-edit) {
+  overflow: hidden;
 }
 .app-header {
   align-items: stretch;
@@ -5580,14 +5615,18 @@ form .coach-skip-button,
   border: 1px solid var(--sidebar-border);
   border-radius: 1.5rem;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+  height: 100%;
+  max-height: 100%;
   justify-content: flex-start;
-  min-height: calc(100dvh - 2.25rem);
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 1.25rem 1.15rem;
-  position: sticky;
-  top: 1rem;
+  position: static;
   transition: width 0.2s ease, padding 0.2s ease;
 }
 .app-brand-row {
@@ -6324,11 +6363,18 @@ html.sidebar-collapsed .application-shell .navigation-icon svg {
   .application-shell,
   .application-shell.is-collapsed {
     grid-template-columns: 1fr;
+    grid-template-rows: 48px 1fr;
     padding: 0.5rem 0.75rem;
     gap: 0.75rem;
+    height: 100dvh;
+    max-height: 100dvh;
+    overflow: hidden;
   }
   .application-shell > main {
     border-radius: 1rem;
+    height: 100%;
+    min-height: 0;
+    overflow-y: auto;
   }
   .sidebar-collapse-container,
   .sidebar-collapse-button {
@@ -6347,6 +6393,7 @@ html.sidebar-collapsed .application-shell .navigation-icon svg {
     padding: 0 1rem !important;
     position: static;
     box-sizing: border-box;
+    overflow: hidden;
   }
   .app-header .app-brand-row {
     margin: 0;
@@ -7202,7 +7249,7 @@ h1 {
 }
 
 .add-opportunity-action:hover {
-  background: #505a38;
+  background: var(--accent-bright, #5b8f40);
   box-shadow: 0 4px 12px rgba(57, 68, 27, 0.4);
   transform: translateY(-1px);
 }
@@ -8142,14 +8189,30 @@ h1 {
   font-size: 0.85rem;
   margin: 0.15rem 0 0;
 }
+.action-banner-inline-link {
+  color: var(--primary-olive);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  transition: color 0.15s ease;
+}
+.action-banner-inline-link:hover {
+  color: var(--accent-bright, #5b8f40);
+}
 
 .action-banner-cta {
+  border-radius: 0.5rem;
   display: inline-flex;
   font-size: 0.85rem;
   font-weight: 600;
   padding: 0.45rem 0.9rem;
   text-decoration: none;
+  transition: all 0.15s ease;
   white-space: nowrap;
+}
+.action-banner-cta:hover {
+  background: var(--accent-bright, #5b8f40);
+  transform: translateY(-0.5px);
 }
 
 .modal-documenting-status {
@@ -8249,24 +8312,23 @@ h1 {
   flex: 1 1 auto !important;
   flex-direction: column !important;
   height: 100% !important;
-  max-height: calc(100dvh - 2.25rem) !important;
+  max-height: 100% !important;
   min-height: 0 !important;
   overflow: hidden !important;
   padding: clamp(1.5rem, calc(2vw * var(--ui-scale)), 3.25rem) clamp(1.5rem, calc(2.8vw * var(--ui-scale)), 4.5rem) 1.25rem !important;
   width: 100%;
 }
 
-/* Resume Onboarding / Initial Setup Layout (Scrollable Container, Fixed Screen) */
+/* Resume Onboarding / Initial Setup Layout (Scrollable Main Container) */
 .resume-workspace.resume-onboarding-workspace.workspace-shell {
   box-sizing: border-box !important;
   display: flex !important;
   flex: 1 1 auto !important;
   flex-direction: column !important;
-  height: 100% !important;
-  max-height: calc(100dvh - 2.25rem) !important;
+  height: auto !important;
+  max-height: none !important;
   min-height: 0 !important;
-  overflow-y: auto !important;
-  overflow-x: hidden !important;
+  overflow: visible !important;
   padding: clamp(1.25rem, calc(1.8vw * var(--ui-scale)), 2rem) clamp(1.5rem, calc(2.8vw * var(--ui-scale)), 4.5rem) 3.5rem !important;
   width: 100%;
 }
@@ -8278,8 +8340,8 @@ h1 {
 
 @media (max-width: 64rem) {
   .resume-workspace.resume-onboarding-workspace.workspace-shell {
-    height: calc(100dvh - 4.5rem) !important;
-    max-height: calc(100dvh - 4.5rem) !important;
+    height: auto !important;
+    max-height: none !important;
     padding: 1rem 1rem 2.5rem !important;
   }
 }

@@ -690,7 +690,23 @@ export function EvidenceLibrary({
               <div>
                 <strong>{state.summary}</strong>
                 {state.safeNextAction ? (
-                  <p className="action-banner-sub">{state.safeNextAction}</p>
+                  <p className="action-banner-sub">
+                    {state.safeNextAction.includes("Resume Preview") &&
+                    state.nextUrl ? (
+                      <>
+                        {state.safeNextAction.split("Resume Preview")[0]}
+                        <Link
+                          href={state.nextUrl}
+                          className="action-banner-inline-link"
+                        >
+                          Resume Preview
+                        </Link>
+                        {state.safeNextAction.split("Resume Preview")[1]}
+                      </>
+                    ) : (
+                      state.safeNextAction
+                    )}
+                  </p>
                 ) : null}
               </div>
             </div>
@@ -701,7 +717,7 @@ export function EvidenceLibrary({
               >
                 {state.nextUrl.includes("interview")
                   ? "Go to Coach Q&A →"
-                  : "Go to Resume →"}
+                  : "Go to Resume Preview →"}
               </Link>
             ) : null}
           </div>
