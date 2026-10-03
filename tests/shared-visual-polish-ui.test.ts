@@ -18,7 +18,6 @@ const componentSubdirs: Record<string, string> = {
   "opportunity-search.tsx": "jobs",
   "opportunity-subnav.tsx": "jobs",
   "base-resume-importer.tsx": "resume",
-  "editable-tex-draft.tsx": "resume",
   "resume-onboarding.tsx": "resume",
   "resume-pdf-preview.tsx": "resume",
   "resume-preview.tsx": "resume",
