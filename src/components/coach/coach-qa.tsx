@@ -3,13 +3,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { resumeClarificationAction } from "@/app/actions";
 import type { InterviewView } from "@/domain/resume-generation/resume-clarification-interview";
 
 const streamPath = "/api/resume-interview/stream";
 const maxStreamFrame = 8_192;
 
 type StreamState =
-  { kind: "idle" } | { kind: "streaming" } | { kind: "error"; summary: string };
+  | { kind: "idle" }
+  | { kind: "streaming" }
+  | {
+      kind: "error";
+      summary: string;
+      code?: string;
+      safeNextAction?: string;
+    };
 
 function randomId(): string {
   return crypto.randomUUID();
@@ -173,7 +181,15 @@ export function ResumeInterview({
               value.type === "error" &&
               typeof value.summary === "string"
             ) {
-              throw new Error(value.summary);
+              const err = new Error(value.summary);
+              if (typeof value.code === "string") {
+                (err as { code?: string }).code = value.code;
+              }
+              if (typeof value.safeNextAction === "string") {
+                (err as { safeNextAction?: string }).safeNextAction =
+                  value.safeNextAction;
+              }
+              throw err;
             } else throw new Error("malformed");
           }
           if (buffered.length > maxStreamFrame) throw new Error("malformed");
@@ -198,7 +214,10 @@ export function ResumeInterview({
             error.message !== "incomplete"
               ? error.message
               : "Streaming local Coach Resume is unavailable right now.";
-          setStreamState({ kind: "error", summary });
+          const code = (error as { code?: string })?.code;
+          const safeNextAction = (error as { safeNextAction?: string })
+            ?.safeNextAction;
+          setStreamState({ kind: "error", summary, code, safeNextAction });
           setProgress(
             "Coach Resume did not finish. The unfinished response was not saved.",
           );
@@ -214,6 +233,41 @@ export function ResumeInterview({
     },
     [current, router, workspaceId],
   );
+
+  const handleSkip = useCallback(async () => {
+    if (!current || streaming) return;
+    setPartial("");
+    setPendingCandidate("");
+    setProgress("Recording question as skipped...");
+    setStreamState({ kind: "streaming" });
+    try {
+      const formData = new FormData();
+      formData.append("workspaceId", workspaceId);
+      formData.append("taskId", current.id);
+      formData.append("command", "skip");
+      const result = await resumeClarificationAction(
+        { status: "idle", summary: "" },
+        formData,
+      );
+      if (result.status === "error") {
+        setStreamState({
+          kind: "error",
+          summary: result.summary,
+          code: "RESUME_COACH_INVALID",
+        });
+      } else {
+        setStreamState({ kind: "idle" });
+        setProgress("Question skipped.");
+        router.refresh();
+      }
+    } catch {
+      setStreamState({
+        kind: "error",
+        summary: "Unable to skip this question right now.",
+        code: "RESUME_COACH_INVALID",
+      });
+    }
+  }, [current, router, streaming, workspaceId]);
 
   useEffect(() => {
     if (
@@ -436,6 +490,16 @@ export function ResumeInterview({
                         <span>Send</span>
                       )}
                     </button>
+                    <button
+                      type="button"
+                      className="coach-skip-button secondary-action"
+                      aria-label="Skip question"
+                      disabled={streaming}
+                      onClick={() => void handleSkip()}
+                      title="Skip this question and record as unknown"
+                    >
+                      Skip
+                    </button>
                   </div>
                   <p className="coach-composer-note">
                     Local Coach Resume only. Press Enter to send • Shift+Enter for new line
@@ -447,18 +511,43 @@ export function ResumeInterview({
                     role="status"
                     aria-live="polite"
                   >
-                    <p>{streamState.summary}</p>
-                    <button
-                      type="button"
-                      className="secondary-action"
-                      onClick={() => {
-                        setPartial("");
-                        setProgress("");
-                        setStreamState({ kind: "idle" });
-                      }}
-                    >
-                      Try again with this message
-                    </button>
+                    {streamState.code === "RESUME_COACH_INVALID" ||
+                    /unsupported|malformed|safely|decision|clarification/i.test(
+                      streamState.summary,
+                    ) ? (
+                      <div className="coach-offtopic-banner">
+                        <p className="coach-error-heading">
+                          <strong>Coach could not connect your response to this goal.</strong>
+                        </p>
+                        <p className="coach-error-details">
+                          Your reply may be off-topic or unclear for {current.itemName} ({current.itemCategory}).
+                          Provide specific details about what you built or owned, or skip this question if you do not have this information.
+                        </p>
+                      </div>
+                    ) : (
+                      <p>{streamState.summary}</p>
+                    )}
+                    <div className="coach-error-actions">
+                      <button
+                        type="button"
+                        className="secondary-action"
+                        onClick={() => {
+                          setPartial("");
+                          setProgress("");
+                          setStreamState({ kind: "idle" });
+                        }}
+                      >
+                        Try again with this message
+                      </button>
+                      <button
+                        type="button"
+                        className="secondary-action coach-error-skip"
+                        disabled={streaming}
+                        onClick={() => void handleSkip()}
+                      >
+                        Skip this question
+                      </button>
+                    </div>
                   </div>
                 ) : null}
               </>

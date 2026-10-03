@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { createResumeInterviewStreamResponse } from "../src/app/api/resume-interview/stream/route";
 import type { ResumeInterviewCoachRequest } from "../src/adapters/local-model/local-model-gateway";
+import { WorkspaceError } from "../src/domain/workspace/types";
 
 const workspaceId = "00000000-0000-7000-8000-000000000101";
 const consentNonce = "00000000-0000-4000-8000-000000000102";
@@ -349,3 +350,26 @@ test("request-aborted interview streams abort upstream and never finalize", asyn
   assert.equal(finalized, 0);
   await reader.cancel();
 });
+
+test("stream errors propagate error code and safeNextAction to client", async () => {
+  const response = await createResumeInterviewStreamResponse(request(), {
+    begin: async () => ({
+      question: "What was your contribution?",
+      context: [],
+      transcript: [],
+    }),
+    configuration: async () => configuration,
+    stream: async function* () {
+      throw new WorkspaceError(
+        "RESUME_COACH_INVALID",
+        "The local Coach Resume reply could not be used safely.",
+        "Try your message again.",
+      );
+    },
+  });
+  const text = await response.text();
+  assert.match(text, /"type":"error"/);
+  assert.match(text, /"code":"RESUME_COACH_INVALID"/);
+  assert.match(text, /"safeNextAction"/);
+});
+

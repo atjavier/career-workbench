@@ -134,10 +134,18 @@ export async function createResumeInterviewStreamResponse(
     input = await inputFor(request);
   } catch (error) {
     const safe = toSafeWorkspaceError(error);
-    return new Response(event({ type: "error", summary: safe.summary }), {
-      status: 400,
-      headers: streamHeaders,
-    });
+    return new Response(
+      event({
+        type: "error",
+        summary: safe.summary,
+        code: safe.code,
+        safeNextAction: safe.safeNextAction,
+      }),
+      {
+        status: 400,
+        headers: streamHeaders,
+      },
+    );
   }
   const dependencies = { ...streamDependencies, ...overrides };
   const encoder = new TextEncoder();
@@ -266,7 +274,14 @@ export async function createResumeInterviewStreamResponse(
         if (!interrupted()) {
           const safe = toSafeWorkspaceError(error);
           controller.enqueue(
-            encoder.encode(event({ type: "error", summary: safe.summary })),
+            encoder.encode(
+              event({
+                type: "error",
+                summary: safe.summary,
+                code: safe.code,
+                safeNextAction: safe.safeNextAction,
+              }),
+            ),
           );
         }
       } finally {

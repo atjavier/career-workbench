@@ -4214,6 +4214,35 @@ button.card-delete-icon-btn:hover:not(:disabled) {
   font-size: 0.82rem;
   margin: 0;
 }
+.coach-inline-status.status-error {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.6rem;
+}
+.coach-offtopic-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  width: 100%;
+}
+.coach-error-heading {
+  font-size: 0.88rem;
+  font-weight: 600;
+  margin: 0;
+}
+.coach-error-details {
+  font-size: 0.82rem;
+  margin: 0;
+  opacity: 0.92;
+  line-height: 1.4;
+}
+.coach-error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+}
 
 .sr-only {
   height: 1px;
@@ -5365,6 +5394,44 @@ form .coach-send-button,
   transform: translateY(-1px);
 }
 .coach-send-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.coach-skip-button {
+  align-self: center !important;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+  box-sizing: border-box;
+  color: var(--muted-ink, #6b7280);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.82rem;
+  font-weight: 500;
+  height: 2.35rem;
+  min-height: 2.35rem;
+  line-height: 1;
+  margin: 0 !important;
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+  padding-inline: 0.85rem;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+form .coach-skip-button,
+.coach-composer form button.coach-skip-button {
+  margin: 0 !important;
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+}
+.coach-skip-button:hover:not(:disabled) {
+  background: var(--surface-subtle, #f3f4f6);
+  color: var(--ink, #111827);
+  border-color: var(--border-strong, #9ca3af);
+}
+.coach-skip-button:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }
