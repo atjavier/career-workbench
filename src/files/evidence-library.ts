@@ -1,3 +1,4 @@
+import { defaultWorkspaceRoot } from "@/files/workspace-root";
 import { createHash } from "node:crypto";
 import {
   lstat,
@@ -148,7 +149,7 @@ function documentationTraversalPriority(name: string): number {
   return 5;
 }
 export function evidenceLibraryRoot(workspaceRoot?: string): string {
-  return resolve(workspaceRoot ?? process.cwd(), "resume-evidence");
+  return resolve(workspaceRoot ?? defaultWorkspaceRoot(), "resume-evidence");
 }
 function safeSegment(value: string): string {
   const result = value
@@ -373,7 +374,7 @@ export async function copyProjectMarkdown(
         ...item,
         absolutePath: target,
         libraryPath: relative(
-          resolve(/* turbopackIgnore: true */ workspaceRoot ?? process.cwd()),
+          resolve(/* turbopackIgnore: true */ workspaceRoot ?? defaultWorkspaceRoot()),
           target,
         ).replaceAll("\\", "/"),
       });
@@ -461,7 +462,7 @@ export async function copyExperienceMarkdown(input: {
   const document = {
     absolutePath: destination,
     libraryPath: relative(
-      resolve(/* turbopackIgnore: true */ input.workspaceRoot ?? process.cwd()),
+      resolve(/* turbopackIgnore: true */ input.workspaceRoot ?? defaultWorkspaceRoot()),
       destination,
     ).replaceAll("\\", "/"),
     ...captured,

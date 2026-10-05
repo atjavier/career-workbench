@@ -129,3 +129,12 @@ test("electron-builder configuration targets macOS, Windows, and Linux", async (
   assert.ok(Array.isArray(config.linux.target));
 });
 
+
+test("desktop production server writes evidence into its explicit writable workspace instead of standalone assets",async()=>{
+ const {mkdtemp,mkdir,writeFile,rm,realpath}=await import('node:fs/promises'),{tmpdir}=await import('node:os'),{join,relative}=await import('node:path');
+ const root=await mkdtemp(join(tmpdir(),'desktop-workspace-'));const runtime=join(root,'resources','standalone'),workspace=join(root,'user-data','workspace');await mkdir(runtime,{recursive:true});const serverPath=join(runtime,'server.cjs');
+ await writeFile(serverPath,"const http=require('node:http'),fs=require('node:fs'),path=require('node:path');process.chdir(__dirname);const root=process.env.CAREER_WORKBENCH_WORKSPACE_ROOT;fs.mkdirSync(path.join(root,'resume-evidence'),{recursive:true});fs.writeFileSync(path.join(root,'resume-evidence','marker.txt'),'saved evidence');http.createServer((req,res)=>{res.setHeader('content-type','application/json');res.end(JSON.stringify({workspace:root,cwd:process.cwd(),host:process.env.HOSTNAME}));}).listen(Number(process.env.PORT),process.env.HOSTNAME);");
+ const manager=new ServerManager({isDev:false,projectRoot:root,workspaceRoot:relative(process.cwd(),workspace),serverPath,pollIntervalMs:50,readinessTimeoutMs:5000});
+ try{await manager.start();const response=await fetch(manager.getBaseUrl());assert.deepEqual(await response.json(),{workspace,cwd:await realpath(runtime),host:'127.0.0.1'});assert.equal(await readFile(join(workspace,'resume-evidence','marker.txt'),'utf8'),'saved evidence');}
+ finally{await manager.stop();await rm(root,{recursive:true,force:true});}
+});

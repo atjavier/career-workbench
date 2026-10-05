@@ -8,6 +8,7 @@ export interface ServerManagerOptions {
   isDev?: boolean;
   port?: number;
   projectRoot?: string;
+  workspaceRoot?: string;
   serverPath?: string;
   pollIntervalMs?: number;
   readinessTimeoutMs?: number;
@@ -100,6 +101,7 @@ export class ServerManager {
   private baseUrl: string = "http://127.0.0.1:3000";
   private isDev: boolean;
   private projectRoot: string;
+  private workspaceRoot: string;
   private customServerPath?: string;
   private pollIntervalMs: number;
   private readinessTimeoutMs: number;
@@ -107,6 +109,7 @@ export class ServerManager {
   constructor(options: ServerManagerOptions = {}) {
     this.isDev = options.isDev ?? (process.env.NODE_ENV === "development" || process.env.ELECTRON_DEV === "1");
     this.projectRoot = options.projectRoot ?? process.cwd();
+    this.workspaceRoot = path.resolve(options.workspaceRoot ?? process.env.CAREER_WORKBENCH_WORKSPACE_ROOT ?? this.projectRoot);
     this.customServerPath = options.serverPath;
     this.pollIntervalMs = options.pollIntervalMs ?? 250;
     this.readinessTimeoutMs = options.readinessTimeoutMs ?? 30000;
@@ -181,6 +184,7 @@ export class ServerManager {
     }
 
     const serverCwd = path.dirname(serverPath);
+    fs.mkdirSync(this.workspaceRoot, { recursive: true });
 
     this.childProcess = spawn(process.execPath, [serverPath], {
       cwd: serverCwd,
@@ -188,6 +192,7 @@ export class ServerManager {
         ...process.env,
         PORT: String(this.port),
         HOSTNAME: "127.0.0.1",
+        CAREER_WORKBENCH_WORKSPACE_ROOT: this.workspaceRoot,
         NODE_ENV: "production",
         NEXT_TELEMETRY_DISABLED: "1",
       },

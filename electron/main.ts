@@ -32,7 +32,10 @@ if (!gotTheLock) {
 
 function initApp(): void {
   const isDev = process.env.NODE_ENV === "development" || process.env.ELECTRON_DEV === "1";
-  serverManager = new ServerManager({ isDev });
+  serverManager = new ServerManager({
+    isDev,
+    workspaceRoot: process.env.CAREER_WORKBENCH_WORKSPACE_ROOT ?? (app.isPackaged ? path.join(app.getPath("userData"), "workspace") : process.cwd()),
+  });
 
   app.whenReady().then(async () => {
     setupIpcHandlers();
