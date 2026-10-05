@@ -12,10 +12,23 @@ It is designed around a core principle: **your career data stays entirely on you
 - **Evidence-First Resume Builder**: Ground every bullet point and claim in reviewed repository documentation, technical notes, and interview answers.
 - **Interactive Local AI Coach**: Conduct clarification interviews and draft refinements using a locally hosted LLM (via LM Studio or Ollama on loopback) without sending data to external APIs.
 - **Native LaTeX PDF Compilation**: Compiles publication-quality, ATS-optimized resumes using an embedded or system Tectonic engine, with live split-view preview and direct editable `.tex` draft support.
-- **Captured Opportunity Library**: Capture and organize opportunities manually from job descriptions with immutable revision tracking and local AI-grounded fit assessments.
+- **Opportunity CRUD**: Review supplied job descriptions, add opportunities, view/edit saved details, and permanently delete opportunities with their attached tailored resumes.
+- **One Tailored Resume per Opportunity**: Use the single base resume automatically; successful regeneration replaces the current tailored resume. Opportunity edits recommend regeneration. Fit assessment is outside the MVP.
+- **Jobs Navigation**: All Opportunities and Applied are sidebar subsections. Application tracking is not implemented yet; Applied provides a truthful empty state and a link back to opportunities.
 - **100% Private & Local Authority**: Uses Node's built-in `node:sqlite` (in WAL mode) as the single source of truth, secure OS Keychain/Credential Manager storage via `@napi-rs/keyring`, and metadata-only audit logging.
 
 ---
+
+
+## Opportunity workflow
+
+Select **Add opportunity** to open `/opportunities/new`. Paste the reference URL and job description, then select **Add opportunity**. The dedicated **Job Opportunity Reader** uses your configured local model to identify cited job facts and organize the full description; the application checks structure, bounds and source evidence, formats the content, saves it and opens details. There is no draft approval or follow-up metadata form. Role titles use Title Case. Genuinely missing facts use the existing Unknown storage convention; one focused AI retry may recover missing identity. Unavailable or malformed AI preserves your URL and paste for retry and saves nothing. Fields are disabled while processing. The URL is a reference and is never retrieved. Saved details remain editable; original source stays separate and collapsed. Delete uses **Cancel / Delete opportunity** without typing confirmation and physically removes the opportunity, its descriptions and attached tailored resume.
+
+Open a saved opportunity to view, edit or delete it. Permanent deletion removes its revisions and attached tailored output while preserving the base resume and unrelated opportunities.
+
+Tailoring requires a ready base resume and explicit local AI consent. One current tailored output is stored per opportunity; failed regeneration leaves it unchanged. Review the output before PDF download. The initial tailoring implementation selects/reorders existing verified bullets rather than inventing or paraphrasing facts.
+
+Current behavior and test evidence: [_bmad-output/implementation-artifacts/spec-opportunities-component-driven-crud.md](_bmad-output/implementation-artifacts/spec-opportunities-component-driven-crud.md) and [_bmad-output/implementation-artifacts/spec-single-opportunity-tailored-resume.md](_bmad-output/implementation-artifacts/spec-single-opportunity-tailored-resume.md).
 
 ## Desktop Application Architecture
 
@@ -188,3 +201,11 @@ npm run lint
 ## License
 
 Private / Personal Workspace. All rights reserved.
+
+
+Agent responsibilities and boundaries: [Application AI agents](docs/application-ai-agents.md). Repository architecture findings and follow-up recommendations: [Codebase structure review](docs/codebase-structure-review-2026-10-05.md).
+
+
+Evidence clarification questions now come from the selected local AI using an Engineering Manager for experiences and a Principal/Staff Engineer for projects. Labels are generated for each missing context rather than chosen from fixed categories. Supplied role/dates and existing answers are part of the context. If question planning fails, use **Read evidence again** in Experience & Projects or the failed intake to retry saved evidence without reimporting folders. Existing databases receive a forward category upgrade that preserves interview history.
+
+AI/source orchestration lives in `src/application`; domain contracts remain in `src/domain`, model instructions/feature gateways in `src/adapters/local-model`, and feature Server Actions in `src/app/actions`. `npm start` uses standalone output after `npm run build`, binds loopback, and keeps evidence in the original workspace. Packaged Electron uses a writable user-data workspace; `CAREER_WORKBENCH_WORKSPACE_ROOT` can explicitly select an existing evidence location.

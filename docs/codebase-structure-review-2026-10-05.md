@@ -1,0 +1,54 @@
+# Codebase structure review — 2026-10-05
+
+Repository-wide architecture review of the current working tree before finishing the Job Opportunity Reader. Scope: 163 application TypeScript/TSX files and dependency graph, plus Electron, local scripts, configuration, tests and planning artifacts (227 code files in the import scan). Reviewed route/component entry points, agent orchestration, persistence boundaries and migration changes. This is an architecture and inconsistency audit, not a claim that every possible behavior or vulnerability has been exhaustively tested. The working tree includes prior work and a staged Resume.pdf deletion; neither is ownership of this change.
+
+| Finding | Evidence and consequence | Disposition |
+| --- | --- | --- |
+| High: pattern-based role/employer validation rejects correct AI answers | opportunity-draft-contract.ts narrows prose/title/company shapes; Regal's position summary and About-company section were rejected. Contract and AI duplicate interpretation. | Fix requested: reader interprets relationships; host validates schema, source citations and bounds without title/company grammar lists. |
+| High: creation still exposes manual completion despite user wanting automatic Add | opportunity-create-form.tsx renders a details fieldset after AI failure or missing required fields, with Enter details manually. | Fix requested: only URL + description + Add; unknown facts remain unknown, no follow-up form. AI/transport failure preserves paste for retry. |
+| Medium: shared persona text in domain | resume-agent/resume-agent-contracts.ts holds prompt text imported by seven local agents, unlike other instructions under adapters/local-model. | Move and rename shared instructions; keep pure stage data/capability boundaries in domain. |
+| Medium: retired Jobs components duplicate obsolete user flows | opportunity-capture.tsx, opportunity-subnav.tsx and opportunity-assessment.tsx have no production importers; contain capture-review/manual, horizontal tabs and removed fit UI. | Remove these retired UI components; do not erase persistence/history or other features that still use fit services. |
+| Medium: active reader naming still says draft | generate-opportunity-draft.ts and requestOpportunityDraft remain despite one-step Add. | Rename active preparation to read-job-opportunity and named reader request; keep compatibility only where historical/test API actually needs it. |
+| Medium: domain imports concrete adapters | 11 import statements across opportunity, evidence, fit, discovery and resume services reference local-model, OS vault or source adapters directly. This is pragmatic service orchestration rather than strict dependency inversion; tests inject some functions but provider coupling remains. | Recommend application service/ports layer in a separate refactor; avoid moving dozens of persistence-owning workflows in this feature. |
+| High: fixed clarification categories despite unused AI prompt | resume-evidence-interpretation.ts planClarifications builds purpose/ownership/users_workflow/etc. from regexes; interpretWorkspaceEvidence persists them. Attached dynamic planning prompt has no model consumer, contrary to AGENTS.md. | Follow-up alongside the forward migration: wire bounded persona-based AI planning, validate flexible category strings and exercise old/new databases. Not changed by this reader slice. |
+| Medium: monolithic adapter/actions | local-model-gateway.ts ~5,540 lines, app/actions.ts ~2,311. Gateway contains transport, semantic transformations and multiple feature protocols; actions.ts mixes feature families. | Reader instructions extracted now. Recommend separate bounded transport and per-feature adapters/actions after behavior coverage. File size itself is not a user bug. |
+| High: legacy database categories remain restricted | modified 0031 and 0037 remove fixed category CHECK from old migration files; already-applied workspaces never replay them. Existing database may reject new dynamic categories. | Record forward-migration work separately: preserve task/evidence/response/conflict/turn FKs and rows during table rebuild, test old and fresh databases. Do not rewrite user data as part of reader changes. |
+| Medium: documentation describes obsolete manual creation | README and approved implementation artifacts describe manual completion that is now rejected; prior spec refers to missing docs/application-native-resume-agent.md. | Synchronize active README, create agent architecture documentation, append superseding approved decisions; preserve historical artifact evidence. |
+| Low: naming does not reflect current MVP | components/pro owns Applied despite local tracking not being implemented; domain/fit and legacy capture services remain though their UI is removed. | Retain backing services for existing callers/history; recommend feature-folder naming and dead-service audit separately. No speculative UI added. |
+| Low: standalone/local start mismatch | next.config.ts requests standalone output; run-local.mjs start invokes next start and prints a warning. Electron already uses standalone server. | Recommend consistent local production entry point, test runtime assets/paths before switching. |
+
+Import scan found no broken production literal imports. Reported fixture paths are false positives: the embedded esbuild entry uses resolveDir=process.cwd(), and the embedded configuration script is executed with cwd=process.cwd(). Unreferenced permitted-sources/job-preferences/tier-badge components are not automatically safe to delete without feature-scope review. Dynamic imports and test-only compatibility require manual interpretation; zero importers does not justify wholesale service removal.
+
+Implementation evidence and final reviewer triage will be appended after verification. Broader recommendations are not approved wholesale architecture rewrites.
+
+Independent review by the existing GPT-6 Luna high reviewer confirmed the reader's hard-coded semantics, manual form, domain-owned prompts, fixed clarification categories/unused prompt, and migration-upgrade gap. The reviewed reader fixture failed before corrections; this is evidence of a runtime issue, not just file preference.
+
+## Implemented results
+
+The requested reader/creation-flow fixes are implemented and verified: dedicated full-card reader; schema/evidence-only host validation; no hardcoded identity interpretation; no manual follow-up form; bounded retry/Unknown representation; shared resume prompts moved to adapters; retired Jobs UI and capture-review actions removed. Preparation/source modules renamed to reflect their purpose. Final high reviewer identified empty {} responses being saved; now rejected before any record/database creation. Reviewer confirms no remaining issue in these fixes.
+
+340/340 automated tests, typecheck, scoped lint and production build passed. Hydrated mock and actual isolated Next/SQLite/LM Studio flows passed at1280/320, including failure retention, automatic Add, original bytes, edit and physical deletion. Actual Gemma correctly read Regal and a different Registered Nurse posting with vendor/agency noise. No universal quality guarantee or whole-repository behavior certification is implied.
+
+The fixed-category clarification planner, forward category migration, ports/dependency inversion, gateway/actions decomposition and standalone start warning remain documented follow-up work. They were reviewed, not silently declared fixed.
+
+
+## Authorized follow-ups — implemented 2026-10-05
+
+The user subsequently authorized all remaining audit work. The earlier recommendations/deferred dispositions above describe the initial review, not the final status. The approved bundle is recorded in `spec-codebase-audit-followups.md`.
+
+| Original follow-up | Final disposition |
+| --- | --- |
+| Fixed categories / unused planning prompt | Real selected-model persona planning, bounded schema, no static fallback; known form metadata preserved as context, completed/in-progress history protected, stale results rejected, plan-only retry available. |
+| Installed database category enums | Forward0049 atomic upgrade; installed/fresh/rollback tests cover rows, dependent answers/evidence/conflicts/turns/reservations, custom indexes/triggers and restored FK enforcement. |
+| Domain-to-adapter imports | Twelve adapter-consuming service modules relocated to `src/application`; pure material types retained in domain; automated domain import-boundary check. This resolves concrete coupling without declaring all persistence-owning domain code pure. |
+| Large gateway/actions | Transport, JSON, contracts, consent, composition, response validation and feature gateways extracted; Server Actions separated by feature, compatible callers retained. Automated gateway cycle check. |
+| Feature folder naming and retired UI | Applied, Career Assistant and Google Sheets components moved from `pro` into feature folders; obsolete capture/confirmation CSS removed. |
+| Dead-service audit | Fit/capture backing code has live persistence/domain/action callers and history tests; removal would break those APIs. Unmounted settings/visual components remain reusable/tested assets, without being mounted as speculative MVP features. No blanket deletion is justified by zero route imports. |
+| Standalone start | npm start invokes generated standalone with loopback HOSTNAME; writable evidence root pinned separately. Desktop production also supplies a writable user-data workspace and preserves explicit root overrides. |
+
+Review found and corrected three additional issues: same-category re-plans could overwrite in-progress questions, failures lacked a plan-only retry, and desktop standalone lacked a writable evidence root. Prompt now explicitly treats supplied role/dates as established user context. Live tests use isolated databases/public fixtures, not user data. Existing evidence directories are not moved/deleted; packaged users with a custom previous evidence location can select it with the workspace-root override.
+
+Verification details are recorded below after final checks. No requested audit item is being silently left deferred; retained legacy APIs and reusable unmounted components are deliberate compatibility decisions.
+
+
+Final verification: **351/351 tests**, typecheck, scoped lint and production build passed. High-model reviewer confirms no remaining actionable findings in the authorized follow-ups. Actual desktop/narrow production forms passed for local-AI retry and opportunity add/edit/delete. Production page and all nine linked CSS/JS assets return200; the repository has no public directory. Desktop child-process regression verifies writable evidence outside the standalone runtime and normalized relative overrides. Temporary server stopped; no user database, staging, commit or push changed.
