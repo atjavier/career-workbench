@@ -138,7 +138,7 @@ export function findCapturedOpportunityByDuplicateKey(
 ): StoredCapturedOpportunity | undefined {
   const row = db
     .prepare(
-      "SELECT id, duplicate_key AS duplicateKey, created_at AS createdAt FROM captured_opportunities WHERE duplicate_key = ? ORDER BY created_at LIMIT 1",
+      "SELECT id, duplicate_key AS duplicateKey, created_at AS createdAt FROM captured_opportunities WHERE id IN (SELECT r.opportunity_id FROM captured_opportunity_revisions r WHERE lower(r.title) || '|' || lower(r.company) = ? AND r.id = (SELECT latest.id FROM captured_opportunity_revisions latest WHERE latest.opportunity_id = r.opportunity_id ORDER BY latest.created_at DESC, latest.id DESC LIMIT 1)) ORDER BY created_at, id LIMIT 1",
     )
     .get(duplicateKey) as StoredCapturedOpportunity | undefined;
   return row ? opportunity(row) : undefined;
@@ -170,7 +170,7 @@ export function listCapturedRevisions(
   return (
     db
       .prepare(
-        "SELECT id, opportunity_id AS opportunityId, captured_at AS capturedAt, original_url AS originalUrl, copied_description AS copiedDescription, title, company, location, work_style AS workStyle, requirements, posted_at AS postedAt, content_digest AS contentDigest, created_at AS createdAt FROM captured_opportunity_revisions WHERE opportunity_id = ? ORDER BY created_at",
+        "SELECT id, opportunity_id AS opportunityId, captured_at AS capturedAt, original_url AS originalUrl, copied_description AS copiedDescription, title, company, location, work_style AS workStyle, requirements, posted_at AS postedAt, content_digest AS contentDigest, created_at AS createdAt FROM captured_opportunity_revisions WHERE opportunity_id = ? ORDER BY created_at, id",
       )
       .all(opportunityId) as StoredCapturedRevision[]
   ).map(revision);

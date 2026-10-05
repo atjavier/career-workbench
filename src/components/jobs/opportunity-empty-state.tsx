@@ -1,30 +1,12 @@
 "use client";
 
-import type { MouseEvent } from "react";
+import Link from "next/link";
 import { EmptyStateCard } from "@/components/common/empty-state-card";
 
-interface OpportunityEmptyLibraryProps {
-  onOpenCapture: (event: MouseEvent<HTMLButtonElement>) => void;
-}
-
-export function OpportunityEmptyLibrary({ onOpenCapture }: OpportunityEmptyLibraryProps) {
-  return (
-    <EmptyStateCard
-      headingLevel="h4"
-      className="jobs-library-empty"
-      title="No captured opportunities saved yet"
-      description="Captured opportunities appear here after you review and confirm copied role details. You stay in control of the URL and text you provide."
-      action={
-        <button
-          className="affirmative-action add-opportunity-action"
-          type="button"
-          onClick={onOpenCapture}
-        >
-          <span>Add opportunity</span>
-        </button>
-      }
-    />
-  );
+export function OpportunityEmptyLibrary() {
+  return <EmptyStateCard headingLevel="h4" className="jobs-library-empty" title="No opportunities yet"
+    description="Add a job you’re interested in to get started."
+    action={<Link href="/opportunities/new" className="btn affirmative-action btn-primary btn-md add-opportunity-action">Add opportunity</Link>} />;
 }
 
 interface OpportunityEmptySearchProps {
@@ -34,7 +16,7 @@ interface OpportunityEmptySearchProps {
 export function OpportunityEmptySearch({ onClearSearch }: OpportunityEmptySearchProps) {
   return (
     <EmptyStateCard
-      description="No captured opportunities match your search. Clear search and try again."
+      description="No opportunities match your search. Clear search and try again."
       action={
         <button
           type="button"

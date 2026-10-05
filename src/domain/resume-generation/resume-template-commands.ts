@@ -101,6 +101,10 @@ async function stillCurrent(
   }
 }
 
+/**
+ * @deprecated Epic 13 Empty State Baseline Refactor: Eager template bootstrapping is removed.
+ * Profiles start with an empty template state.
+ */
 export async function bootstrapBundledResumeTemplate(
   input: Options = {},
 ): Promise<ResumeTemplateSource> {

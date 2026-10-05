@@ -1,3 +1,4 @@
+import { WorkspaceContainer } from "@/components/common/layout-containers";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { BaseResumeImporter } from "@/components/resume/base-resume-importer";
@@ -7,7 +8,7 @@ import { bootstrapBundledBaseResume } from "@/domain/base-resume/import-base-res
 import { readInitialResumeTemplateContract } from "@/domain/base-resume/resume-template-contract";
 import { readCandidateProfileState } from "@/domain/resume-generation/candidate-profile-commands";
 import { readLocalModelReadiness } from "@/domain/resume-generation/local-model-configuration-commands";
-import { readMaterialDraft } from "@/domain/resume-generation/material-draft-commands";
+import { readMaterialDraft } from "@/application/resume-generation/material-draft-commands";
 import { readResumeWorkspaceState } from "@/domain/resume-generation/resume-workspace-commands";
 import { resolveAppDataPaths } from "@/files/app-data";
 import { applyMigrations, openDatabase } from "@/persistence/database";
@@ -19,7 +20,7 @@ import {
 import { listWorkspaceDocumentedEvidenceIds } from "@/persistence/resume-workspace-repository";
 import { findLatestTexDraftForWorkspace } from "@/persistence/tex-draft-repository";
 import { readLatestResumeGenerationJob } from "@/domain/resume-generation/resume-generation-jobs";
-import { readLatestResumeEvidenceIntake } from "@/domain/resume-generation/resume-evidence-intake";
+import { readLatestResumeEvidenceIntake } from "@/application/resume-generation/resume-evidence-intake";
 
 const safeError = (error: unknown) =>
   error instanceof Error && "summary" in error
@@ -157,7 +158,7 @@ export async function ResumeWorkspace() {
 
   if (!workspaceState.activeWorkspace) {
     return (
-      <div className="workspace-shell resume-workspace resume-onboarding-workspace">
+      <WorkspaceContainer className="resume-workspace resume-onboarding-workspace">
         <header className="resume-page-head">
           <div className="resume-head-copy">
             <p className="eyebrow">Resume</p>
@@ -169,13 +170,13 @@ export async function ResumeWorkspace() {
           </div>
         </header>
         <ResumeOnboarding localAiReady={localModel.ready} />
-      </div>
+      </WorkspaceContainer>
     );
   }
 
   if (isOnboarding) {
     return (
-      <div className="workspace-shell resume-workspace resume-onboarding-workspace">
+      <WorkspaceContainer className="resume-workspace resume-onboarding-workspace">
         <header className="resume-page-head">
           <div className="resume-head-copy">
             <p className="eyebrow">Resume</p>
@@ -187,11 +188,11 @@ export async function ResumeWorkspace() {
           </div>
         </header>
         <ResumeOnboarding localAiReady={localModel.ready} />
-      </div>
+      </WorkspaceContainer>
     );
   }
   return (
-    <div className="workspace-shell resume-workspace">
+    <WorkspaceContainer className="resume-workspace" mode="studio">
       <div className="sr-only" aria-hidden="true">
         <div className="resume-head-copy">
           <p className="eyebrow">Resume</p>
@@ -247,6 +248,6 @@ export async function ResumeWorkspace() {
           latestTexRevisionId={latestTexRevisionId}
         />
       </section>
-    </div>
+    </WorkspaceContainer>
   );
 }

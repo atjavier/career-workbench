@@ -1,7 +1,4 @@
-import {
-  bootstrapBundledResumeTemplate,
-  readDesignatedResumeTemplatePdf,
-} from "@/domain/resume-generation/resume-template-commands";
+import { readDesignatedResumeTemplatePdf } from "@/domain/resume-generation/resume-template-commands";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,14 +17,6 @@ function responseBody(bytes: Uint8Array): ArrayBuffer {
 }
 
 export async function GET(): Promise<Response> {
-  try {
-    await bootstrapBundledResumeTemplate();
-  } catch {
-    return new Response("The Resume.pdf template is unavailable.", {
-      status: 404,
-      headers: unavailableHeaders,
-    });
-  }
   const pdf = await readDesignatedResumeTemplatePdf();
   if (!pdf)
     return new Response("The Resume.pdf template is unavailable.", {

@@ -7,7 +7,6 @@ const readJobsUI = async () => {
     readFile(new URL("../src/components/jobs/job-listings.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/components/jobs/opportunity-card.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/components/jobs/opportunity-search.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../src/components/jobs/opportunity-subnav.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/components/jobs/opportunity-empty-state.tsx", import.meta.url), "utf8"),
   ]);
   return files.join("\n");
@@ -23,10 +22,10 @@ test("Jobs renders the captured Opportunity Library rather than legacy discovery
     "CapturedOpportunityLibraryItem",
     "capturedAt",
     "originalUrl",
-    "Open original page",
+    "Original posting",
     "All opportunities",
     "Add opportunity",
-    "No captured opportunities saved yet",
+    "No opportunities yet",
   ])
     assert.match(
       `${ui} ${page} ${settings}`.replace(/\s+/g, " "),
@@ -49,12 +48,11 @@ test("Jobs renders the captured Opportunity Library rather than legacy discovery
 test("Captured opportunity cards preserve local attribution and an explicit outbound handoff", async () => {
   const ui = await readJobsUI();
   for (const token of [
-    "Open original page",
+    "Original posting",
     'target="_blank"',
     'rel="noreferrer"',
-    "Submission happens outside this workspace",
-    "Captured ",
-    "No fit guidance yet",
+    "Saved ",
+    "View opportunity",
   ])
     assert.match(
       ui.replace(/\s+/g, " "),
@@ -66,7 +64,7 @@ test("Captured opportunity cards preserve local attribution and an explicit outb
   );
 });
 
-test("Jobs keeps the capture dialog, local search, accessible states, and narrow reflow contracts", async () => {
+test("Jobs keeps the add-page link, local search, accessible states, and narrow reflow contracts", async () => {
   const [ui, styles] = await Promise.all([
     readJobsUI(),
     readFile(new URL("../src/app/globals.css", import.meta.url), "utf8"),
@@ -76,12 +74,7 @@ test("Jobs keeps the capture dialog, local search, accessible states, and narrow
     "Clear search",
     'role="status"',
     'aria-live="polite"',
-    "captureTrigger",
-    "headerCaptureTrigger",
-    "trigger?.isConnected",
-    "<OpportunityCapture open={captureOpen} onClose={closeCapture}",
-    "onReturnToAllOpportunities",
-    'setJobsView("all"); setQuery(""); closeCapture()',
+    'href="/opportunities/new"',
     "Applied opportunities are not available yet",
   ])
     assert.ok(ui.replace(/\s+/g, " ").includes(token.replace(/\s+/g, " ")));
@@ -99,32 +92,9 @@ test("Jobs keeps the capture dialog, local search, accessible states, and narrow
   );
 });
 
-test("Fit explanation requires consent and preserves local-AI provenance and handoff safety", async () => {
-  const [ui, assessment] = await Promise.all([
-    readJobsUI(),
-    readFile(
-      new URL("../src/components/jobs/opportunity-assessment.tsx", import.meta.url),
-      "utf8",
-    ),
-  ]);
-  for (const token of [
-    "OpportunityAssessment",
-    "Fit explanation",
-    "Assess fit",
-    "local AI decision support",
-    "not a hiring prediction",
-    "Approved evidence revision",
-    "Captured posting excerpt",
-    "Safety context",
-    "Save personal decision",
-    "expectedDecisionId",
-    'role="status"',
-  ])
-    assert.ok(`${ui}\n${assessment}`.includes(token));
-  assert.doesNotMatch(
-    `${ui}\n${assessment}`,
-    /fetch\s*\(|iframe|automation|refresh|source configuration|credential/i,
-  );
+test("Jobs active UI excludes retired capture, horizontal tabs and opportunity fit", async () => {
+  const ui = await readJobsUI();
+  assert.doesNotMatch(ui, /OpportunityAssessment|OpportunityCapture|OpportunitySubnav|Assess fit|Fit explanation/);
 });
 
 test("Stitch Job Board provides company logo badge, search clear ref, and safe outbound host parsing", async () => {

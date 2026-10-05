@@ -45,6 +45,8 @@ export function SidebarCollapseToggle() {
       className="sidebar-collapse-button"
       aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
       title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+      aria-expanded={!collapsed}
+      aria-controls="workspace-section-navigation"
       onClick={toggle}
     >
       <svg
@@ -58,8 +60,7 @@ export function SidebarCollapseToggle() {
         strokeLinejoin="round"
         aria-hidden="true"
       >
-        <rect width="18" height="18" x="3" y="3" rx="2" />
-        <path d="M9 3v18" />
+        <path d={collapsed ? "m9 6 6 6-6 6" : "m15 6-6 6 6 6"} />
       </svg>
     </button>
   );

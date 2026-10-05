@@ -1,8 +1,10 @@
 "use client";
 
+import { ContentCard, WorkspaceContainer } from "@/components/common/layout-containers";
+
 import Link from "next/link";
 import { useState, useMemo, type ReactNode } from "react";
-import type { ExperienceProjectCollection } from "@/domain/evidence/evidence-library";
+import type { ExperienceProjectCollection } from "@/application/evidence/evidence-library";
 import { SegmentedTabs } from "@/components/common/segmented-tabs";
 
 type ParsedBullet = {
@@ -608,7 +610,7 @@ export function EvidenceDetailsWorkspace({
 
   if (!item) {
     return (
-      <div className="workspace-shell evidence-details-workspace">
+      <WorkspaceContainer className="evidence-details-workspace">
         <nav className="evidence-details-nav" aria-label="Breadcrumb">
           <Link href="/evidence" className="evidence-back-link">
             <svg
@@ -628,7 +630,7 @@ export function EvidenceDetailsWorkspace({
             <span>Back to Experience &amp; Projects</span>
           </Link>
         </nav>
-        <div className="details-not-found-card">
+        <ContentCard as="div" className="details-not-found-card">
           <h2>Documented item not found</h2>
           <p>
             We could not find evidence records for{" "}
@@ -638,8 +640,8 @@ export function EvidenceDetailsWorkspace({
           <Link href="/evidence" className="neutral-action">
             Return to Experience &amp; Projects
           </Link>
-        </div>
-      </div>
+        </ContentCard>
+      </WorkspaceContainer>
     );
   }
 
@@ -649,7 +651,7 @@ export function EvidenceDetailsWorkspace({
   const storyDescription = useMemo(() => extractNarrativeSummary(item), [item]);
 
   return (
-    <div className="workspace-shell evidence-details-workspace">
+    <WorkspaceContainer className="evidence-details-workspace">
       {/* Top Breadcrumb Navigation */}
       <nav className="evidence-details-nav" aria-label="Evidence navigation">
         <Link href="/evidence" className="evidence-back-link">
@@ -844,7 +846,7 @@ export function EvidenceDetailsWorkspace({
           ) : null}
         </section>
       </main>
-    </div>
+    </WorkspaceContainer>
   );
 }
 

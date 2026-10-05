@@ -1,62 +1,20 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { ApplicationsWorkspace } from "../src/components/applications/applications-workspace";
 
-test("Applications has a dedicated shared-shell route rather than the generic placeholder", async () => {
-  const [page, placeholder] = await Promise.all([
-    readFile(
-      new URL("../src/app/applications/page.tsx", import.meta.url),
-      "utf8",
-    ),
-    readFile(new URL("../src/app/[section]/page.tsx", import.meta.url), "utf8"),
-  ]);
-  assert.match(page, /ApplicationShell active="Applications"/);
-  assert.match(page, /ApplicationsWorkspace/);
-  assert.doesNotMatch(placeholder, /applications:/);
-  assert.match(placeholder, /destination\.href === "\/settings"/);
+test("Applied uses the shared page header with an honest empty state and useful navigation", () => {
+  const html = renderToStaticMarkup(createElement(ApplicationsWorkspace));
+  assert.match(html, /<h1>Applied<\/h1>/);
+  assert.match(html, /page-header/);
+  assert.match(html, /No applied jobs to show/);
+  assert.match(html, /Application tracking isn’t available yet/);
+  assert.match(html, /href="\/">Browse opportunities/);
+  assert.doesNotMatch(html, /eyebrow|Google Sheets|tracking workspace|What you will see/);
 });
-
-test("Applications gives an honest, accessible empty tracking state and useful handoffs", async () => {
-  const workspace = await readFile(
-    new URL("../src/components/pro/applications.tsx", import.meta.url),
-    "utf8",
-  );
-  for (const text of [
-    "Applications",
-    "No applications to track yet",
-    "Browse Jobs",
-    "Google Sheets",
-    "not connected",
-    "optional",
-  ]) {
-    assert.match(workspace, new RegExp(text));
-  }
-  assert.match(workspace, /<h1>/);
-  assert.match(workspace, /<section\s+aria-labelledby="applications-status"/);
-  assert.match(workspace, /<section\s+aria-labelledby="applications-list"/);
-  assert.match(workspace, /<Link href="\/">Browse Jobs<\/Link>/);
-  assert.doesNotMatch(workspace, /href="\/google-sheets"/);
-  assert.match(
-    workspace,
-    /Ordered\s+rounds,\s+dates,\s+statuses,\s+outcomes,\s+notes,\s+and\s+next\s+actions\./,
-  );
-  assert.match(workspace, /captured opportunities/i);
-});
-
-test("Applications preserves local-first scope and does not manufacture tracking or sync behavior", async () => {
-  const [workspace, styles] = await Promise.all([
-    readFile(new URL("../src/components/pro/applications.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../src/app/globals.css", import.meta.url), "utf8"),
-  ]);
-  assert.doesNotMatch(
-    workspace,
-    /fetch\s*\(|setInterval|setTimeout|useActionState|Server Action|oauth|authorization|sync now|application submitted/i,
-  );
-  assert.match(
-    workspace,
-    /Local\s+tracking\s+will\s+remain\s+available\s+without\s+a\s+Google\s+Sheets\s+connection\./,
-  );
-  assert.match(styles, /\.applications-workspace/);
-  assert.match(styles, /\.applications-empty-state/);
-  assert.match(styles, /overflow-wrap: anywhere/);
+test("Applied remains a Jobs subsection", async () => {
+  const page = await readFile(new URL("../src/app/applications/page.tsx", import.meta.url), "utf8");
+  assert.match(page, /ApplicationShell active="Jobs" activeSubItem="Applied"/);
 });

@@ -1,0 +1,106 @@
+About the role
+Work Model: You’ll work in a hybrid model, onsite at your designated Regal Rexnord location, with flexibility to work remotely.
+____________________
+Position Summary
+The Junior Automation Developer supports the design, development, testing, deployment, and maintenance of intelligent automation solutions that drive operational efficiency and business transformation across the enterprise. This role will work closely with business stakeholders, process owners, and technical teams to automate business processes using Robotic Process Automation (RPA), workflow automation, Generative AI, AI Agents, and enterprise digital technologies.
+Essential Duties And Responsibilities
+Support Regal Rexnord's digital transformation journey by developing intelligent automation and AI solutions that streamline business processes, enhance productivity, reduce manual effort, and enable smarter decision-making across the enterprise.
+Intelligent Automation Development
+Develop, deploy, and maintain automation solutions using RPA and workflow automation platforms.
+Assist in building digital workers, bots, and automated workflows that eliminate repetitive manual activities.
+Support process automation initiatives across business functions including Finance, Supply Chain, Customer Service, Manufacturing, Marketing, and Shared Services.
+Perform testing, debugging, monitoring, and optimization of automation solutions.
+Generative AI & AI Solutions
+Support the development of AI-powered business solutions using Microsoft Copilot, Copilot Studio, Azure OpenAI, and other enterprise AI technologies.
+Build and maintain AI assistants, chatbots, knowledge management solutions, and AI agents.
+Create, test, and optimize prompts to improve AI-generated outputs and business outcomes.
+Assist in evaluating new AI technologies and recommending innovative use cases.
+Business Process Transformation
+Participate in process discovery workshops and identify opportunities for automation and AI enablement.
+Analyze existing business processes and document improvement recommendations.
+Collaborate with business users to gather requirements and define solution designs.
+Support change management, user adoption, and training activities for implemented solutions.
+Software Development & Integration
+Develop scripts, APIs, connectors, and application enhancements to support automation initiatives.
+Assist with integration between enterprise systems and automation platforms.
+Support deployment activities and ensure solutions comply with development standards and best practices.
+Operations & Support
+Monitor automation and AI solution performance and proactively identify improvement opportunities.
+Troubleshoot incidents, production issues, and automation failures.
+Maintain technical documentation, knowledge articles, and solution repositories.
+Ensure compliance with IT security, governance, and data privacy requirements.
+Tools & Technologies
+The Junior Automation Developer may work with the following technologies:
+Intelligent Automation & RPA
+UiPath
+Microsoft Power Automate
+Power Apps
+Power Automate Desktop
+Automation Anywhere (preferred)
+API-based automation solutions
+Artificial Intelligence & Generative AI
+Microsoft Copilot
+Microsoft 365 Copilot
+Copilot Studio
+Azure OpenAI
+Azure AI Services
+AI Agents
+Prompt Engineering
+Large Language Models (LLMs)
+Intelligent Document Processing (IDP)
+Development & Integration
+Python
+C#
+JavaScript
+.NET
+SQL
+REST APIs
+JSON
+Git
+Data & Analytics
+Power BI
+Microsoft Dataverse
+SharePoint
+Microsoft Fabric (preferred)
+Cloud Platforms
+Microsoft Azure
+Azure Logic Apps
+Azure Functions
+Critical Competencies
+Strong analytical and problem-solving skills with a focus on automation and AI-driven solutions.
+Technical aptitude and eagerness to learn emerging technologies such as UiPath, Power Platform, Copilot, and Generative AI.
+Effective collaboration and communication skills in a global, cross-functional environment.
+Ability to manage multiple priorities, meet deadlines, and deliver high-quality results.
+Adaptability and continuous learning mindset in a rapidly evolving technology landscape.
+Results-oriented with strong attention to detail and a commitment to process improvement.
+Professional Experience/Qualifications
+Required Qualifications
+Bachelor's Degree in:
+Information Technology
+Computer Science
+Computer Engineering
+Information Systems
+Data Science
+Software Engineering
+Or related discipline
+Fresh graduates are encouraged to apply.
+Up to two (2) years of internship, project-based, freelance, contractor, or professional experience.
+Strong analytical and problem-solving skills.
+Basic knowledge of programming concepts and software development lifecycle (SDLC).
+Demonstrated interest in automation, artificial intelligence, and emerging technologies.
+Strong communication and collaboration skills.
+Self-motivated with a continuous learning mindset.
+Preferred Qualifications
+Exposure to UiPath, Power Automate, Power Apps, or similar automation tools.
+Exposure to Microsoft Copilot, Azure AI, or Generative AI technologies.
+Experience with academic projects involving AI, automation, analytics, or software development.
+Basic understanding of databases and SQL.
+Familiarity with Agile or Scrum methodologies.
+Microsoft certifications or automation-related certifications are a plus.
+Travel: None
+Language: English
+About Regal Rexnord
+Regal Rexnord is a publicly held global industrial manufacturer with 30,000 associates around the world who help create a better tomorrow by providing sustainable solutions that power, transmit and control motion. The Company’s electric motors and air moving subsystems provide the power to create motion. A portfolio of highly engineered power transmission components and subsystems efficiently transmits motion to power industrial applications. The Company’s automation offering, comprised of controls, actuators, drives, and precision motors, controls motion in applications ranging from factory automation to precision control in surgical tools.
+The Company’s end markets benefit from meaningful secular demand tailwinds, and include factory automation, food & beverage, aerospace, medical, data center, warehouse, alternative energy, residential and commercial buildings, general industrial, construction, metals and mining, and agriculture.
+Regal Rexnord is comprised of three operating segments: Industrial Powertrain Solutions, Power Efficiency Solutions, and Automation & Motion Control. Regal Rexnord has offices and manufacturing, sales and service facilities worldwide. For more information, including a copy of our Sustainability Report, visit RegalRexnord.com.
+Notification to Agencies: Please note that Regal Rexnord Corporation and its affiliates and subsidiaries ("Regal Rexnord") do not accept unsolicited resumes or calls from third-party recruiters or employment agencies. In the absence of a signed Master Service Agreement or similar contract and approval from HR to submit resumes for a specific requisition, Regal Rexnord will not consider or approve payment to any third-parties for hires made.

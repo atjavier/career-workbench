@@ -1,5 +1,8 @@
 "use client";
 
+import { ContentCard } from "@/components/common/layout-containers";
+import { Button } from "@/components/common/button";
+
 import { useActionState, useEffect, useRef, useState } from "react";
 
 import {
@@ -12,6 +15,8 @@ type Props = {
   profileId?: string;
   expectedStateRevisionNumber: number;
   values?: CandidateProfileValues;
+  onDelete?: () => void;
+  deletePending?: boolean;
 };
 type FormValues = Record<keyof CandidateProfileValues, string>;
 
@@ -99,6 +104,8 @@ export function ResumeProfileForm({
   profileId,
   expectedStateRevisionNumber,
   values,
+  onDelete,
+  deletePending = false,
 }: Props) {
   const [formValues, setFormValues] = useState<FormValues>(() =>
     valuesFromProfile(values),
@@ -125,14 +132,14 @@ export function ResumeProfileForm({
   }, [state.status]);
 
   return (
-    <section
+    <ContentCard as="section"
       className="resume-profile-card"
       aria-labelledby="profile-details-heading"
     >
       <div className="resume-pane-head">
         <div>
-          <p className="eyebrow">Profile</p>
-          <h2 id="profile-details-heading">Profile details</h2>
+          <p className="eyebrow">Your Details</p>
+          <h2 id="profile-details-heading">Personal, contact &amp; education</h2>
           <p>Save the details that belong on your resume.</p>
         </div>
       </div>
@@ -212,18 +219,26 @@ export function ResumeProfileForm({
           ))}
         </div>
         <div className="resume-profile-save">
-          <button
-            className="affirmative-action"
-            type="submit"
-            disabled={pending}
-          >
-            {pending ? "Saving details…" : "Save details"}
-          </button>
+          <div className="resume-profile-actions">
+            <Button type="submit" disabled={pending || deletePending}>
+              {pending ? "Saving details…" : "Save details"}
+            </Button>
+            {onDelete ? (
+              <Button
+                type="button"
+                variant="danger"
+                onClick={onDelete}
+                disabled={pending || deletePending}
+              >
+                {deletePending ? "Deleting…" : "Delete resume"}
+              </Button>
+            ) : null}
+          </div>
           <p role="status" aria-live="polite">
             {pending ? "Saving details locally…" : state.summary}
           </p>
         </div>
       </form>
-    </section>
+    </ContentCard>
   );
 }

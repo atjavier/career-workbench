@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import type { MaterialDraftView } from "@/domain/resume-generation/material-draft-commands";
+import type { MaterialDraftView } from "@/domain/resume-generation/material-draft-types";
 import {
   cleanDateString,
   cleanOrganization,
@@ -42,10 +42,10 @@ function fallbackTemplate(): string {
 {{HEADER}}
 \end{center}
 \vspace{-2pt}
-{{EXPERIENCE_SECTION}}
-{{EDUCATION_SECTION}}
-{{PROJECTS_SECTION}}
 {{SKILLS_SECTION}}
+{{EXPERIENCE_SECTION}}
+{{PROJECTS_SECTION}}
+{{EDUCATION_SECTION}}
 \end{document}`;
 }
 
@@ -260,6 +260,7 @@ function renderedDraftSections(
 ): string {
   return draft.sections
     .filter((item) => item.text.trim())
+    .toSorted((a, b) => sectionRank(a.heading) - sectionRank(b.heading))
     .map(({ heading, text }) => {
       if (/contact/i.test(heading)) return "";
       if (/(?:experience|employment|\bwork\b)/i.test(heading)) {
@@ -294,6 +295,14 @@ function renderedDraftSections(
     })
     .filter(Boolean)
     .join("\n");
+}
+
+function sectionRank(heading: string): number {
+  if (/(?:technical skills|skills|technologies)/i.test(heading)) return 0;
+  if (/(?:experience|employment|\bwork\b)/i.test(heading)) return 1;
+  if (/project/i.test(heading)) return 2;
+  if (/education/i.test(heading)) return 3;
+  return 4;
 }
 
 /**

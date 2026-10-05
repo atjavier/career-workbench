@@ -11,12 +11,9 @@ const componentSubdirs: Record<string, string> = {
   "sidebar-collapse-toggle.tsx": "common",
   "tier-badge.tsx": "common",
   "job-listings.tsx": "jobs",
-  "opportunity-assessment.tsx": "jobs",
-  "opportunity-capture.tsx": "jobs",
   "opportunity-card.tsx": "jobs",
   "opportunity-empty-state.tsx": "jobs",
   "opportunity-search.tsx": "jobs",
-  "opportunity-subnav.tsx": "jobs",
   "base-resume-importer.tsx": "resume",
   "resume-onboarding.tsx": "resume",
   "resume-pdf-preview.tsx": "resume",
@@ -32,10 +29,10 @@ const componentSubdirs: Record<string, string> = {
   "job-preferences.tsx": "settings",
   "local-model-settings.tsx": "settings",
   "permitted-sources.tsx": "settings",
-  "applications.tsx": "pro",
-  "career-assistant-workspace.tsx": "pro",
-  "career-assistant.tsx": "pro",
-  "google-sheets-workspace.tsx": "pro",
+  "applications-workspace.tsx": "applications",
+  "career-assistant-workspace.tsx": "career-assistant",
+  "career-assistant.tsx": "career-assistant",
+  "google-sheets-workspace.tsx": "integrations",
 };
 
 const source = (file: string) => {
@@ -50,7 +47,8 @@ test("compact navigation preserves Jobs-first routes and keyboard-close focus be
     source("compact-navigation.tsx"),
     source("globals.css"),
   ]);
-  assert.match(shell, /CompactNavigation/);
+  const sidebar = await readFile(new URL("../src/components/common/workspace-sidebar.tsx", import.meta.url), "utf8");
+  assert.match(sidebar, /CompactNavigation/);
   assert.match(shell, /applicationDestinations/);
   assert.match(compact, /Current destination: \$\{active\}/);
   assert.match(compact, /open \? "Close" : "Open"/);
@@ -58,7 +56,7 @@ test("compact navigation preserves Jobs-first routes and keyboard-close focus be
   assert.match(compact, /aria-current/);
   assert.match(compact, /event\.key === "Escape"/);
   assert.match(compact, /triggerRef\.current\?\.focus\(\)/);
-  assert.match(compact, /matchMedia\("\(max-width: 40rem\)"\)/);
+  assert.match(compact, /matchMedia\("\(max-width: 64rem\)"\)/);
   assert.match(shell, /Review saved opportunities/);
   assert.match(styles, /\.compact-navigation/);
   assert.match(styles, /\.primary-navigation/);
@@ -72,7 +70,7 @@ test("shared visual polish uses semantic actions, resilient cards, and disclosur
     await Promise.all([
       source("globals.css"),
       source("job-listings.tsx"),
-      source("applications.tsx"),
+      source("applications-workspace.tsx"),
       source("experience-projects.tsx"),
       source("career-assistant.tsx"),
       source("data-storage.tsx"),
@@ -89,8 +87,8 @@ test("shared visual polish uses semantic actions, resilient cards, and disclosur
     /\.applications-future-fields\s*\{\s*grid-template-columns:\s*1fr;/,
   );
   assert.match(styles, /overflow-wrap: anywhere/);
-  assert.match(jobs, /className="affirmative-action add-opportunity-action"/);
-  assert.match(applications, /applications-future-fields/);
+  assert.match(jobs, /<Link[^>]*className="[^"]*add-opportunity-action"/);
+  assert.doesNotMatch(applications, /applications-future-fields|eyebrow|Google Sheets/);
   assert.match(evidence, /className="danger-action/);
   assert.match(assistant, /className="danger-action"/);
   assert.match(storage, /danger-action/);
@@ -104,7 +102,7 @@ test("polished presentation stays local, truthful, and accessible", async () => 
         "compact-navigation.tsx",
         "job-listings.tsx",
         "opportunity-empty-state.tsx",
-        "applications.tsx",
+        "applications-workspace.tsx",
         "experience-projects.tsx",
         "career-assistant.tsx",
         "google-sheets-workspace.tsx",
@@ -112,9 +110,8 @@ test("polished presentation stays local, truthful, and accessible", async () => 
       ].map(source),
     )
   ).join("\n");
-  assert.match(combined, /No applications to track yet/);
-  assert.match(combined, /Google Sheets is not connected yet/);
-  assert.match(combined, /No captured opportunities match your search/);
+  assert.match(combined, /PageHeader title="Applied"/);
+  assert.match(combined, /No opportunities match your search/);
   assert.doesNotMatch(
     combined,
     /fetch\s*\(|setInterval|setTimeout|oauth|automatic retry|automatic scan/i,

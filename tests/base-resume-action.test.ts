@@ -1,3 +1,4 @@
+import { readActionSources } from "./helpers/source-modules";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
@@ -7,10 +8,7 @@ import test from "node:test";
 const execFileAsync = promisify(execFile);
 
 test("Base Resume server action enforces upload limits before materializing bytes and refreshes the profile", async () => {
-  const action = await readFile(
-    new URL("../src/app/actions.ts", import.meta.url),
-    "utf8",
-  );
+  const action = await readActionSources();
   const config = await readFile(
     new URL("../next.config.ts", import.meta.url),
     "utf8",
@@ -37,10 +35,7 @@ test("Base Resume generation creates and passes a session scoped to active works
 });
 
 test("Base Resume generation sends only eligible candidate clarifications", async () => {
-  const action = await readFile(
-    new URL("../src/app/actions.ts", import.meta.url),
-    "utf8",
-  );
+  const action = await readActionSources();
 
   assert.match(
     action,
@@ -50,10 +45,7 @@ test("Base Resume generation sends only eligible candidate clarifications", asyn
 });
 
 test("Base Resume regeneration accepts an empty revision request while retaining generation gates", async () => {
-  const action = await readFile(
-    new URL("../src/app/actions.ts", import.meta.url),
-    "utf8",
-  );
+  const action = await readActionSources();
 
   assert.doesNotMatch(
     action,

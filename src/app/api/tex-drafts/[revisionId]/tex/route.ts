@@ -1,4 +1,4 @@
-import { readEditableTexDraftRevision } from "@/domain/resume-generation/editable-tex-drafts";
+import { readEditableTexDraftRevision } from "@/application/resume-generation/editable-tex-drafts";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

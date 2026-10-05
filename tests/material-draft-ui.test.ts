@@ -1,3 +1,4 @@
+import { readActionSources } from "./helpers/source-modules";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
@@ -5,7 +6,7 @@ import test from "node:test";
 test("Resume Coach presents the generated PDF and does not regenerate on page visits", async () => {
   const [coach, actions] = await Promise.all([
     readFile(new URL("../src/components/resume/resume-preview.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../src/app/actions.ts", import.meta.url), "utf8"),
+    readActionSources(),
   ]);
   for (const token of [
     "Resume Coach independently reviews",

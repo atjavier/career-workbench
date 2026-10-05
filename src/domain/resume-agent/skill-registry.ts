@@ -189,12 +189,12 @@ export const resumeAgentSkillRegistry: readonly ResumeAgentSkillDefinition[] =
       inputSchema:
         "Saved profile, host-issued application/work root IDs, and bounded local read results",
       outputSchema:
-        "Canonical Resume.pdf ordered base-resume sections, path-and-line-cited claims, and explicit unknowns",
+        "Canonical ordered base-resume sections, path-and-line-cited claims, and explicit unknowns",
       workflow: [
         "use only host-issued root IDs with bounded list/read actions; never inspect folders outside those roots or choose tools beyond the registered reader",
         "mine documented purpose, problem, users or workflow, rationale, contribution, implementation evidence, and supported qualitative result",
         "position the candidate truthfully without inventing a target role, seniority, fit, or professional summary",
-        "select the strongest direct evidence and compose Experience, Education, Projects, and Technical Skills in canonical Resume.pdf order",
+        "select the strongest direct evidence and compose the sections in the exact order: Technical Skills, Experience, Projects, and Education",
         "make every visible Experience or Projects bullet candidate-facing, outcome-oriented, and linked to a host-validated file citation",
         "list missing ownership, metrics, dates, users, outcomes, scope, and skills as unknowns",
         "return a reviewable draft; the host persists and compiles it without source mutation or rerunning on page visit",

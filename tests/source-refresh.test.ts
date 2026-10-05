@@ -11,7 +11,7 @@ import {
 import {
   listRefreshRuns,
   startRefreshRun,
-} from "../src/domain/discovery/refresh-runs";
+} from "../src/application/discovery/refresh-runs";
 import {
   listSourceConfigurations,
   saveSourceConfiguration,
@@ -258,7 +258,7 @@ test("refresh requires confirmation and no generic retrieval surface is introduc
   const source = await (
     await import("node:fs/promises")
   ).readFile(
-    new URL("../src/domain/discovery/refresh-runs.ts", import.meta.url),
+    new URL("../src/application/discovery/refresh-runs.ts", import.meta.url),
     "utf8",
   );
   assert.doesNotMatch(

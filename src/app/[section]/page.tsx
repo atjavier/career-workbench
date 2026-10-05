@@ -1,3 +1,4 @@
+import { WorkspaceContainer } from "@/components/common/layout-containers";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
@@ -22,7 +23,7 @@ export default async function PlaceholderPage({
   if (!content) notFound();
   return (
     <ApplicationShell active={content.title}>
-      <div className="workspace-shell placeholder-page">
+      <WorkspaceContainer className="placeholder-page">
         <p className="eyebrow">Workspace destination</p>
         <h1>{content.title}</h1>
         <p>{content.summary}</p>
@@ -31,7 +32,7 @@ export default async function PlaceholderPage({
           available.
         </p>
         <Link href="/">Return to Jobs</Link>
-      </div>
+      </WorkspaceContainer>
     </ApplicationShell>
   );
 }

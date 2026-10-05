@@ -47,7 +47,7 @@ export function OpportunitySearch({
 export function OpportunityResultCount({ count }: { count: number }) {
   return (
     <p className="jobs-result-summary" role="status" aria-live="polite">
-      {count} matching captured opportunit{count === 1 ? "y" : "ies"}.
+      {count} matching opportunit{count === 1 ? "y" : "ies"}.
     </p>
   );
 }

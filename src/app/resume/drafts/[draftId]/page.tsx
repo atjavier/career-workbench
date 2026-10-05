@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { readMaterialDraft } from "@/domain/resume-generation/material-draft-commands";
+import { readMaterialDraft } from "@/application/resume-generation/material-draft-commands";
 
 export const dynamic = "force-dynamic";
 

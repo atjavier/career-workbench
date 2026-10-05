@@ -1,4 +1,4 @@
-import { resumeArchitectContract } from "@/domain/resume-agent/resume-agent-contracts";
+import { resumeArchitectContract } from "@/adapters/local-model/resume-agent-shared-instructions";
 
 /** A bounded, stateless final-review instruction. It cannot rewrite a resume. */
 export const resumeIntegrityReviewerInstruction = `${resumeArchitectContract}

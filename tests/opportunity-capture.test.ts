@@ -5,7 +5,6 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { captureOpportunityDraft } from "../src/domain/opportunities/capture-draft";
-import { opportunityCaptureAction } from "../src/app/actions";
 import { listJobListings } from "../src/domain/discovery/job-listings";
 import { openDatabase } from "../src/persistence/database";
 
@@ -130,29 +129,4 @@ test("capture drafts never write opportunity compatibility tables or audit histo
   } finally {
     await rm(value.root, { recursive: true, force: true });
   }
-});
-
-test("capture action returns a serializable review draft and field-specific recovery", async () => {
-  const valid = new FormData();
-  valid.set("postingUrl", "https://jobs.example.test/role");
-  valid.set("copiedDescription", copiedDescription);
-  const success = await opportunityCaptureAction(
-    { status: "idle", summary: "" },
-    valid,
-  );
-  assert.equal(success.status, "success");
-  assert.equal(success.draft?.postingUrl, "https://jobs.example.test/role");
-  assert.match(success.summary, /Nothing is saved yet/);
-  assert.equal(success.submittedPostingUrl, "https://jobs.example.test/role");
-  assert.equal(success.submittedCopiedDescription, copiedDescription);
-  const invalid = new FormData();
-  invalid.set("postingUrl", "http://jobs.example.test/role");
-  invalid.set("copiedDescription", copiedDescription);
-  const failure = await opportunityCaptureAction(
-    { status: "idle", summary: "" },
-    invalid,
-  );
-  assert.equal(failure.status, "error");
-  assert.ok(failure.fieldErrors?.postingUrl);
-  assert.equal(failure.draft, undefined);
 });

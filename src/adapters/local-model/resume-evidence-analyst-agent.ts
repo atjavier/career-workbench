@@ -1,4 +1,4 @@
-import { resumeArchitectContract } from "@/domain/resume-agent/resume-agent-contracts";
+import { resumeArchitectContract } from "@/adapters/local-model/resume-agent-shared-instructions";
 
 /** A bounded, stateless evidence-mining instruction. The host validates all indexes. */
 export const resumeEvidenceAnalystInstruction = `${resumeArchitectContract}

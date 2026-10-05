@@ -19,7 +19,7 @@ import { configureLocalModel } from "../src/domain/resume-generation/local-model
 import {
   generateEditableTexDraft,
   readEditableTexDraftRevision,
-} from "../src/domain/resume-generation/editable-tex-drafts";
+} from "../src/application/resume-generation/editable-tex-drafts";
 import {
   createResumeWorkspace,
   permanentlyDeleteResumeWorkspace,

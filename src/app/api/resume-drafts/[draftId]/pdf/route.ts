@@ -1,6 +1,5 @@
-import { readActiveWorkspaceMaterialDraft } from "@/domain/resume-generation/material-draft-commands";
-import { compileResumeDraftPdf } from "@/domain/resume-generation/resume-tex-compiler";
-import { readBundledResumeTemplate } from "@/files/resume-template";
+import { readActiveWorkspaceMaterialDraft } from "@/application/resume-generation/material-draft-commands";
+import { getOrCompileResumeDraftPdf } from "@/domain/resume-generation/resume-draft-pdf-cache";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,20 +17,26 @@ function responseBody(bytes: Uint8Array): ArrayBuffer {
   return body;
 }
 
-export async function GET(
+export type ResumeDraftPdfRouteOptions = {
+  appDataRoot?: string;
+  readDraft?: typeof readActiveWorkspaceMaterialDraft;
+  getPdf?: typeof getOrCompileResumeDraftPdf;
+};
+
+export async function createResumeDraftPdfResponse(
   _request: Request,
-  { params }: { params: Promise<{ draftId: string }> },
+  params: Promise<{ draftId: string }>,
+  options?: ResumeDraftPdfRouteOptions,
 ): Promise<Response> {
   try {
     const { draftId } = await params;
-    const draft = await readActiveWorkspaceMaterialDraft({ draftId });
-    const template = await readBundledResumeTemplate();
-    if (template.contentDigest !== draft.templateDigest)
-      return new Response(
-        "The Resume.pdf template changed. Generate a fresh resume preview.",
-        { status: 409, headers: unavailableHeaders },
-      );
-    const pdf = await compileResumeDraftPdf(draft);
+    const readDraft = options?.readDraft ?? readActiveWorkspaceMaterialDraft;
+    const getPdf = options?.getPdf ?? getOrCompileResumeDraftPdf;
+    const draft = await readDraft({
+      draftId,
+      appDataRoot: options?.appDataRoot,
+    });
+    const pdf = await getPdf(draft, { appDataRoot: options?.appDataRoot });
     return new Response(responseBody(pdf), {
       headers: {
         "cache-control": "private, no-store",
@@ -48,4 +53,11 @@ export async function GET(
       headers: unavailableHeaders,
     });
   }
+}
+
+export async function GET(
+  request: Request,
+  { params }: { params: Promise<{ draftId: string }> },
+): Promise<Response> {
+  return createResumeDraftPdfResponse(request, params);
 }

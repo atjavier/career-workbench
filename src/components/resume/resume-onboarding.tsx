@@ -17,6 +17,7 @@ import {
   type FolderPickerActionState,
   type WorkspaceActionState,
 } from "@/app/actions";
+import { MonthYearPicker } from "@/components/common/month-year-picker";
 
 const initial: WorkspaceActionState = {
   status: "idle",
@@ -625,31 +626,30 @@ export function ResumeOnboarding({ localAiReady }: { localAiReady: boolean }) {
                     <label htmlFor={`project-start-${item.id}`}>
                       Start date
                     </label>
-                    <input
+                    <MonthYearPicker
                       id={`project-start-${item.id}`}
                       name={`projectStartDate-${index}`}
                       value={item.startDate}
-                      onChange={(e) =>
-                        updateProject(item.id, { startDate: e.target.value })
+                      onChange={(val) =>
+                        updateProject(item.id, { startDate: val })
                       }
-                      placeholder="YYYY-MM"
+                      placeholder="Select start date"
                       required
-                      maxLength={20}
                       className="input-base"
                     />
                   </div>
                   <div>
                     <label htmlFor={`project-end-${item.id}`}>End date</label>
-                    <input
+                    <MonthYearPicker
                       id={`project-end-${item.id}`}
                       name={`projectEndDate-${index}`}
                       value={item.endDate}
-                      onChange={(e) =>
-                        updateProject(item.id, { endDate: e.target.value })
+                      onChange={(val) =>
+                        updateProject(item.id, { endDate: val })
                       }
-                      placeholder="YYYY-MM"
+                      placeholder="Select end date"
                       required
-                      maxLength={20}
+                      align="right"
                       className="input-base"
                     />
                   </div>
@@ -758,40 +758,51 @@ export function ResumeOnboarding({ localAiReady }: { localAiReady: boolean }) {
                 <div className="work-date-range">
                   <div>
                     <label htmlFor={`exp-start-${item.id}`}>Start date</label>
-                    <input
+                    <MonthYearPicker
                       id={`exp-start-${item.id}`}
                       name={`expStartDate-${index}`}
                       value={item.startDate}
-                      onChange={(e) =>
-                        updateExperience(item.id, { startDate: e.target.value })
+                      onChange={(val) =>
+                        updateExperience(item.id, { startDate: val })
                       }
-                      placeholder="YYYY-MM"
+                      placeholder="Select start date"
                       required
-                      maxLength={20}
                       className="input-base"
                     />
                   </div>
                   <div>
                     <label htmlFor={`exp-end-${item.id}`}>End date</label>
-                    <input
-                      id={`exp-end-${item.id}`}
-                      name={`expEndDate-${index}`}
-                      value={item.currentlyWorking ? "" : item.endDate}
-                      disabled={item.currentlyWorking}
-                      onChange={(e) =>
-                        updateExperience(item.id, { endDate: e.target.value })
-                      }
-                      placeholder={
-                        item.currentlyWorking ? "Present" : "YYYY-MM"
-                      }
-                      required={!item.currentlyWorking}
-                      maxLength={20}
-                      aria-describedby={`exp-current-desc-${item.id}`}
-                      className="input-base"
-                    />
-                    {item.currentlyWorking ? (
-                      <span className="present-badge">Present</span>
-                    ) : null}
+                    <div className="modal-date-input-wrap">
+                      {item.currentlyWorking ? (
+                        <>
+                          <input
+                            type="text"
+                            id={`exp-end-${item.id}`}
+                            name={`expEndDate-${index}`}
+                            value=""
+                            disabled
+                            placeholder="Present"
+                            aria-describedby={`exp-current-desc-${item.id}`}
+                            className="input-base"
+                          />
+                          <span className="present-badge">Present</span>
+                        </>
+                      ) : (
+                        <MonthYearPicker
+                          id={`exp-end-${item.id}`}
+                          name={`expEndDate-${index}`}
+                          value={item.endDate}
+                          onChange={(val) =>
+                            updateExperience(item.id, { endDate: val })
+                          }
+                          placeholder="Select end date"
+                          required
+                          align="right"
+                          ariaDescribedBy={`exp-current-desc-${item.id}`}
+                          className="input-base"
+                        />
+                      )}
+                    </div>
                   </div>
                 </div>
                 <div className="current-work-checkbox">

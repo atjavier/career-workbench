@@ -8,8 +8,8 @@ import {
   handOffMaterialDraft,
   readActiveWorkspaceMaterialDraft,
   readMaterialDraft,
-} from "../src/domain/resume-generation/material-draft-commands";
-import { persistResumeCoachDraft } from "../src/domain/resume-generation/resume-coach-commands";
+} from "../src/application/resume-generation/material-draft-commands";
+import { persistResumeCoachDraft } from "../src/application/resume-generation/resume-coach-commands";
 import { createResumeWorkspace } from "../src/domain/resume-generation/resume-workspace-commands";
 import { applyMigrations, openDatabase } from "../src/persistence/database";
 

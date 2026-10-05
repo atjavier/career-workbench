@@ -328,4 +328,10 @@ export const migrations = [
       "utf8",
     ),
   },
+  {
+    id: "0047_opportunity_lifecycle",
+    sql: readFileSync(join(migrationDirectory, "0047_opportunity_lifecycle.sql"), "utf8"),
+  },
+  { id: "0048_opportunity_descriptions", sql: readFileSync(join(migrationDirectory, "0048_opportunity_descriptions.sql"), "utf8") },
+  { id: "0049_flexible_clarification_categories", sql: readFileSync(join(migrationDirectory, "0049_flexible_clarification_categories.sql"), "utf8") },
 ] as const;

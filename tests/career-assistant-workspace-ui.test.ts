@@ -1,3 +1,4 @@
+import { readActionSources } from "./helpers/source-modules";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
@@ -17,7 +18,7 @@ test("Career Assistant has a dedicated local-first shared-shell route", async ()
 
 test("Career Assistant discloses the bounded local project-evidence workflow before inspection", async () => {
   const ui = await readFile(
-    new URL("../src/components/pro/career-assistant.tsx", import.meta.url),
+    new URL("../src/components/career-assistant/career-assistant.tsx", import.meta.url),
     "utf8",
   );
   for (const text of [
@@ -42,14 +43,14 @@ test("Career Assistant discloses the bounded local project-evidence workflow bef
 test("Career Assistant preserves individual proposal review and recovery truthfulness", async () => {
   const [ui, workspace, actions] = await Promise.all([
     readFile(
-      new URL("../src/components/pro/career-assistant.tsx", import.meta.url),
+      new URL("../src/components/career-assistant/career-assistant.tsx", import.meta.url),
       "utf8",
     ),
     readFile(
-      new URL("../src/components/pro/career-assistant-workspace.tsx", import.meta.url),
+      new URL("../src/components/career-assistant/career-assistant-workspace.tsx", import.meta.url),
       "utf8",
     ),
-    readFile(new URL("../src/app/actions.ts", import.meta.url), "utf8"),
+    readActionSources(),
   ]);
   for (const text of [
     "Ready for your review",
@@ -74,8 +75,8 @@ test("Career Assistant stays explicit and does not add unsafe client behavior", 
   const source = (
     await Promise.all(
       [
-        "../src/components/pro/career-assistant.tsx",
-        "../src/components/pro/career-assistant-workspace.tsx",
+        "../src/components/career-assistant/career-assistant.tsx",
+        "../src/components/career-assistant/career-assistant-workspace.tsx",
       ].map((file) => readFile(new URL(file, import.meta.url), "utf8")),
     )
   ).join("\n");

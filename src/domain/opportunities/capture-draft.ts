@@ -86,7 +86,7 @@ function normalizeDescription(value: unknown): string {
   if (text.length < minimumDescriptionLength)
     throw new OpportunityCaptureValidationError(
       "copiedDescription",
-      "Paste a fuller job description before review.",
+      "Enter a fuller job description.",
       "Include at least 80 characters of copied role details.",
     );
   if (text.length > maximumDescriptionLength)
@@ -149,7 +149,16 @@ export function captureOpportunityDraft(
     postingUrl,
     copiedDescription,
     capturedAt: (input.now ?? (() => new Date()))().toISOString(),
-    title: titleFrom(copiedDescription),
+    ...opportunityDetailsFromDescription(copiedDescription),
+  };
+}
+
+/** Plain-text extraction shared by the add form; it never retrieves a URL. */
+export function opportunityDetailsFromDescription(value: string) {
+  const copiedDescription = normalizeDescription(value);
+  const title = titleFrom(copiedDescription);
+  return {
+    title: title.length <= 300 ? title : unknown,
     company: labelledValue(copiedDescription, ["company", "employer"]),
     location: labelledValue(copiedDescription, ["location", "job location"]),
     workStyle: labelledValue(copiedDescription, [

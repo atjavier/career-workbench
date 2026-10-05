@@ -22,12 +22,14 @@ import {
   permanentlyDeleteDocumentedEvidenceItem,
   resolveCollectionReviewHandle,
   summaryFromProjectOverview,
-} from "../src/domain/evidence/evidence-library";
+} from "../src/application/evidence/evidence-library";
 import { createResumeWorkspace } from "../src/domain/resume-generation/resume-workspace-commands";
 import {
   readResumeDocumentationSource,
   readUploadedResumeDocumentationSource,
 } from "../src/files/evidence-library";
+import { openDatabase } from "../src/persistence/database";
+import { resolveAppDataPaths } from "../src/files/app-data";
 
 const unknowns =
   "ownership, metrics, users, dates, deployment status, outcomes, and skills are unknown unless directly evidenced.";
@@ -356,6 +358,56 @@ test("permanently deleting documented work removes its workspace records and man
       "Accessibility-Report",
     );
     assert.equal((await lstat(managedDirectory)).isDirectory(), true);
+
+    const paths = await resolveAppDataPaths(value.appDataRoot);
+    const database = openDatabase(paths.databasePath);
+    const itemKey = "project:Accessibility-Report";
+    const taskId = "01940000-0000-7000-8000-000000000001";
+    const responseId = "01940000-0000-7000-8000-000000000002";
+    const clarifiedId = "01940000-0000-7000-8000-000000000003";
+    const turnId = "01940000-0000-7000-8000-000000000004";
+    const candidateTurnId = "01940000-0000-7000-8000-000000000005";
+    const now = new Date().toISOString();
+    database
+      .prepare(
+        "INSERT INTO resume_clarification_tasks (id, workspace_id, item_key, item_name, item_category, category, question, created_at, status) VALUES (?, ?, ?, ?, 'project', 'metrics', 'Any metrics?', ?, 'answered')",
+      )
+      .run(taskId, value.workspaceId, itemKey, "Accessibility-Report", now);
+    database
+      .prepare(
+        "INSERT INTO resume_clarification_task_responses (id, workspace_id, task_id, disposition, answer_text, created_at) VALUES (?, ?, ?, 'answered', '100% compliant', ?)",
+      )
+      .run(responseId, value.workspaceId, taskId, now);
+    database
+      .prepare(
+        "INSERT INTO resume_clarified_evidence (id, workspace_id, task_id, response_id, item_key, item_name, item_category, category, candidate_text, provenance, created_at) VALUES (?, ?, ?, ?, ?, ?, 'project', 'metrics', '100% compliant', 'candidate_interview_answer', ?)",
+      )
+      .run(
+        clarifiedId,
+        value.workspaceId,
+        taskId,
+        responseId,
+        itemKey,
+        "Accessibility-Report",
+        now,
+      );
+    database
+      .prepare(
+        "INSERT INTO resume_interview_turns (id, workspace_id, task_id, role, content, created_at) VALUES (?, ?, ?, 'coach', 'What metrics?', ?)",
+      )
+      .run(turnId, value.workspaceId, taskId, now);
+    database
+      .prepare(
+        "INSERT INTO resume_interview_candidate_turns (id, workspace_id, task_id, content, created_at) VALUES (?, ?, ?, '100% compliant', ?)",
+      )
+      .run(candidateTurnId, value.workspaceId, taskId, now);
+    database
+      .prepare(
+        "INSERT INTO resume_evidence_packets (workspace_id, item_key, packet_path, sync_status, updated_at) VALUES (?, ?, 'resume-evidence/workspaces/packet', 'ready', ?)",
+      )
+      .run(value.workspaceId, itemKey, now);
+    database.close();
+
     const deleted = await permanentlyDeleteDocumentedEvidenceItem({
       ...value,
       category: "project",
@@ -366,6 +418,72 @@ test("permanently deleting documented work removes its workspace records and man
     assert.equal(deleted.findingsDeleted, 1);
     assert.deepEqual(await listExperienceProjectCollection(value), []);
     await assert.rejects(lstat(managedDirectory), { code: "ENOENT" });
+
+    const checkDb = openDatabase(paths.databasePath);
+    try {
+      assert.equal(
+        (
+          checkDb
+            .prepare(
+              "SELECT count(*) as count FROM resume_clarification_tasks WHERE workspace_id = ?",
+            )
+            .get(value.workspaceId) as { count: number }
+        ).count,
+        0,
+      );
+      assert.equal(
+        (
+          checkDb
+            .prepare(
+              "SELECT count(*) as count FROM resume_clarification_task_responses WHERE workspace_id = ?",
+            )
+            .get(value.workspaceId) as { count: number }
+        ).count,
+        0,
+      );
+      assert.equal(
+        (
+          checkDb
+            .prepare(
+              "SELECT count(*) as count FROM resume_clarified_evidence WHERE workspace_id = ?",
+            )
+            .get(value.workspaceId) as { count: number }
+        ).count,
+        0,
+      );
+      assert.equal(
+        (
+          checkDb
+            .prepare(
+              "SELECT count(*) as count FROM resume_interview_turns WHERE workspace_id = ?",
+            )
+            .get(value.workspaceId) as { count: number }
+        ).count,
+        0,
+      );
+      assert.equal(
+        (
+          checkDb
+            .prepare(
+              "SELECT count(*) as count FROM resume_interview_candidate_turns WHERE workspace_id = ?",
+            )
+            .get(value.workspaceId) as { count: number }
+        ).count,
+        0,
+      );
+      assert.equal(
+        (
+          checkDb
+            .prepare(
+              "SELECT count(*) as count FROM resume_evidence_packets WHERE workspace_id = ?",
+            )
+            .get(value.workspaceId) as { count: number }
+        ).count,
+        0,
+      );
+    } finally {
+      checkDb.close();
+    }
   } finally {
     await rm(value.root, { recursive: true, force: true });
   }

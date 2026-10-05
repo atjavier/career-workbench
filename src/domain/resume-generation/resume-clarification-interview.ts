@@ -114,7 +114,12 @@ function view(
   };
 }
 export function interviewCategoryLabel(category: string): string {
-  return labels[category] ?? "additional context";
+  if (!category || typeof category !== "string") return "additional context";
+  return (
+    labels[category.toLowerCase()] ??
+    labels[category] ??
+    category.replace(/_/g, " ").trim()
+  );
 }
 export async function readResumeClarificationInterview(
   workspaceId: string,

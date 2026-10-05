@@ -1,6 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 
 import { migrations } from "@/persistence/migrations";
+import { upgradeClarificationCategories } from "@/persistence/flexible-clarification-categories";
 
 export function openDatabase(databasePath: string): DatabaseSync {
   const database = new DatabaseSync(databasePath);
@@ -24,13 +25,20 @@ export function applyMigrations(database: DatabaseSync): void {
     if (appliedStatement.get(migration.id)) {
       continue;
     }
-    database.exec("BEGIN IMMEDIATE;");
+    const categoryUpgrade = migration.id === "0049_flexible_clarification_categories";
+    const foreignKeys = (database.prepare("PRAGMA foreign_keys").get() as { foreign_keys: number }).foreign_keys;
+    // SQLite ignores this PRAGMA inside a transaction. Disable it before BEGIN
+    // so dropping a parent table cannot cascade through retained interview history.
+    if (categoryUpgrade) database.exec("PRAGMA foreign_keys = OFF;");
     try {
+      database.exec("BEGIN IMMEDIATE;");
       // Migration 0028 repairs databases created while material_drafts still
       // used the earlier opportunity_id column. Fresh databases already have
       // the replacement column from 0021, so its ALTER TABLE is intentionally
       // skipped when that column is present.
-      if (migration.id === "0028_resume_draft_schema_compat") {
+      if (categoryUpgrade) {
+        upgradeClarificationCategories(database);
+      } else if (migration.id === "0028_resume_draft_schema_compat") {
         const columns = database
           .prepare("PRAGMA table_info(material_drafts)")
           .all() as Array<{ name?: string }>;
@@ -76,8 +84,10 @@ export function applyMigrations(database: DatabaseSync): void {
       recordMigration.run(migration.id, new Date().toISOString());
       database.exec("COMMIT;");
     } catch (error) {
-      database.exec("ROLLBACK;");
+      if (database.isTransaction) database.exec("ROLLBACK;");
       throw error;
+    } finally {
+      if (categoryUpgrade) database.exec(`PRAGMA foreign_keys = ${foreignKeys ? "ON" : "OFF"};`);
     }
   }
 }

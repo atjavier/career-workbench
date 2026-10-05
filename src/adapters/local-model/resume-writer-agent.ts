@@ -1,4 +1,4 @@
-import { resumeArchitectContract } from "@/domain/resume-agent/resume-agent-contracts";
+import { resumeArchitectContract } from "@/adapters/local-model/resume-agent-shared-instructions";
 
 /** A bounded, stateless editable-slot writer instruction. */
 export const resumeWriterInstruction = `/no_think\n${resumeArchitectContract}

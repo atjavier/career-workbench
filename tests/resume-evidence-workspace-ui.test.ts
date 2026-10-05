@@ -1,3 +1,5 @@
+import { readGatewaySources } from "./helpers/source-modules";
+import { readActionSources } from "./helpers/source-modules";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
@@ -79,14 +81,8 @@ test("the registered workflow separates folder documentation from base-resume ge
       "utf8",
     ),
     readFile(new URL("../src/components/resume/resume-preview.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../src/app/actions.ts", import.meta.url), "utf8"),
-    readFile(
-      new URL(
-        "../src/adapters/local-model/local-model-gateway.ts",
-        import.meta.url,
-      ),
-      "utf8",
-    ),
+    readActionSources(),
+    readGatewaySources(),
   ]);
   for (const text of [
     "for a project: classify repository shape",
@@ -145,7 +141,7 @@ test("existing generated resumes retain their Coach and preview workspace", asyn
     readFile(new URL("../src/app/globals.css", import.meta.url), "utf8"),
   ]);
   for (const text of [
-    "Profile details",
+    "Your Details",
     "Save details",
     "Resume Coach",
     "Reviewable preview",
@@ -168,7 +164,7 @@ test("existing generated resumes retain their Coach and preview workspace", asyn
 test("generated resumes offer an accessible evidence-based regeneration control without a revision request input", async () => {
   const [coach, actions] = await Promise.all([
     readFile(new URL("../src/components/resume/resume-preview.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../src/app/actions.ts", import.meta.url), "utf8"),
+    readActionSources(),
   ]);
 
   assert.match(

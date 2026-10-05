@@ -3,6 +3,7 @@
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { readResumeEvidenceIntakeStatusAction } from "@/app/actions";
+import { ClarificationPlanningRetry } from "./clarification-planning-retry";
 
 export function ResumeIntakeStatus({
   workspaceId,
@@ -270,9 +271,10 @@ export function ResumeIntakeStatus({
         {isFailed ? (
           <div className="intake-recovery-box">
             <p className="intake-recovery-text">
-              Your saved work is recoverable. Return to this resume when you can
-              restart evidence intake.
+              Read saved evidence again to retry preparing questions. If a folder
+              could not be documented, add it from Experience &amp; Projects.
             </p>
+            <ClarificationPlanningRetry workspaceId={workspaceId} />
           </div>
         ) : null}
       </div>

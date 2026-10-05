@@ -6,7 +6,7 @@ CREATE TABLE resume_clarified_evidence (
   item_key TEXT NOT NULL,
   item_name TEXT NOT NULL,
   item_category TEXT NOT NULL CHECK (item_category IN ('project', 'experience')),
-  category TEXT NOT NULL CHECK (category IN ('purpose', 'ownership', 'users_workflow', 'outcome', 'metrics', 'deployment', 'collaboration', 'dates', 'role')),
+  category TEXT NOT NULL,
   candidate_text TEXT NOT NULL CHECK (length(candidate_text) BETWEEN 1 AND 2400),
   provenance TEXT NOT NULL CHECK (provenance = 'candidate_interview_answer'),
   created_at TEXT NOT NULL

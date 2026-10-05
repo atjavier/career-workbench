@@ -124,11 +124,11 @@ mock.module("@/audit/audit-event", {
   },
 });
 mock.module("@/persistence/workspace-repository", { exports: { appendAuditEvent: () => undefined } });
-mock.module("@/domain/resume-generation/resume-coach-commands", { exports: { persistResumeCoachDraft: () => ({ id: "draft" }) } });
+mock.module("@/application/resume-generation/resume-coach-commands", { exports: { persistResumeCoachDraft: () => ({ id: "draft" }) } });
 mock.module("next/cache", { exports: { revalidatePath: () => undefined } });
 mock.module("next/navigation", { exports: { redirect: () => undefined } });
 mock.module("next/server", { exports: { after: () => undefined } });
-mock.module("@/domain/resume-generation/editable-tex-drafts", {
+mock.module("@/application/resume-generation/editable-tex-drafts", {
   exports: {
     generateEditableTexDraft: async () => ({
       draftId: "tex-draft-1",

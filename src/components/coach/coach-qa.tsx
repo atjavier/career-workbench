@@ -23,6 +23,22 @@ function randomId(): string {
   return crypto.randomUUID();
 }
 
+function formatCategoryLabel(category?: string): string {
+  if (!category) return "Current goal";
+  const known: Record<string, string> = {
+    purpose: "Purpose",
+    ownership: "Your Contribution",
+    users_workflow: "Users & Workflow",
+    outcome: "Outcome & Impact",
+    metrics: "Results or Scale",
+    deployment: "Deployment & Usage",
+    collaboration: "Collaboration",
+    dates: "Dates",
+    role: "Role",
+  };
+  return known[category.toLowerCase()] ?? category.replace(/_/g, " ").trim();
+}
+
 export function ResumeInterview({
   workspaceId,
   interview,
@@ -331,7 +347,9 @@ export function ResumeInterview({
               <div className="coach-chat-context">
                 <div className="coach-context-inner">
                   <div className="coach-context-header">
-                    <span className="coach-context-tag">Current goal</span>
+                    <span className="coach-context-tag">
+                      {current.category ? formatCategoryLabel(current.category) : "Current goal"}
+                    </span>
                     <span className="coach-context-item">
                       {current.itemName} ({current.itemCategory})
                     </span>
@@ -715,9 +733,16 @@ export function ResumeInterview({
                       </svg>
                     </span>
                     <div className="goal-item-body">
-                      <span className="goal-item-badge">
-                        {task.itemName || task.itemCategory}
-                      </span>
+                      <div className="goal-item-header">
+                        <span className="goal-item-badge">
+                          {task.itemName || task.itemCategory}
+                        </span>
+                        {task.category ? (
+                          <span className="goal-item-category-tag">
+                            {formatCategoryLabel(task.category)}
+                          </span>
+                        ) : null}
+                      </div>
                       <span className="goal-item-question">{task.question}</span>
                     </div>
                   </li>
@@ -728,9 +753,16 @@ export function ResumeInterview({
                       <span className="goal-pulse-dot" />
                     </span>
                     <div className="goal-item-body">
-                      <span className="goal-item-badge active-badge">
-                        {current.itemName || current.itemCategory}
-                      </span>
+                      <div className="goal-item-header">
+                        <span className="goal-item-badge active-badge">
+                          {current.itemName || current.itemCategory}
+                        </span>
+                        {current.category ? (
+                          <span className="goal-item-category-tag active-category-tag">
+                            {formatCategoryLabel(current.category)}
+                          </span>
+                        ) : null}
+                      </div>
                       <span className="goal-item-question">{current.question}</span>
                     </div>
                   </li>

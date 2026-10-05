@@ -1,4 +1,4 @@
-import { resumeArchitectContract } from "@/domain/resume-agent/resume-agent-contracts";
+import { resumeArchitectContract } from "@/adapters/local-model/resume-agent-shared-instructions";
 
 /** Stateless instruction for the host-mediated local file reader. */
 export const resumeFileAgentInstruction = `${resumeArchitectContract}

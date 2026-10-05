@@ -1,3 +1,4 @@
+import { readActionSources } from "./helpers/source-modules";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
@@ -74,14 +75,14 @@ test("Resume onboarding prepares evidence before the Coach interview", async () 
 
   // Resume onboarding layout is scrollable and excludes redundant header duplication
   assert.match(workspace, /resume-onboarding-workspace/);
-  assert.match(styles, /\.resume-workspace\.resume-onboarding-workspace\.workspace-shell/);
-  assert.match(styles, /:not\(\.resume-onboarding-workspace\)/);
+  assert.match(styles, /\.workspace-container-page\s*\{[^}]*overflow: visible;/);
+  assert.match(workspace, /<WorkspaceContainer className="resume-workspace" mode="studio">/);
   assert.doesNotMatch(form, /<h2 id="resume-onboarding-heading">/);
   assert.doesNotMatch(form, /<p className="eyebrow">Build Your Resume<\/p>/);
 });
 
 test("Candidate Profile action remains a thin append-only server boundary", async () => {
-  const action = await read("src/app/actions.ts");
+  const action = await readActionSources();
   assert.match(action, /export type CandidateProfileActionState/);
   assert.match(action, /export async function saveCandidateProfileAction/);
   assert.match(action, /saveCandidateProfile\(\{/);
@@ -99,7 +100,7 @@ test("mandatory Coach Resume interview is chat-only and accessible", async () =>
   const [page, interview, action, streamRoute] = await Promise.all([
     read("src/app/resume/interview/page.tsx"),
     read("src/components/coach/coach-qa.tsx"),
-    read("src/app/actions.ts"),
+    readActionSources(),
     read("src/app/api/resume-interview/stream/route.ts"),
   ]);
   assert.match(page, /ResumeInterview/);
@@ -218,27 +219,52 @@ test("Stitch-led Resume Builder provides separated work collections and accessib
   assert.match(styles, /\.onboarding-experiences/);
 });
 
-test("Single resume workflow provides profile editing and eliminates multi-resume creation affordances", async () => {
-  const [studio, workspace, styles] = await Promise.all([
+test("Single resume workflow provides dedicated profile route and frictionless delete flow", async () => {
+  const [studio, workspace, profilePage, profileWorkspace, shell] = await Promise.all([
     read("src/components/resume/resume-preview.tsx"),
     read("src/components/resume/resume-workspace.tsx"),
-    read("src/app/globals.css"),
+    read("src/app/resume/profile/page.tsx"),
+    read("src/components/resume/resume-profile-workspace.tsx"),
+    read("src/components/common/application-shell.tsx"),
   ]);
 
-  // Studio provides an Edit Profile trigger and accessible modal dialog
+  // Studio links to the details tab through the existing route
   assert.match(studio, /edit-profile-trigger/);
-  assert.match(studio, /Edit Profile/);
-  assert.match(studio, /profile-edit-modal-dialog/);
-  assert.match(studio, /ResumeProfileForm/);
-  assert.match(studio, /Personal Details &amp; Education/);
+  assert.match(studio, /Edit details/);
+  assert.match(studio, /href="\/resume\/profile"/);
+
+  // The details route retains its active sidebar state
+  assert.match(profilePage, /ApplicationShell/);
+  assert.match(profilePage, /activeSubItem="Your Details"/);
+  assert.match(profilePage, /ResumeProfileWorkspace/);
+
+  const navStart = shell.indexOf("const resumeSubItems");
+  const navEnd = shell.indexOf("const effectiveDestinations", navStart);
+  const nav = shell.slice(navStart, navEnd);
+  const labels = ["Your Details", "Experience & Projects", "Coach Q&A", "Resume Preview"];
+  const positions = labels.map(label => nav.indexOf(`label: "${label}"`));
+  assert.ok(positions.every(position => position >= 0));
+  assert.deepEqual([...positions].sort((a, b) => a - b), positions);
+
+  // ApplicationShell includes the renamed details subnav item
+  assert.match(shell, /href:\s*"\/resume\/profile"/);
+  assert.match(shell, /label:\s*"Your Details"/);
+
+  // Profile workspace contains ResumeProfileForm and frictionless delete modal
+  assert.match(profileWorkspace, /ResumeProfileForm/);
+  assert.doesNotMatch(profileWorkspace, /Danger Zone|profile-danger-zone-card/);
+  const form = await read("src/components/resume/resume-profile-form.tsx");
+  assert.match(form, /resume-profile-actions/);
+  assert.match(form, /type="submit"[\s\S]*?Save details[\s\S]*?type="button"[\s\S]*?onClick=\{onDelete\}[\s\S]*?Delete resume/);
+  assert.match(form, /disabled=\{pending \|\| deletePending\}/);
+  assert.match(profileWorkspace, /onDelete=\{[\s\S]*?setShowDeleteModal\(true\)/);
+  assert.match(profileWorkspace, /delete-confirm-modal/);
+  assert.match(profileWorkspace, /name="confirmation"\s+value="DELETE"/);
+  assert.match(profileWorkspace, /Confirm permanent deletion/);
 
   // Multi-resume creation is removed: single resume workflow with no workspace switcher or creation controls
   assert.doesNotMatch(workspace, /Choose a resume workspace/);
   assert.doesNotMatch(workspace, /ResumeWorkspacePicker/);
   assert.doesNotMatch(studio, /ResumeWorkspacePicker/);
-
-  // Modal styling is present
-  assert.match(styles, /\.profile-edit-modal-dialog/);
-  assert.match(styles, /\.profile-edit-modal-body/);
 });
 

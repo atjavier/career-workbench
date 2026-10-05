@@ -9,11 +9,11 @@ import { readResumeWorkspaceState } from "../src/domain/resume-generation/resume
 import {
   interpretWorkspaceEvidence,
   parseCuratedFacts,
-  planClarifications,
-} from "../src/domain/resume-generation/resume-evidence-interpretation";
+} from "../src/application/resume-generation/resume-evidence-interpretation";
 import {
   beginResumeInterviewCoachStream,
   finalizeResumeInterviewCoachStream,
+  interviewCategoryLabel,
   readBoundedResumeInterviewContext,
   readBoundedResumeInterviewTranscript,
   readResumeClarificationInterview,
@@ -33,34 +33,6 @@ const initialArtifact = `# Resume Evidence (Proposed / Unreviewed)
 - Explicit unknowns: Ownership, metrics, users, dates, deployment status, outcomes, and skills are not established by this source line.
 - Status: Proposed / unreviewed`;
 
-test("clarification planning keeps absent material details as questions", () => {
-  const planned = planClarifications(
-    "BioEvidence",
-    "Built a local application.",
-  );
-  assert.ok(planned.some((task) => task.category === "purpose"));
-  assert.ok(planned.some((task) => task.category === "users_workflow"));
-  assert.ok(planned.some((task) => task.category === "metrics"));
-  assert.ok(planned.every((task) => task.question.includes("BioEvidence")));
-});
-
-test("clarification planning does not repeat directly documented context", () => {
-  const planned = planClarifications(
-    "BioEvidence",
-    "I developed the project in AY 2025-2026 for researchers. Its purpose was to support their workflow; 21 respondents gave a usability score. The team deployed a local demo.",
-  );
-  for (const category of [
-    "purpose",
-    "ownership",
-    "users_workflow",
-    "metrics",
-    "deployment",
-    "collaboration",
-    "dates",
-  ] as const)
-    assert.ok(!planned.some((task) => task.category === category));
-});
-
 test("only provenance-backed facts are parsed; context, candidates, and explicit unknowns remain non-facts", () => {
   const facts = parseCuratedFacts(
     `${initialArtifact}\n\n# Resume Bullet Candidates (Proposed / Unreviewed)\n\n- Purpose: Not directly evidenced.\n- Candidate: Built a local TypeScript tool.\n- Supporting evidence: E-001`,
@@ -74,17 +46,7 @@ test("only provenance-backed facts are parsed; context, candidates, and explicit
       sourcePath: "resume-evidence/projects/tool/resume-evidence.md",
     },
   ]);
-  const planned = planClarifications(
-    "Tool",
-    facts.map((fact) => fact.fact).join("\n"),
-  );
-  for (const category of [
-    "purpose",
-    "users_workflow",
-    "metrics",
-    "deployment",
-  ] as const)
-    assert.ok(planned.some((task) => task.category === category));
+
 });
 
 test("interpretation persists only curated facts, re-plans pending tasks, and refuses a switched workspace", async () => {
@@ -129,6 +91,7 @@ test("interpretation persists only curated facts, re-plans pending tasks, and re
       await interpretWorkspaceEvidence(workspace.workspace.id, {
         appDataRoot,
         workspaceRoot: root,
+        planner: async (_name, facts) => JSON.parse(facts).documentedFacts[0]?.includes("21-respondent") ? [] : [{ category: "Measured Impact", question: "What measurable effect did BioEvidence have?" }],
       }),
       true,
     );
@@ -150,7 +113,7 @@ test("interpretation persists only curated facts, re-plans pending tasks, and re
         (
           verify
             .prepare(
-              "SELECT count(*) AS value FROM resume_clarification_tasks WHERE category = 'metrics' AND status = 'pending'",
+              "SELECT count(*) AS value FROM resume_clarification_tasks WHERE category = 'Measured Impact' AND status = 'pending'",
             )
             .get() as { value: number }
         ).value,
@@ -174,6 +137,7 @@ test("interpretation persists only curated facts, re-plans pending tasks, and re
       await interpretWorkspaceEvidence(workspace.workspace.id, {
         appDataRoot,
         workspaceRoot: root,
+        planner: async (_name, facts) => JSON.parse(facts).documentedFacts[0]?.includes("21-respondent") ? [] : [{ category: "Measured Impact", question: "What measurable effect did BioEvidence have?" }],
       }),
       true,
     );
@@ -1045,4 +1009,62 @@ test("Coach Resume context is bounded to the active workspace and current task i
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("dynamic categories persist in clarification tasks and clarified evidence without constraint errors", async () => {
+  const root = await mkdtemp(join(tmpdir(), "resume-dynamic-category-"));
+  const appDataRoot = join(root, "private");
+  try {
+    const workspace = await createResumeWorkspace({
+      appDataRoot,
+      name: "Dynamic Category Workspace",
+    });
+    const db = openDatabase(join(appDataRoot, "workspace.sqlite"));
+    try {
+      const now = new Date().toISOString();
+      for (const [id, category] of [
+        ["task-api", "API Ergonomics"],
+        ["task-scale", "Team Scale"],
+      ] as const) {
+        db.prepare(
+          "INSERT INTO resume_clarification_tasks (id, workspace_id, item_key, item_name, item_category, category, question, created_at) VALUES (?, ?, 'project:bio', 'BioEvidence', 'project', ?, ?, ?)",
+        ).run(id, workspace.workspace.id, category, `Question for ${category}`, now);
+      }
+    } finally {
+      db.close();
+    }
+
+    const interview = await readResumeClarificationInterview(workspace.workspace.id, {
+      appDataRoot,
+    });
+    assert.equal(interview?.current?.id, "task-api");
+    assert.equal(interview?.current?.category, "API Ergonomics");
+
+    await respondToResumeClarification({
+      appDataRoot,
+      workspaceId: workspace.workspace.id,
+      taskId: "task-api",
+      answer: "We designed a type-safe declarative API interface.",
+    });
+
+    const verifyDb = openDatabase(join(appDataRoot, "workspace.sqlite"));
+    try {
+      const clarified = listClarifiedEvidenceInDatabase(verifyDb, workspace.workspace.id);
+      assert.equal(clarified.length, 1);
+      assert.equal(clarified[0]?.category, "API Ergonomics");
+      assert.equal(clarified[0]?.candidateText, "We designed a type-safe declarative API interface.");
+    } finally {
+      verifyDb.close();
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("interviewCategoryLabel cleanly formats dynamic categories", () => {
+  assert.equal(interviewCategoryLabel("API Ergonomics"), "API Ergonomics");
+  assert.equal(interviewCategoryLabel("team_scale"), "team scale");
+  assert.equal(interviewCategoryLabel("purpose"), "purpose");
+  assert.equal(interviewCategoryLabel("ownership"), "your contribution");
+  assert.equal(interviewCategoryLabel(""), "additional context");
 });

@@ -6,6 +6,8 @@ import test from "node:test";
 
 import {
   confirmCapturedOpportunity,
+  readOpportunityDuplicate,
+  deleteCapturedOpportunity,
   listCapturedOpportunities,
 } from "../src/domain/opportunities/captured-opportunities";
 import { openDatabase } from "../src/persistence/database";
@@ -209,4 +211,17 @@ test("the forward-only URL migration upgrades an existing 0019 workspace", async
   } finally {
     await rm(value.root, { recursive: true, force: true });
   }
+});
+
+test("a saved duplicate exposes the existing job for comparison and clears after deletion", async () => {
+  const value = await fixture();
+  try {
+    const first = await confirmCapturedOpportunity({ ...value, ...input });
+    const second = await confirmCapturedOpportunity({ ...value, ...input });
+    const duplicate = await readOpportunityDuplicate(second.opportunity.id, value);
+    assert.equal(duplicate?.id, first.opportunity.id);
+    assert.equal(duplicate?.title, input.title);
+    await deleteCapturedOpportunity({ ...value, opportunityId: first.opportunity.id, expectedRevisionId: first.opportunity.revisions[0].id, confirmation: "DELETE" });
+    assert.equal(await readOpportunityDuplicate(second.opportunity.id, value), undefined);
+  } finally { await rm(value.root, { recursive: true, force: true }); }
 });

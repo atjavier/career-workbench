@@ -1,8 +1,9 @@
+import { WorkspaceContainer } from "@/components/common/layout-containers";
 import { ApplicationShell } from "@/components/common/application-shell";
 import { redirect } from "next/navigation";
 import { PageHeader } from "@/components/common/page-header";
 import { readResumeWorkspaceState } from "@/domain/resume-generation/resume-workspace-commands";
-import { readLatestResumeEvidenceIntake } from "@/domain/resume-generation/resume-evidence-intake";
+import { readLatestResumeEvidenceIntake } from "@/application/resume-generation/resume-evidence-intake";
 import { readResumeClarificationInterview } from "@/domain/resume-generation/resume-clarification-interview";
 import { CoachQA, ResumeInterview } from "@/components/coach/coach-qa";
 import { ResumeIntakeStatus } from "@/components/coach/resume-intake-status";
@@ -55,7 +56,7 @@ export default async function ResumeInterviewPage() {
     "Reading your selected local folders and documenting resume evidence.";
   return (
     <ApplicationShell active={shouldShowInterview ? "Coach Q&A" : "Resume"}>
-      <div className="workspace-shell resume-workspace resume-interview-workspace">
+      <WorkspaceContainer className="resume-workspace resume-interview-workspace">
         <PageHeader
           className="resume-page-head"
           title={
@@ -81,7 +82,7 @@ export default async function ResumeInterviewPage() {
             initialStatus={intake?.status}
           />
         )}
-      </div>
+      </WorkspaceContainer>
     </ApplicationShell>
   );
 }

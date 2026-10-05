@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { PDFDocumentProxy } from "pdfjs-dist/legacy/build/pdf.mjs";
+import { EmptyStateCard } from "@/components/common/empty-state-card";
 
 interface ResumePdfPreviewProps {
   draftId: string;
@@ -102,6 +103,7 @@ export function ResumePdfPreview({
 }: ResumePdfPreviewProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isEmpty, setIsEmpty] = useState(false);
   const [pdfDoc, setPdfDoc] = useState<PDFDocumentProxy | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -112,6 +114,7 @@ export function ResumePdfPreview({
     async function loadPdf() {
       setLoading(true);
       setError(null);
+      setIsEmpty(false);
 
       try {
         const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
@@ -123,6 +126,12 @@ export function ResumePdfPreview({
         const res = await fetch(url, { signal: abortController.signal });
 
         if (!res.ok) {
+          if (res.status === 404) {
+            if (isCancelled) return;
+            setIsEmpty(true);
+            setLoading(false);
+            return;
+          }
           if (res.status === 409) {
             throw new Error(
               "Resume template has changed. Please click Regenerate resume.",
@@ -179,7 +188,27 @@ export function ResumePdfPreview({
         </div>
       ) : null}
 
-      {error ? (
+      {isEmpty ? (
+        <div
+          className="resume-preview-empty-container"
+          style={{
+            width: `${Math.floor(612 * scale)}px`,
+            minHeight: `${Math.floor(400 * scale)}px`,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "2rem",
+          }}
+        >
+          <EmptyStateCard
+            title="No base resume found"
+            description="Please add a template or projects to begin."
+            className="resume-preview-empty-card"
+          />
+        </div>
+      ) : null}
+
+      {!isEmpty && error ? (
         <div className="custom-pdf-error-state" role="alert">
           <p>{error}</p>
           <a
@@ -192,7 +221,7 @@ export function ResumePdfPreview({
         </div>
       ) : null}
 
-      {!loading && !error && pdfDoc ? (
+      {!loading && !isEmpty && !error && pdfDoc ? (
         <div className="custom-pdf-pages-list">
           {Array.from({ length: numPages }, (_, i) => i + 1).map((pageNum) => (
             <PdfPageCanvas

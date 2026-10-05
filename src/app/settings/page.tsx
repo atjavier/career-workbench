@@ -1,3 +1,4 @@
+import { WorkspaceContainer } from "@/components/common/layout-containers";
 import { ApplicationShell } from "@/components/common/application-shell";
 import { LocalModelSettings } from "@/components/settings/local-model-settings";
 import { DataStorage } from "@/components/settings/data-storage";
@@ -14,7 +15,7 @@ export default async function SettingsPage() {
 
   return (
     <ApplicationShell active="Settings">
-      <div className="workspace-shell space-y-8">
+      <WorkspaceContainer className="space-y-8">
         <LocalModelSettings ready={readiness.ready} />
         {dataStorageState ? (
           <div id="data-storage" className="mt-8">
@@ -25,7 +26,7 @@ export default async function SettingsPage() {
             />
           </div>
         ) : null}
-      </div>
+      </WorkspaceContainer>
     </ApplicationShell>
   );
 }

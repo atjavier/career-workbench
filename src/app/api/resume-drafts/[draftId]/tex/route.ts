@@ -1,4 +1,4 @@
-import { readActiveWorkspaceMaterialDraft } from "@/domain/resume-generation/material-draft-commands";
+import { readActiveWorkspaceMaterialDraft } from "@/application/resume-generation/material-draft-commands";
 import { renderResumeDraftTex } from "@/domain/resume-generation/resume-tex";
 
 export const runtime = "nodejs";

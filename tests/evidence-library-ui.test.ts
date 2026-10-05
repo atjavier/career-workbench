@@ -1,3 +1,4 @@
+import { readActionSources } from "./helpers/source-modules";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
@@ -10,7 +11,7 @@ test("Experience & Projects exposes category-specific source-folder handoff and 
       "../src/components/evidence/experience-projects-workspace.tsx",
       "../src/app/actions.ts",
       "../src/app/evidence/page.tsx",
-    ].map((file) => readFile(new URL(file, import.meta.url), "utf8")),
+    ].map((file) => file === "../src/app/actions.ts" ? readActionSources() : readFile(new URL(file, import.meta.url), "utf8")),
   );
   const ui = evidenceUi + "\n" + tabsUi;
   for (const text of [
@@ -61,9 +62,9 @@ test("collection implementation stays local, artifact-only, and avoids network, 
     await Promise.all(
       [
         "../src/files/evidence-library.ts",
-        "../src/domain/evidence/evidence-library.ts",
+        "../src/application/evidence/evidence-library.ts",
         "../src/components/evidence/experience-projects.tsx",
-      ].map((file) => readFile(new URL(file, import.meta.url), "utf8")),
+      ].map((file) => file === "../src/app/actions.ts" ? readActionSources() : readFile(new URL(file, import.meta.url), "utf8")),
     )
   ).join("\n");
   assert.match(source, /copyDocumentedEvidenceArtifacts/);
@@ -78,4 +79,17 @@ test("collection implementation stays local, artifact-only, and avoids network, 
     ),
     /sourceSection|sourceDocument|contentDigest|absolutePath|diagnostic/i,
   );
+});
+
+test("EvidenceLibrary cleans up deleting state on success, submission, tab change, and collection disappearance", async () => {
+  const content = await readFile(
+    new URL("../src/components/evidence/experience-projects.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    content,
+    /deleting &&\s*!collection\.some\(\(item\)\s*=>\s*`\$\{item\.category\}-\$\{item\.name\}`\s*===\s*deleting\)/,
+  );
+  assert.match(content, /if \(state\.status === "success"\) \{[\s\S]*?setDeleting\(undefined\)/);
+  assert.match(content, /submitDocumentation =[\s\S]*?setDeleting\(undefined\)/);
 });

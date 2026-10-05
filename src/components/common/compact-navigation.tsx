@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { SectionIcon } from "./section-icon";
 import { useEffect, useRef, useState } from "react";
 
 type Destination = {
@@ -26,7 +27,7 @@ export function CompactNavigation({
   const triggerLabel = `${open ? "Close" : "Open"} primary navigation. Current destination: ${active}`;
 
   useEffect(() => {
-    const narrowViewport = window.matchMedia("(max-width: 40rem)");
+    const narrowViewport = window.matchMedia("(max-width: 64rem)");
     const closeForWideViewport = () => {
       if (!narrowViewport.matches) setOpen(false);
     };
@@ -81,7 +82,7 @@ export function CompactNavigation({
                   aria-current={active === sub.label ? "page" : undefined}
                   onClick={() => setOpen(false)}
                 >
-                  <span>↳ {sub.label}</span>
+                  <span className="compact-nav-sub-label"><SectionIcon label={sub.label} />{sub.label}</span>
                   <small>{sub.description}</small>
                 </Link>
               ))}

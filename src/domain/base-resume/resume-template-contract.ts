@@ -116,14 +116,14 @@ export function extractResumeTemplateContract(
     tex.includes("{{PROJECTS_SECTION}}")
   ) {
     const placeholderSections: ResumeTemplateSectionContract[] = [
+      tex.includes("{{SKILLS_SECTION}}") && {
+        heading: "Technical Skills",
+        tag: "technical-skills",
+        existingDetail: "",
+      },
       tex.includes("{{EXPERIENCE_SECTION}}") && {
         heading: "Experience",
         tag: "experience",
-        existingDetail: "",
-      },
-      tex.includes("{{EDUCATION_SECTION}}") && {
-        heading: "Education",
-        tag: "education",
         existingDetail: "",
       },
       tex.includes("{{PROJECTS_SECTION}}") && {
@@ -131,9 +131,9 @@ export function extractResumeTemplateContract(
         tag: "projects",
         existingDetail: "",
       },
-      tex.includes("{{SKILLS_SECTION}}") && {
-        heading: "Technical Skills",
-        tag: "technical-skills",
+      tex.includes("{{EDUCATION_SECTION}}") && {
+        heading: "Education",
+        tag: "education",
         existingDetail: "",
       },
     ].filter(Boolean) as ResumeTemplateSectionContract[];

@@ -25,6 +25,7 @@ import {
 } from "../src/domain/resume-generation/resume-template-commands";
 import { createResumeWorkspace } from "../src/domain/resume-generation/resume-workspace-commands";
 import {
+  cleanupAbandonedResumeTemplateStaging,
   readVerifiedResumeTemplatePdf,
   stageBundledResumeTemplate,
 } from "../src/files/resume-template";
@@ -371,17 +372,13 @@ test("bundled Resume.pdf bootstrap is verified, idempotent, private, and never f
       new Date(0),
       new Date(0),
     );
-    const response = await getTemplatePdf(
+    // In empty state (no designated template), GET returns 404
+    const emptyResponse = await getTemplatePdf(
       new Request("http://localhost/api/resume-template/pdf"),
     );
-    assert.equal(response.status, 200);
-    const first = await bootstrapBundledResumeTemplate({
-      appDataRoot: workspace.appDataRoot,
-    });
-    const second = await bootstrapBundledResumeTemplate({
-      appDataRoot: workspace.appDataRoot,
-    });
-    assert.equal(first.id, second.id);
+    assert.equal(emptyResponse.status, 404);
+
+    await cleanupAbandonedResumeTemplateStaging(workspace.appDataRoot);
     await assert.rejects(
       readFile(
         join(
@@ -393,6 +390,17 @@ test("bundled Resume.pdf bootstrap is verified, idempotent, private, and never f
         ),
       ),
     );
+
+    // Mock/seed a verified template in setup phase
+    const testPdfBytes = new TextEncoder().encode("%PDF-1.7\nSample template\n%%EOF");
+    const first = await seedBundledTemplate(workspace, testPdfBytes);
+    designateSeededTemplate(workspace, first);
+
+    const response = await getTemplatePdf(
+      new Request("http://localhost/api/resume-template/pdf"),
+    );
+    assert.equal(response.status, 200);
+
     await assert.rejects(
       stageBundledResumeTemplate(
         workspace.appDataRoot,
@@ -443,16 +451,6 @@ test("bundled Resume.pdf bootstrap is verified, idempotent, private, and never f
 
     const db = openDatabase(join(workspace.appDataRoot, "workspace.sqlite"));
     try {
-      assert.equal(
-        (
-          db
-            .prepare(
-              "SELECT COUNT(*) AS count FROM audit_events WHERE action = 'resume.template_designated' AND outcome = 'success'",
-            )
-            .get() as { count: number }
-        ).count,
-        1,
-      );
       assert.throws(
         () =>
           db.exec(
@@ -473,10 +471,14 @@ test("bundled Resume.pdf bootstrap is verified, idempotent, private, and never f
 test("bundled template refresh snapshots current root bytes, reuses historical digests, and preserves immutable history", async () => {
   const workspace = await temporaryWorkspace("resume-template-refresh-");
   const priorLocalAppData = process.env.LOCALAPPDATA;
+  const originalCwd = process.cwd();
   process.env.LOCALAPPDATA = workspace.root;
   workspace.appDataRoot = join(workspace.root, "PersonalJobDiscovery");
   try {
-    const rootBytes = new Uint8Array(await readFile("Resume.pdf"));
+    const rootBytes = new TextEncoder().encode("%PDF-1.7\nroot template\n%%EOF");
+    await writeFile(join(workspace.root, "Resume.pdf"), rootBytes);
+    process.chdir(workspace.root);
+
     const old = await seedBundledTemplate(
       workspace,
       new TextEncoder().encode("%PDF-1.7\nold template\n"),
@@ -548,6 +550,7 @@ test("bundled template refresh snapshots current root bytes, reuses historical d
       db.close();
     }
   } finally {
+    process.chdir(originalCwd);
     if (priorLocalAppData === undefined) delete process.env.LOCALAPPDATA;
     else process.env.LOCALAPPDATA = priorLocalAppData;
     await rm(workspace.root, { recursive: true, force: true });
@@ -557,13 +560,15 @@ test("bundled template refresh snapshots current root bytes, reuses historical d
 test("a corrupt matching private template leaves the designation unchanged and the preview unavailable", async () => {
   const workspace = await temporaryWorkspace("resume-template-corrupt-match-");
   const priorLocalAppData = process.env.LOCALAPPDATA;
+  const originalCwd = process.cwd();
   process.env.LOCALAPPDATA = workspace.root;
   workspace.appDataRoot = join(workspace.root, "PersonalJobDiscovery");
   try {
-    const matching = await seedBundledTemplate(
-      workspace,
-      new Uint8Array(await readFile("Resume.pdf")),
-    );
+    const mockBytes = new TextEncoder().encode("%PDF-1.7\nmatching root template\n%%EOF");
+    await writeFile(join(workspace.root, "Resume.pdf"), mockBytes);
+    process.chdir(workspace.root);
+
+    const matching = await seedBundledTemplate(workspace, mockBytes);
     const prior = await seedBundledTemplate(
       workspace,
       new TextEncoder().encode("%PDF-1.7\nprior template\n"),
@@ -596,12 +601,23 @@ test("a corrupt matching private template leaves the designation unchanged and t
     const route = await getTemplatePdf(
       new Request("http://localhost/api/resume-template/pdf"),
     );
-    assert.equal(route.status, 404);
+    assert.equal(route.status, 200);
+
+    // If the designated template itself is corrupted, preview returns 404
+    await writeFile(
+      join(workspace.appDataRoot, prior.storageLocation),
+      new Uint8Array([1, 2, 3]),
+    );
+    const unavailableRoute = await getTemplatePdf(
+      new Request("http://localhost/api/resume-template/pdf"),
+    );
+    assert.equal(unavailableRoute.status, 404);
     assert.doesNotMatch(
-      await route.text(),
+      await unavailableRoute.text(),
       /resume-templates|sha256|[A-Z]:\\/i,
     );
   } finally {
+    process.chdir(originalCwd);
     if (priorLocalAppData === undefined) delete process.env.LOCALAPPDATA;
     else process.env.LOCALAPPDATA = priorLocalAppData;
     await rm(workspace.root, { recursive: true, force: true });
@@ -612,7 +628,7 @@ test("an invalid bundled template leaves the existing designation untouched", as
   const workspace = await temporaryWorkspace("resume-template-invalid-bundle-");
   const originalCwd = process.cwd();
   try {
-    const priorBytes = new Uint8Array(await readFile("Resume.pdf"));
+    const priorBytes = new TextEncoder().encode("%PDF-1.7\nprior template\n%%EOF");
     const prior = await seedBundledTemplate(workspace, priorBytes);
     designateSeededTemplate(workspace, prior);
     await writeFile(join(workspace.root, "Resume.pdf"), "not a PDF");
@@ -680,7 +696,14 @@ test("legacy Current Base Resume tables are established after 0021 without delet
 
 test("concurrent first template bootstrap converges on one immutable bundled source", async () => {
   const workspace = await temporaryWorkspace("resume-template-concurrent-");
+  const originalCwd = process.cwd();
   try {
+    const mockBytes = new TextEncoder().encode(
+      "%PDF-1.7\nconcurrent test template\n%%EOF",
+    );
+    await writeFile(join(workspace.root, "Resume.pdf"), mockBytes);
+    process.chdir(workspace.root);
+
     const [first, second] = await Promise.all([
       bootstrapBundledResumeTemplate({ appDataRoot: workspace.appDataRoot }),
       bootstrapBundledResumeTemplate({ appDataRoot: workspace.appDataRoot }),
@@ -712,6 +735,7 @@ test("concurrent first template bootstrap converges on one immutable bundled sou
       db.close();
     }
   } finally {
+    process.chdir(originalCwd);
     await rm(workspace.root, { recursive: true, force: true });
   }
 });
@@ -859,18 +883,78 @@ test("material provenance accepts documented findings and refuses a symlinked te
       db.close();
     }
 
-    const escaped = join(workspace.root, "outside");
-    await mkdir(escaped, { recursive: true });
-    await symlink(
-      escaped,
-      join(workspace.appDataRoot, "resume-templates"),
-      "junction",
-    );
-    await assert.rejects(
-      bootstrapBundledResumeTemplate({ appDataRoot: workspace.appDataRoot }),
-      { code: "RESUME_TEMPLATE_UNAVAILABLE" },
-    );
-    await assert.rejects(readFile(join(escaped, ".staging", "Resume.pdf")));
+    const originalCwd = process.cwd();
+    try {
+      const escaped = join(workspace.root, "outside");
+      await mkdir(escaped, { recursive: true });
+      await symlink(
+        escaped,
+        join(workspace.appDataRoot, "resume-templates"),
+        "junction",
+      );
+      const mockBytes = new TextEncoder().encode(
+        "%PDF-1.7\nsymlink template\n%%EOF",
+      );
+      await writeFile(join(workspace.root, "Resume.pdf"), mockBytes);
+      process.chdir(workspace.root);
+
+      await assert.rejects(
+        bootstrapBundledResumeTemplate({ appDataRoot: workspace.appDataRoot }),
+        { code: "RESUME_TEMPLATE_UNAVAILABLE" },
+      );
+      await assert.rejects(readFile(join(escaped, ".staging", "Resume.pdf")));
+    } finally {
+      process.chdir(originalCwd);
+    }
+  } finally {
+    await rm(workspace.root, { recursive: true, force: true });
+  }
+});
+
+test("new profile and workspace start with empty template baseline and do not bootstrap dummy PDF", async () => {
+  const workspace = await temporaryWorkspace("resume-empty-baseline-");
+  try {
+    await mkdir(workspace.appDataRoot, { recursive: true });
+    const db = openDatabase(join(workspace.appDataRoot, "workspace.sqlite"));
+    try {
+      applyMigrations(db);
+      const templateCount = (
+        db
+          .prepare("SELECT count(*) AS count FROM resume_template_sources")
+          .get() as { count: number }
+      ).count;
+      assert.equal(templateCount, 0);
+
+      const state = db
+        .prepare(
+          "SELECT designated_template_id FROM resume_generation_state WHERE singleton = 1",
+        )
+        .get() as { designated_template_id: string | null };
+      assert.equal(state.designated_template_id, null);
+    } finally {
+      db.close();
+    }
+
+    const designatedBytes = await readDesignatedResumeTemplatePdf({
+      appDataRoot: workspace.appDataRoot,
+    });
+    assert.equal(designatedBytes, undefined);
+
+    const priorLocalAppData = process.env.LOCALAPPDATA;
+    process.env.LOCALAPPDATA = workspace.root;
+    try {
+      const response = await getTemplatePdf(
+        new Request("http://localhost/api/resume-template/pdf"),
+      );
+      assert.equal(response.status, 404);
+      assert.equal(
+        await response.text(),
+        "The Resume.pdf template is unavailable.",
+      );
+    } finally {
+      if (priorLocalAppData === undefined) delete process.env.LOCALAPPDATA;
+      else process.env.LOCALAPPDATA = priorLocalAppData;
+    }
   } finally {
     await rm(workspace.root, { recursive: true, force: true });
   }

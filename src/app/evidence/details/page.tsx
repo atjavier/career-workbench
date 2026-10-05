@@ -3,7 +3,7 @@ import {
   ExperienceProjectsDetailsWorkspace,
   EvidenceDetailsWorkspace,
 } from "@/components/evidence/experience-projects-details-workspace";
-import { listExperienceProjectCollection } from "@/domain/evidence/evidence-library";
+import { listExperienceProjectCollection } from "@/application/evidence/evidence-library";
 import { readResumeWorkspaceState } from "@/domain/resume-generation/resume-workspace-commands";
 import { redirect } from "next/navigation";
 

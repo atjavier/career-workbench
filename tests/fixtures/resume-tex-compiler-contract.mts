@@ -4,7 +4,7 @@ import { access, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { mock } from "node:test";
-import type { MaterialDraftView } from "../../src/domain/resume-generation/material-draft-commands";
+import type { MaterialDraftView } from "../../src/application/resume-generation/material-draft-commands";
 
 const kind = process.argv[2];
 assert.ok(kind === "structured" || kind === "raw");

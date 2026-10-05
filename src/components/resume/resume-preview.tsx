@@ -15,15 +15,12 @@ import {
 import {
   generateBaseResumeAction,
   materialDraftHandoffAction,
-  resumeWorkspaceAction,
   type MaterialDraftHandoffActionState,
   type ResumeCoachActionState,
-  type WorkspaceActionState,
 } from "@/app/actions";
-import type { MaterialDraftView } from "@/domain/resume-generation/material-draft-commands";
+import type { MaterialDraftView } from "@/application/resume-generation/material-draft-commands";
 import { ResumePdfPreview } from "@/components/resume/resume-pdf-preview";
 import { PageHeader } from "@/components/common/page-header";
-import { ResumeProfileForm } from "@/components/resume/resume-profile-form";
 import type { CandidateProfileValues } from "@/persistence/candidate-profile-repository";
 
 const initialHandoff: MaterialDraftHandoffActionState = {
@@ -31,10 +28,6 @@ const initialHandoff: MaterialDraftHandoffActionState = {
   summary: "",
 };
 const initialGeneration: ResumeCoachActionState = {
-  status: "idle",
-  summary: "",
-};
-const initialWorkspaceAction: WorkspaceActionState = {
   status: "idle",
   summary: "",
 };
@@ -80,26 +73,8 @@ export function ResumePreview({
   const [dismissedDraftId, setDismissedDraftId] = useState<
     string | undefined
   >();
-  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
-  const [showDelete, setShowDelete] = useState(false);
-  const [deleteState, deleteAction, deletePending] = useActionState(
-    resumeWorkspaceAction,
-    initialWorkspaceAction,
-  );
   const effectiveTexRevisionId =
     revisionState.texRevisionId ?? latestTexRevisionId;
-
-  useEffect(() => {
-    if (!isProfileModalOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setIsProfileModalOpen(false);
-        setShowDelete(false);
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isProfileModalOpen]);
 
   useEffect(() => {
     if (!generationMessage) return;
@@ -112,12 +87,9 @@ export function ResumePreview({
   }, [revisionState.status, router]);
 
   const editProfileButton = (
-    <button
-      type="button"
+    <Link
+      href="/resume/profile"
       className="toolbar-btn toolbar-btn-subtle edit-profile-trigger"
-      onClick={() => setIsProfileModalOpen(true)}
-      aria-haspopup="dialog"
-      aria-expanded={isProfileModalOpen}
       title="Edit your personal details and education"
     >
       <svg
@@ -134,110 +106,9 @@ export function ResumePreview({
         <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
         <circle cx="12" cy="7" r="4" />
       </svg>
-      <span>Edit Profile</span>
-    </button>
+      <span>Edit details</span>
+    </Link>
   );
-
-  const profileModal = isProfileModalOpen ? (
-    <div
-      className="modal-backdrop"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) {
-          setIsProfileModalOpen(false);
-          setShowDelete(false);
-        }
-      }}
-    >
-      <div
-        className="modal-card profile-edit-modal-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="edit-profile-modal-heading"
-      >
-        <div className="modal-header">
-          <div className="modal-header-titles">
-            <p className="eyebrow">Candidate Profile</p>
-            <h3 id="edit-profile-modal-heading">Personal Details &amp; Education</h3>
-            <p className="modal-subtitle-text">
-              Update your contact information, education, and links. Project and experience folders are managed in Experience &amp; Projects.
-            </p>
-          </div>
-          <button
-            type="button"
-            className="modal-close-button"
-            onClick={() => {
-              setIsProfileModalOpen(false);
-              setShowDelete(false);
-            }}
-            aria-label="Close edit profile dialog"
-          >
-            ✕
-          </button>
-        </div>
-        <div className="modal-body profile-edit-modal-body">
-          <ResumeProfileForm
-            profileId={profileId}
-            expectedStateRevisionNumber={profileRevisionNumber}
-            values={profileValues}
-          />
-          {workspaceId && typeof workspaceRevisionNumber === "number" ? (
-            <div className="profile-modal-danger-zone">
-              {!showDelete ? (
-                <button
-                  type="button"
-                  className="popover-delete-toggle"
-                  onClick={() => setShowDelete(true)}
-                >
-                  Delete this resume
-                </button>
-              ) : (
-                <form action={deleteAction} className="popover-delete-form">
-                  <input type="hidden" name="workspaceCommand" value="delete" />
-                  <input type="hidden" name="workspaceId" value={workspaceId} />
-                  <input
-                    type="hidden"
-                    name="expectedRevisionNumber"
-                    value={workspaceRevisionNumber}
-                  />
-                  <p className="popover-delete-warning">
-                    Type DELETE to confirm removal:
-                  </p>
-                  <div className="popover-delete-row">
-                    <input
-                      name="confirmation"
-                      required
-                      placeholder="DELETE"
-                      className="popover-input popover-input-delete"
-                      disabled={deletePending}
-                    />
-                    <button
-                      type="submit"
-                      className="popover-btn-delete-confirm"
-                      disabled={deletePending}
-                    >
-                      {deletePending ? "Deleting..." : "Delete"}
-                    </button>
-                    <button
-                      type="button"
-                      className="popover-btn-cancel-del"
-                      onClick={() => setShowDelete(false)}
-                    >
-                      ✕
-                    </button>
-                  </div>
-                </form>
-              )}
-              {deleteState.status === "error" ? (
-                <p className="popover-error-msg" role="status">
-                  {deleteState.summary}
-                </p>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
-      </div>
-    </div>
-  ) : null;
 
   if (!available) {
     return (
@@ -307,7 +178,6 @@ export function ResumePreview({
             </div>
           </div>
         </section>
-        {profileModal}
       </div>
     );
   }
@@ -794,7 +664,6 @@ export function ResumePreview({
           ) : null}
         </div>
       </section>
-      {profileModal}
     </div>
   );
 }

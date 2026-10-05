@@ -1,5 +1,7 @@
 "use client";
 
+import { ContentCard } from "@/components/common/layout-containers";
+
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -18,8 +20,9 @@ import {
   type FolderPickerActionState,
   type WorkspaceActionState,
 } from "@/app/actions";
-import type { ExperienceProjectCollection } from "@/domain/evidence/evidence-library";
+import type { ExperienceProjectCollection } from "@/application/evidence/evidence-library";
 import { SegmentedTabs } from "@/components/common/segmented-tabs";
+import { MonthYearPicker } from "@/components/common/month-year-picker";
 
 const initial: WorkspaceActionState = {
   status: "idle",
@@ -520,8 +523,18 @@ export function EvidenceLibrary({
     ? collection.find((item) => `${item.category}-${item.name}` === deleting)
     : undefined;
 
+  useEffect(() => {
+    if (
+      deleting &&
+      !collection.some((item) => `${item.category}-${item.name}` === deleting)
+    ) {
+      setDeleting(undefined);
+    }
+  }, [collection, deleting]);
+
   const submitDocumentation = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    setDeleting(undefined);
     if (!selectedFolder) {
       setSelectionMessage("Choose a local folder before documenting it.");
       return;
@@ -547,6 +560,7 @@ export function EvidenceLibrary({
   useEffect(() => {
     if (state.status === "success") {
       setOpen(false);
+      setDeleting(undefined);
       setProjectName("");
       setProjectStartDate("");
       setProjectEndDate("");
@@ -637,6 +651,7 @@ export function EvidenceLibrary({
         onChange={(val) => {
           setCategory(val);
           setOpen(false);
+          setDeleting(undefined);
         }}
         ariaLabel="Work type"
       />
@@ -751,6 +766,7 @@ export function EvidenceLibrary({
               if (category === "project" || category === "experience") {
                 setDocCategorySelection(category);
               }
+              setDeleting(undefined);
               setOpen(true);
             }}
             onKeyDown={(e) => {
@@ -759,6 +775,7 @@ export function EvidenceLibrary({
                 if (category === "project" || category === "experience") {
                   setDocCategorySelection(category);
                 }
+                setDeleting(undefined);
                 setOpen(true);
               }
             }}
@@ -812,7 +829,8 @@ export function EvidenceLibrary({
               const detailsUrl = `/evidence/details?category=${item.category}&name=${encodeURIComponent(item.name)}`;
 
               return (
-                <li
+                <ContentCard
+                  as="li"
                   key={key}
                   className={`experience-project-row experience-project-card ${item.category === "experience" ? "is-experience" : "is-project"}`}
                   tabIndex={0}
@@ -974,7 +992,7 @@ export function EvidenceLibrary({
                       </Link>
                     </div>
                   </div>
-                </li>
+                </ContentCard>
               );
             })}
           </ul>
@@ -1026,44 +1044,45 @@ export function EvidenceLibrary({
                   </div>
                 </div>
               </div>
-              <div className="modal-actions">
+              <form action={action} className="modal-actions documented-item-delete" style={{ margin: 0 }}>
+                <input
+                  type="hidden"
+                  name="libraryCommand"
+                  value="delete-documented-item"
+                />
+                <input
+                  type="hidden"
+                  name="category"
+                  value={deletingItem.category}
+                />
+                <input
+                  type="hidden"
+                  name="itemName"
+                  value={deletingItem.name}
+                />
+                <input
+                  type="hidden"
+                  name="confirmation"
+                  value="DELETE"
+                />
                 <button
                   type="button"
                   className="neutral-action"
                   onClick={() => setDeleting(undefined)}
+                  disabled={pending}
+                  style={{ margin: 0 }}
                 >
                   Cancel
                 </button>
-                <form action={action} className="documented-item-delete">
-                  <input
-                    type="hidden"
-                    name="libraryCommand"
-                    value="delete-documented-item"
-                  />
-                  <input
-                    type="hidden"
-                    name="category"
-                    value={deletingItem.category}
-                  />
-                  <input
-                    type="hidden"
-                    name="itemName"
-                    value={deletingItem.name}
-                  />
-                  <input
-                    type="hidden"
-                    name="confirmation"
-                    value="DELETE"
-                  />
-                  <button
-                    className="danger-action"
-                    type="submit"
-                    disabled={pending}
-                  >
-                    Confirm permanent deletion
-                  </button>
-                </form>
-              </div>
+                <button
+                  className="danger-action"
+                  type="submit"
+                  disabled={pending}
+                  style={{ margin: 0 }}
+                >
+                  {pending ? "Deleting..." : "Confirm permanent deletion"}
+                </button>
+              </form>
             </div>
           </div>
         ) : null}
@@ -1247,15 +1266,14 @@ export function EvidenceLibrary({
                         <label htmlFor="project-start" className="modal-form-label">
                           Start date
                         </label>
-                        <input
+                        <MonthYearPicker
                           id="project-start"
                           name="startDate"
                           value={projectStartDate}
                           disabled={pending}
-                          onChange={(e) => setProjectStartDate(e.target.value)}
-                          placeholder="YYYY-MM"
+                          onChange={(val) => setProjectStartDate(val)}
+                          placeholder="Select start date"
                           required
-                          maxLength={20}
                           className="modal-form-input"
                         />
                       </div>
@@ -1263,15 +1281,15 @@ export function EvidenceLibrary({
                         <label htmlFor="project-end" className="modal-form-label">
                           End date
                         </label>
-                        <input
+                        <MonthYearPicker
                           id="project-end"
                           name="endDate"
                           value={projectEndDate}
                           disabled={pending}
-                          onChange={(e) => setProjectEndDate(e.target.value)}
-                          placeholder="YYYY-MM"
+                          onChange={(val) => setProjectEndDate(val)}
+                          placeholder="Select end date"
                           required
-                          maxLength={20}
+                          align="right"
                           className="modal-form-input"
                         />
                       </div>
@@ -1320,15 +1338,14 @@ export function EvidenceLibrary({
                         <label htmlFor="exp-start" className="modal-form-label">
                           Start date
                         </label>
-                        <input
+                        <MonthYearPicker
                           id="exp-start"
                           name="startDate"
                           value={expStartDate}
                           disabled={pending}
-                          onChange={(e) => setExpStartDate(e.target.value)}
-                          placeholder="YYYY-MM"
+                          onChange={(val) => setExpStartDate(val)}
+                          placeholder="Select start date"
                           required
-                          maxLength={20}
                           className="modal-form-input"
                         />
                       </div>
@@ -1337,21 +1354,34 @@ export function EvidenceLibrary({
                           End date
                         </label>
                         <div className="modal-date-input-wrap">
-                          <input
-                            id="exp-end"
-                            name="endDate"
-                            value={currentlyWorking ? "" : expEndDate}
-                            disabled={currentlyWorking || pending}
-                            onChange={(e) => setExpEndDate(e.target.value)}
-                            placeholder={currentlyWorking ? "Present" : "YYYY-MM"}
-                            required={!currentlyWorking}
-                            maxLength={20}
-                            aria-describedby="exp-current-desc"
-                            className="modal-form-input"
-                          />
                           {currentlyWorking ? (
-                            <span className="present-badge">Present</span>
-                          ) : null}
+                            <>
+                              <input
+                                type="text"
+                                id="exp-end"
+                                name="endDate"
+                                value=""
+                                disabled
+                                placeholder="Present"
+                                aria-describedby="exp-current-desc"
+                                className="modal-form-input"
+                              />
+                              <span className="present-badge">Present</span>
+                            </>
+                          ) : (
+                            <MonthYearPicker
+                              id="exp-end"
+                              name="endDate"
+                              value={expEndDate}
+                              disabled={pending}
+                              onChange={(val) => setExpEndDate(val)}
+                              placeholder="Select end date"
+                              required
+                              align="right"
+                              ariaDescribedBy="exp-current-desc"
+                              className="modal-form-input"
+                            />
+                          )}
                         </div>
                       </div>
                     </div>

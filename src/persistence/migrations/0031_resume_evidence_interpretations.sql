@@ -16,7 +16,7 @@ CREATE TABLE resume_clarification_tasks (
   item_key TEXT NOT NULL,
   item_name TEXT NOT NULL,
   item_category TEXT NOT NULL CHECK (item_category IN ('project', 'experience')),
-  category TEXT NOT NULL CHECK (category IN ('purpose', 'ownership', 'users_workflow', 'outcome', 'metrics', 'deployment', 'collaboration', 'dates', 'role')),
+  category TEXT NOT NULL,
   question TEXT NOT NULL CHECK (length(question) BETWEEN 1 AND 600),
   status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'answered', 'skipped')),
   created_at TEXT NOT NULL,

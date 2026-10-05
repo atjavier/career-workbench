@@ -17,11 +17,12 @@ test("application shell presents Jobs first with human-facing destinations", asy
     "Career Assistant",
   ])
     assert.doesNotMatch(shell, new RegExp(`label: "${label}"`));
-  assert.match(shell, /aria-current/);
+  const sidebar = await readFile(new URL("../src/components/common/workspace-sidebar.tsx", import.meta.url), "utf8");
+  assert.match(sidebar, /aria-current/);
   assert.match(shell, /Skip to main content/);
-  assert.match(shell, /app-sidebar-footer/);
-  assert.match(shell, /navigation-icon/);
-  assert.match(shell, /Private, local mode/);
+  assert.match(sidebar, /app-sidebar-footer/);
+  assert.match(sidebar, /navigation-icon/);
+  assert.match(sidebar, /Private, local mode/);
 });
 
 test("home composition uses the application shell and human product identity", async () => {

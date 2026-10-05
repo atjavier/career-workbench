@@ -50,6 +50,8 @@ test("TeX export uses the canonical template and the same semantic sections as t
   };
 
   const tex = renderResumeDraftTex(draft);
+  const expectedOrder = ["Technical Skills", "Experience", "Projects", "Education"].filter(heading => tex.includes(`\\section*{${heading}}`));
+  for (let i = 1; i < expectedOrder.length; i++) assert.ok(tex.indexOf(`\\section*{${expectedOrder[i - 1]}}`) < tex.indexOf(`\\section*{${expectedOrder[i]}}`));
   assert.match(tex, /\\documentclass\[10pt,letterpaper\]\{article\}/);
   assert.match(tex, /left=54pt,right=44pt/);
   assert.match(tex, /\\section\*\{Experience\}/);

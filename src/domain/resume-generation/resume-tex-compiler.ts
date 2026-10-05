@@ -3,7 +3,7 @@ import { lstat, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promise
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { inflateSync } from "node:zlib";
 
-import type { MaterialDraftView } from "@/domain/resume-generation/material-draft-commands";
+import type { MaterialDraftView } from "@/domain/resume-generation/material-draft-types";
 import { renderResumeDraftTex } from "@/domain/resume-generation/resume-tex";
 import { resolveAppDataPaths } from "@/files/app-data";
 

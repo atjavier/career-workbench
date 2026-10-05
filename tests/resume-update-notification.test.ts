@@ -1,10 +1,11 @@
+import { readActionSources } from "./helpers/source-modules";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 test("evidence intake provides actionable next-step routing and Base Resume warns when stale", async () => {
   const [actions, library, coach, styles] = await Promise.all([
-    readFile(new URL("../src/app/actions.ts", import.meta.url), "utf8"),
+    readActionSources(),
     readFile(new URL("../src/components/evidence/experience-projects.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/components/resume/resume-preview.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/app/globals.css", import.meta.url), "utf8"),
@@ -35,10 +36,7 @@ test("evidence intake provides actionable next-step routing and Base Resume warn
 });
 
 test("removing a documented project prompts regeneration and detects changes", async () => {
-  const actions = await readFile(
-    new URL("../src/app/actions.ts", import.meta.url),
-    "utf8",
-  );
+  const actions = await readActionSources();
 
   // Deleting documented item routes to /resume and notifies of deletion
   assert.match(actions, /command === "delete-documented-item"/);
@@ -65,7 +63,7 @@ test("Base Resume remains accessible across journey phases and documentation dis
   assert.match(shell, /resumeSubItems/);
   assert.match(shell, /phase === "interview"/);
   assert.match(shell, /label: "Coach Q&A"/);
-  assert.match(shell, /destination\.subItems && isResumeActive/);
+  assert.match(shell, /activeSection=\{isResumeActive \? "Resume" : active\}/);
 
   // ResumeWorkspace preserves access to existing draft even if interview or documenting is in flight
   assert.match(

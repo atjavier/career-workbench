@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { createUuidV7 } from "../src/audit/audit-event";
-import { assessCapturedOpportunity } from "../src/domain/fit/ai-opportunity-assessment";
+import { assessCapturedOpportunity } from "../src/application/fit/ai-opportunity-assessment";
 import { confirmCapturedOpportunity } from "../src/domain/opportunities/captured-opportunities";
 import { saveCandidateProfile } from "../src/domain/resume-generation/candidate-profile-commands";
 import { configureLocalModel } from "../src/domain/resume-generation/local-model-configuration-commands";

@@ -1,23 +1,11 @@
+import { WorkspaceContainer } from "@/components/common/layout-containers";
 import { JobListings } from "@/components/jobs/job-listings";
 import { listCapturedOpportunities } from "@/domain/opportunities/captured-opportunities";
 import { ApplicationShell } from "@/components/common/application-shell";
-import { resolveAppDataPaths } from "@/files/app-data";
-import { applyMigrations, openDatabase } from "@/persistence/database";
-import { listApprovedEvidence } from "@/persistence/evidence-repository";
-import {
-  latestCapturedOpportunityAssessment,
-  latestCapturedOpportunityDecision,
-  type OpportunityAssessmentView,
-  type OpportunityDecisionView,
-} from "@/domain/fit/ai-opportunity-assessment";
-import {
-  latestCapturedFitAssessmentView,
-  type FitFactor,
-} from "@/domain/fit/fit-assessment";
-
 export const dynamic = "force-dynamic";
 
-export default async function Home() {
+export default async function Home({ searchParams }: { searchParams: Promise<{ deleted?: string }> }) {
+  const { deleted } = await searchParams;
   const opportunitiesState = await listCapturedOpportunities()
     .then((view) => ({ opportunities: view.opportunities, error: undefined }))
     .catch((error) => ({
@@ -36,73 +24,15 @@ export default async function Home() {
                 "Check local workspace storage, then refresh the page.",
             },
     }));
-  const materials = await (async () => {
-    const paths = await resolveAppDataPaths();
-    const db = openDatabase(paths.databasePath);
-    try {
-      applyMigrations(db);
-      return listApprovedEvidence(db).map((item) => ({
-        id: item.id,
-        label: `${item.sourceDocument} — ${item.sourceSection}`,
-      }));
-    } finally {
-      db.close();
-    }
-  })().catch(() => []);
-
-  const assessmentState = await Promise.all(
-    opportunitiesState.opportunities.map(
-      async (opportunity) =>
-        [
-          opportunity.id,
-          await latestCapturedOpportunityAssessment(opportunity.id).catch(
-            () => undefined,
-          ),
-          await latestCapturedOpportunityDecision(opportunity.id).catch(
-            () => undefined,
-          ),
-          await (async () => {
-            const paths = await resolveAppDataPaths();
-            const db = openDatabase(paths.databasePath);
-            try {
-              applyMigrations(db);
-              return latestCapturedFitAssessmentView(db, opportunity.id);
-            } finally {
-              db.close();
-            }
-          })().catch(() => undefined),
-        ] as const,
-    ),
-  );
-  const assessments = Object.fromEntries(
-    assessmentState.map(([id, assessment, decision, fit]) => [
-      id,
-      { assessment, latestDecision: decision, fit },
-    ]),
-  ) as Record<
-    string,
-    {
-      assessment?: OpportunityAssessmentView;
-      latestDecision?: OpportunityDecisionView;
-      fit?: {
-        label: "Strong" | "Potential" | "Stretch";
-        confidence: "high" | "medium" | "low";
-        calculatedAt: string;
-        factors: FitFactor[];
-      };
-    }
-  >;
-
   return (
     <ApplicationShell active="Jobs">
-      <div className="workspace-shell jobs-page-shell">
+      <WorkspaceContainer className="jobs-page-shell">
+        {deleted && <p role="status">{deleted === "cleanup-pending" ? "Opportunity deleted. Some old resume files could not be removed yet; cleanup will retry when you open this page." : "Opportunity and attached tailored resume deleted."}</p>}
         <JobListings
           opportunities={opportunitiesState.opportunities}
-          materials={materials}
-          assessments={assessments}
           error={opportunitiesState.error}
         />
-      </div>
+      </WorkspaceContainer>
     </ApplicationShell>
   );
 }

@@ -1,0 +1,44 @@
+About the job
+With a company culture rooted in collaboration, expertise and innovation, we aim to promote progress and inspire our clients, employees, investors and communities to achieve their greatest potential. Our work is the catalyst that helps others achieve their goals. In short, We Enable Possibility℠.
+
+Job Description We are seeking a highly skilled backend developer to join our team. The ideal candidate will have experience in .NET Core, Azure, microservices, SQL, and AKS. In this role, you will be responsible for designing, developing, and maintaining the backend of our applications.
+
+Tasks/Responsibilities
+
+ Design, develop, and maintain the backend of our applications using .NET Core, Azure, microservices, SQL, and AKS. 
+ Collaborate with cross-functional teams to define, design, and ship new features. 
+ Ensure the performance, quality, and responsiveness of applications. 
+ Identify and correct bottlenecks and fix bugs. 
+ Help maintain code quality, organization, and automatization. 
+ Understand functional requirements. 
+ Design and code current and new business functionality in the strategic platform. 
+ Ensure solutions conform to best practice design. 
+ Strong communication and team-working skills. 
+ Pro-active and cooperative attitude. 
+ Managing deployment of applications. 
+ Excellent Analytical ability and showing keen interest to learn new platforms and technologies. 
+ Experience in Insurance/Reinsurance domains will be an added bonus. 
+
+Requirements Skills/Experience
+
+ Learning and problem-solving Attitude – Ability to learn new business concepts and technology
+ Front-end Technology – Knowledgeable in front-end technologies including JavaScript framework-REACT JS, CSS and HTML5. 
+ Development Languages – Knowledge on Server-Side program languages like .NET (using C#) on .NET Core / .NET 5.0. 
+ Entity Framework – Expertise and hands on experience on working with Entity Framework Core (either Database First/Code First approach)
+ Database technology – Familiarity with DBMS technology, familiar with SQL Server, Working knowledge of database queries, stored procedures and other database objects using SQL Server. Work on SQL Server SSIS packages/Jobs for system integration
+ Basic Design Ability – including knowledge of UI and basic prototype design for applications being worked on. Knowledge on Server Side and API design and implementation patterns is a must. 
+ Devops - Worked on Standard Devops tools using git repository, build and deployment tools like Azure Devops and GitHub, JIRA
+ Strong knowledge of object orientated analysis / design / design patterns
+ Experience with multi-threaded applications using asynchronous and event driven programming
+ Azure Cloud Experience
+Experience in deploying Web Apps and API on Azure workloads using Azure Web App, App Service Plan or Azure Kubernetes service. 
+Worked on Containers and Container registry
+ Strong experience in microservices, SQL, and AKS. 
+ Proficient understanding of code versioning tools, such as Git. 
+ Familiarity with continuous integration and continuous deployment. 
+ Excellent problem-solving skills and attention to detail. 
+ Strong communication and collaboration skills. 
+
+Do you like solving complex business problems, working with talented colleagues and have an innovative mindset? Arch may be a great fit for you. If this job isn’t the right fit but you’re interested in working for Arch, create a job alert! Simply create an account and opt in to receive emails when we have job openings that meet your criteria. Join our talent community to share your preferences directly with Arch’s Talent Acquisition team.
+
+10400 Arch Global Services (Philippines) Inc.

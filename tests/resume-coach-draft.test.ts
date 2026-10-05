@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { persistResumeCoachDraft } from "../src/domain/resume-generation/resume-coach-commands";
+import { persistResumeCoachDraft } from "../src/application/resume-generation/resume-coach-commands";
 import { createResumeWorkspace } from "../src/domain/resume-generation/resume-workspace-commands";
 import { applyMigrations, openDatabase } from "../src/persistence/database";
 

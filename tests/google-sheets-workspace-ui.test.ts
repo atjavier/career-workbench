@@ -18,7 +18,7 @@ test("Google Sheets has a dedicated shared-shell route and leaves Settings gener
 
 test("Google Sheets shows the truthful optional local-first disconnected state", async () => {
   const workspace = await readFile(
-    new URL("../src/components/pro/google-sheets-workspace.tsx", import.meta.url),
+    new URL("../src/components/integrations/google-sheets-workspace.tsx", import.meta.url),
     "utf8",
   );
   for (const text of [
@@ -44,7 +44,7 @@ test("Google Sheets shows the truthful optional local-first disconnected state",
 
 test("Google Sheets previews future consent and recovery without fabricating a live integration", async () => {
   const workspace = await readFile(
-    new URL("../src/components/pro/google-sheets-workspace.tsx", import.meta.url),
+    new URL("../src/components/integrations/google-sheets-workspace.tsx", import.meta.url),
     "utf8",
   );
   for (const text of [
@@ -76,7 +76,7 @@ test("Google Sheets previews future consent and recovery without fabricating a l
 test("Google Sheets workspace stays presentation-only and uses responsive accessible contracts", async () => {
   const [workspace, styles] = await Promise.all([
     readFile(
-      new URL("../src/components/pro/google-sheets-workspace.tsx", import.meta.url),
+      new URL("../src/components/integrations/google-sheets-workspace.tsx", import.meta.url),
       "utf8",
     ),
     readFile(new URL("../src/app/globals.css", import.meta.url), "utf8"),

@@ -8,7 +8,7 @@ import {
   documentFolderForResume,
   listDocumenterProposals,
   resolveDocumenterProposal,
-} from "../src/domain/evidence/evidence-documenter";
+} from "../src/application/evidence/evidence-documenter";
 import {
   listClaimEligibleEvidence,
   listEvidence,

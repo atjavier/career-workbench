@@ -1,4 +1,4 @@
-import type { MaterialDraftView } from "@/domain/resume-generation/material-draft-commands";
+import type { MaterialDraftView } from "@/domain/resume-generation/material-draft-types";
 
 // Resume.pdf is the visual contract for generated base resumes. The renderer
 // keeps its A4 geometry, Times typography, ruled headings, and compact entry

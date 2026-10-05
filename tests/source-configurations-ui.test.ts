@@ -1,3 +1,4 @@
+import { readActionSources } from "./helpers/source-modules";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
@@ -9,7 +10,7 @@ test("Permitted Sources remains an accessible historical policy control outside 
       "utf8",
     ),
     readFile(new URL("../src/app/page.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../src/app/actions.ts", import.meta.url), "utf8"),
+    readActionSources(),
     readFile(
       new URL(
         "../src/domain/discovery/source-configurations.ts",

@@ -72,10 +72,10 @@ test("extracts template contract from token-based resume template", () => {
   assert.deepEqual(
     contract?.sections.map(({ heading, tag }) => ({ heading, tag })),
     [
-      { heading: "Experience", tag: "experience" },
-      { heading: "Education", tag: "education" },
-      { heading: "Projects", tag: "projects" },
       { heading: "Technical Skills", tag: "technical-skills" },
+      { heading: "Experience", tag: "experience" },
+      { heading: "Projects", tag: "projects" },
+      { heading: "Education", tag: "education" },
     ],
   );
 });
@@ -91,7 +91,7 @@ test("bootstraps bundled resume-template.tex when no baseline exists and is idem
     assert.equal(contract.baselineId, bootstrapped.baseResume.id);
     assert.deepEqual(
       contract.sections.map((section) => section.heading),
-      ["Experience", "Education", "Projects", "Technical Skills"],
+      ["Technical Skills", "Experience", "Projects", "Education"],
     );
     const idempotent = await bootstrapBundledBaseResume({ appDataRoot });
     assert.equal(idempotent, undefined);
